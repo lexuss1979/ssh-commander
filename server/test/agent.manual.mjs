@@ -110,7 +110,21 @@ const files = await req(`/api/files/list?profileId=${pid}&path=/tmp`, {}, cookie
 check('approved command had effect', files.entries.some((e) => e.name === 'agent-approved'));
 
 ws.close();
+
+// Проверяем, что диалог сохранился и в нём есть сообщения
+const dialogues = await req(`/api/ai/dialogues?profileId=${pid}`, {}, cookie);
+check('dialogue persisted', dialogues.dialogues.length > 0, JSON.stringify(dialogues.dialogues.map((d) => d.messageCount)));
+const saved = dialogues.dialogues[0];
+const full = await req(`/api/ai/dialogues/${saved.id}`, {}, cookie);
+check(
+  'dialogue contains user and assistant messages',
+  full.dialogue.messages.some((m) => m.role === 'user') && full.dialogue.messages.some((m) => m.role === 'assistant'),
+  JSON.stringify(full.dialogue.messages.map((m) => m.role)),
+);
+for (const d of dialogues.dialogues) {
+  await req(`/api/ai/dialogues/${d.id}`, { method: 'DELETE' }, cookie);
+}
+
 await req(`/api/profiles/${pid}`, { method: 'DELETE' }, cookie);
 
 console.log(process.exitCode ? 'AGENT TEST: FAILED' : 'AGENT TEST: PASSED');
-

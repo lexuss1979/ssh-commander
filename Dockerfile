@@ -15,6 +15,14 @@ COPY server/tsconfig.json ./
 COPY server/src ./src
 RUN npm run build
 
+# --- Dev (deps only; source bind-mounted at runtime for hot reload) ---
+FROM node:20-alpine AS dev
+WORKDIR /app
+COPY server/package.json server/package-lock.json ./server/
+RUN cd /app/server && npm ci
+COPY web/package.json web/package-lock.json ./web/
+RUN cd /app/web && npm ci
+
 # --- Runtime ---
 FROM node:20-alpine
 ENV NODE_ENV=production

@@ -11,6 +11,7 @@ import { profilesRouter } from './routes/profiles.js';
 import { keysRouter } from './routes/keys.js';
 import { filesRouter } from './routes/files.js';
 import { dockerRouter } from './routes/docker.js';
+import { aiRouter } from './routes/ai.js';
 import { requireProfile } from './profiles.js';
 import { attachTerminal } from './ws/terminal.js';
 import { handleAgentWs } from './ws/agent.js';
@@ -30,6 +31,7 @@ app.use('/api/profiles', requireAuth, profilesRouter);
 app.use('/api/keys', requireAuth, keysRouter);
 app.use('/api/files', requireAuth, filesRouter);
 app.use('/api/docker', requireAuth, dockerRouter);
+app.use('/api/ai', requireAuth, aiRouter);
 
 // SPA static files (built web app).
 if (fs.existsSync(config.webDist)) {
@@ -102,7 +104,8 @@ server.on('upgrade', (req, socket, head) => {
       const rows = Number(url.searchParams.get('rows')) || 24;
       attachTerminal(ws, profile, cols, rows);
     } else {
-      handleAgentWs(ws, profile);
+      const dialogueId = url.searchParams.get('dialogueId') ?? undefined;
+      handleAgentWs(ws, profile, dialogueId);
     }
   });
 });

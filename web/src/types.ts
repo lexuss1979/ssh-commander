@@ -31,3 +31,28 @@ export interface DockerEntity {
   [key: string]: string | number | boolean | null | undefined;
 }
 
+export interface DialogueMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string | null;
+  tool_calls?: Array<{
+    id: string;
+    type?: 'function';
+    function: { name: string; arguments: string };
+  }>;
+  tool_call_id?: string;
+  name?: string;
+}
+
+export interface DialogueSummary {
+  id: string;
+  title: string;
+  preview: string;
+  messageCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface Dialogue extends DialogueSummary {
+  profileId: string;
+  messages: DialogueMessage[];
+}

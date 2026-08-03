@@ -2,8 +2,9 @@ node_modules/
 dist/
 .env
 data/profiles.json
+data/ai-dialogues.json
+data/*.tmp
 keys/*
 !keys/.gitkeep
 *.log
 .DS_Store
-

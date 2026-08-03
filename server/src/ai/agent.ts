@@ -1,6 +1,7 @@
 import type { WebSocket } from 'ws';
 import { config } from '../config.js';
 import { streamChatCompletion, type ChatMessage, type ToolCall } from './client.js';
+import { sanitizeMessages } from './messages.js';
 import { toolDefs, READ_ONLY_TOOLS } from './tools.js';
 import { checkReadOnlyCommand } from './guard.js';
 import { exec, withSftp } from '../ssh/manager.js';
@@ -23,6 +24,12 @@ import {
   runContainer,
   dockerExec,
 } from '../services/docker.js';
+import {
+  createDialogue,
+  getDialogue,
+  saveDialogueMessages,
+  type Dialogue,
+} from './dialogues.js';
 
 const MAX_TOOL_OUTPUT = 12000;
 
@@ -45,7 +52,9 @@ export class AgentSession {
   constructor(
     private profile: Profile,
     private ws: WebSocket,
+    dialogue?: Dialogue,
   ) {
+    this.dialogueId = dialogue?.id ?? createDialogue(profile.id).id;
     this.messages.push({
       role: 'system',
       content:
@@ -58,10 +67,21 @@ export class AgentSession {
         'Отвечай кратко и по делу на русском. Сначала собери факты (проверь состояние), затем предлагай действия. ' +
         'Перед разрушительными действиями предупреждай о последствиях.',
     });
+    for (const message of dialogue?.messages ?? []) {
+      if (message.role !== 'system') {
+        this.messages.push(message);
+      }
+    }
   }
+
+  readonly dialogueId: string;
 
   get isRunning(): boolean {
     return this.running;
+  }
+
+  notifyDialogue(): void {
+    this.send({ type: 'dialogue', id: this.dialogueId });
   }
 
   handleClientMessage(data: WsMessage): void {
@@ -118,6 +138,14 @@ export class AgentSession {
     }
   }
 
+  private save(): void {
+    try {
+      saveDialogueMessages(this.dialogueId, this.messages);
+    } catch (err) {
+      console.warn(`Failed to save dialogue ${this.dialogueId}:`, err);
+    }
+  }
+
   private waitDecision(callId: string): Promise<'approved' | 'rejected' | 'aborted'> {
     return new Promise((resolve) => {
       this.pending.set(callId, { callId, resolve });
@@ -129,7 +157,11 @@ export class AgentSession {
     this.running = true;
     this.stopRequested = false;
     this.steps = 0;
+    // Не отправляем в API и не сохраняем оборванный обмен tool_calls (например,
+    // после остановки агента или перезагрузки вкладки в середине вызова).
+    this.messages = sanitizeMessages(this.messages);
     this.messages.push({ role: 'user', content: userContent });
+    this.save();
     this.send({ type: 'running', steps: config.ai.maxSteps });
 
     try {
@@ -140,7 +172,7 @@ export class AgentSession {
         let assistant: ChatMessage;
         try {
           assistant = await streamChatCompletion({
-            messages: this.messages,
+            messages: sanitizeMessages(this.messages),
             tools: toolDefs,
             signal: this.loopAbort.signal,
             onToken: (token) => this.send({ type: 'token', content: token }),
@@ -156,6 +188,7 @@ export class AgentSession {
 
         this.send({ type: 'message', role: 'assistant', content: assistant.content ?? '' });
         this.messages.push(assistant);
+        this.save();
 
         const calls = assistant.tool_calls ?? [];
         if (!calls.length) {
@@ -225,6 +258,7 @@ export class AgentSession {
           }
         }
         this.messages.push(...toolMessages);
+        this.save();
       }
 
       if (this.stopRequested) {
@@ -235,6 +269,7 @@ export class AgentSession {
     } catch (err) {
       this.send({ type: 'error', message: String((err as Error).message ?? err) });
     } finally {
+      this.save();
       this.running = false;
       this.pending.clear();
       this.loopAbort = null;
@@ -378,7 +413,7 @@ export class AgentSession {
 
 const sessions = new Map<string, AgentSession>();
 
-export function attachAgent(ws: WebSocket, profile: Profile): AgentSession {
+export function attachAgent(ws: WebSocket, profile: Profile, dialogueId?: string): AgentSession {
   const existing = sessions.get(profile.id);
   if (existing) {
     existing.stop();
@@ -388,8 +423,16 @@ export function attachAgent(ws: WebSocket, profile: Profile): AgentSession {
       /* noop */
     }
   }
-  const session = new AgentSession(profile, ws);
+  let dialogue: Dialogue | undefined;
+  if (dialogueId) {
+    const found = getDialogue(dialogueId);
+    if (found?.profileId === profile.id) {
+      dialogue = found;
+    }
+  }
+  const session = new AgentSession(profile, ws, dialogue);
   sessions.set(profile.id, session);
+  session.notifyDialogue();
   ws.on('close', () => {
     session.onWsClose();
     if (sessions.get(profile.id) === session) {

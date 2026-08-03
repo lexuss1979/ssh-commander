@@ -24,7 +24,23 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('terminal');
   const [showProfiles, setShowProfiles] = useState(false);
   const [toast, setToast] = useState('');
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    try {
+      return localStorage.getItem('sc-theme') === 'light' ? 'light' : 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
   const toastTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try {
+      localStorage.setItem('sc-theme', theme);
+    } catch {
+      /* localStorage может быть недоступен */
+    }
+  }, [theme]);
 
   const showError = useCallback((msg: string) => {
     setToast(msg);
@@ -121,6 +137,12 @@ export default function App() {
         </nav>
 
         <div className="sidebar-footer">
+          <button
+            className="btn btn-ghost btn-block"
+            onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+          >
+            {theme === 'dark' ? '☀️ Светлая тема' : '🌙 Тёмная тема'}
+          </button>
           <button className="btn btn-ghost btn-block" onClick={handleLogout}>
             Выйти
           </button>
@@ -161,4 +183,3 @@ export default function App() {
     </div>
   );
 }
-

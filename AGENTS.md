@@ -9,6 +9,12 @@
 docker compose up -d --build        # пересборка обязательна после изменений кода
 docker compose down                 # остановить
 
+# Dev-режим в Docker: hot-reload без пересборки образа при изменении кода
+scripts/docker-dev.sh up            # dev-образ (только npm ci) + запуск: API на :8081, web на :5173
+scripts/docker-dev.sh logs          # логи обоих процессов
+scripts/docker-dev.sh restart       # перезапуск контейнера
+scripts/docker-dev.sh down
+
 # Разработка
 cd server && npm install && npm run dev   # API + WebSocket на :8080
 cd web && npm install && npm run dev      # Vite на :5173, проксирует /api и /ws на :8080
@@ -23,10 +29,12 @@ cd web && npm run build                   # tsc && vite build → web/dist
 ## Структура проекта
 
 - `server/` — Node.js + TypeScript (ESM). Express + WebSocket (`ws`) + `ssh2`. Вход: `src/index.ts`.
-- `web/` — React 18 + Vite + xterm.js. Вход: `src/main.tsx`, корневой компонент `src/App.tsx`.
+- `web/` — React 18 + Vite + xterm.js. Вход: `src/main.tsx`, корневой компонент `src/App.tsx`. Сообщения чата агента рендерятся как markdown (`react-markdown` + `remark-gfm`, компонент `src/components/Markdown.tsx`).
 - `Dockerfile` — multi-stage: `web-builder` → `server-builder` → runtime `node:20-alpine`.
 - `docker-compose.yml` — публикация `127.0.0.1:8080:8080`, volumes `./data:/data` и `./keys:/keys`.
-- `data/` — volume: `profiles.json` (профили серверов, пароли открытым текстом).
+- `docker-compose.dev.yml` — dev-сервис `ssh-commander-dev` (`target: dev` из Dockerfile): Vite + tsx watch в одном контейнере, исходники смонтированы bind-mount'ами, горячая перезагрузка при изменении `server/src` и `web/src` без пересборки образа. Изменение зависимостей (package.json/lock) требует `scripts/docker-dev.sh up` (пересборка dev-стадии).
+- `scripts/docker-dev.sh` — обёртка над dev-compose: `up|down|restart|logs|build`.
+- `data/` — volume: `profiles.json` (профили серверов, пароли открытым текстом) и `ai-dialogues.json` (история диалогов AI-агента).
 - `keys/` — SSH-ключи, монтируются в контейнер в `/keys` (не копируются в образ).
 - `server/test/` — unit-тесты (vitest) и ручные интеграционные сценарии (`*.manual.mjs`).
 
@@ -59,6 +67,8 @@ cd web && npm run build                   # tsc && vite build → web/dist
 - `src/routes/keys.ts` — `GET /api/keys`: список файлов в `KEYS_DIR` (для выпадающего списка ключей в форме).
 - `src/ws/terminal.ts` — терминальные сессии на профиль: буфер ввода до готовности shell, переживают перезагрузку вкладки (60 c после последнего отсоединения), удаляются по завершении процесса.
 - `src/ai/` — агент: `client.ts` (Chat Completions, streaming SSE, аккумуляция tool_calls), `tools.ts` (определения инструментов + `READ_ONLY_TOOLS`), `guard.ts` (deny-лист read-only команд), `agent.ts` (цикл, подтверждения, лимит шагов).
+- `src/ai/dialogues.ts` — хранение диалогов агента в `DATA_DIR/ai-dialogues.json` (zod-валидация, атомарная запись tmp+rename, кэш в памяти).
+- `src/routes/ai.ts` — REST для диалогов: `GET/POST /api/ai/dialogues`, `GET/DELETE /api/ai/dialogues/:id`.
 
 ## REST и WebSocket API
 
@@ -66,10 +76,11 @@ cd web && npm run build                   # tsc && vite build → web/dist
 
 - `POST /api/auth/login|logout`
 - CRUD `/api/profiles`, `GET /api/keys`
+- Диалоги агента: `GET /api/ai/dialogues?profileId=` (список-сводки), `POST /api/ai/dialogues` `{profileId}` (создать), `GET /api/ai/dialogues/:id` (полный диалог), `DELETE /api/ai/dialogues/:id`
 - `/api/files/list|read|write|mkdir|rename|chmod|delete|download|upload` — `profileId` и `path` в query/body; upload — raw body (`express.raw`, лимит 200 МБ); download — стрим.
 - `/api/docker/containers|images|volumes|networks`, действия контейнеров (`start|stop|restart|rm`), `pull`, `rmi`, `run`, `logs` (tail и follow-стрим).
 - WS `/ws/terminal?profileId=&cols=&rows=` — сообщения: клиент `input|resize|close`, сервер `output|connected|close|error`.
-- WS `/ws/agent?profileId=` — клиент `message|approve|reject|stop`, сервер `token|message|tool_pending|tool_result|running|done|error`.
+- WS `/ws/agent?profileId=&dialogueId=` — клиент `message|approve|reject|stop`, сервер `dialogue|token|message|tool_pending|tool_result|running|done|error`. Диалог загружается в сессию при подключении и сохраняется по ходу каждого шага; если `dialogueId` не передан, сервер создаёт новый диалог и сообщает его id событием `dialogue`.
 
 ## AI-агент: правила подтверждений
 
@@ -88,7 +99,7 @@ cd web && npm run build                   # tsc && vite build → web/dist
 - Пути в API: абсолютные, нормализация `//` и хвостового `/`; операции удаления запрещают `/` и `..` (`src/util/path.ts`); рекурсивное удаление использует `rm -rf -- <shq(path)>`.
 - Секреты: ключи, `.env` и `data/profiles.json` в git не попадают (`.gitignore`); не добавлять их в коммиты и не логировать содержимое.
 - Docker-сборка: при изменении сервера/фронта контейнер пересобирается через `docker compose up -d --build`; `WEB_DIST` в Dockerfile задан явно — не удалять.
-- Интерфейс: тёмная тема на CSS-переменных (`web/src/styles.css`), русский язык; скроллируемые области используют `scrollbar-gutter: stable` против дёргания layout.
+- Интерфейс: тёмная и светлая темы на CSS-переменных (`web/src/styles.css`, атрибут `data-theme` на `<html>`), переключатель в сайдбаре, выбор сохраняется в `localStorage`; русский язык; скроллируемые области используют `scrollbar-gutter: stable` против дёргания layout.
 - Git: репозиторий инициализирован в корне проекта, ветка `main`.
 
 ## Тестирование
@@ -101,4 +112,3 @@ cd web && npm run build                   # tsc && vite build → web/dist
 ## Безопасность (кратко)
 
 Сервис однопользовательский: localhost-only, пароль из `APP_PASSWORD`, httpOnly-cookie, rate-limit логина. SSH-пароли лежат открытым текстом в `data/profiles.json` — это осознанный компромисс локального инструмента, volume наружу не публиковать. Мутирующие действия агента никогда не выполняются без подтверждения; deny-лист read-only команд консервативен — лучше отказать, чем пропустить.
-

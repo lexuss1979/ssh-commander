@@ -1,0 +1,35 @@
+services:
+  ssh-commander-dev:
+    build:
+      context: .
+      target: dev
+    container_name: ssh-commander-dev
+    # Оба dev-процесса в одном контейнере: Vite (web) + tsx watch (server).
+    command: >
+      sh -c "cd /app/web && npm run dev -- --host 0.0.0.0 --port 5173 &
+             cd /app/server && npm run dev;
+             wait"
+    environment:
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8080
+      - APP_PASSWORD=${APP_PASSWORD:-admin}
+      - AI_API_BASE=${AI_API_BASE:-https://api.openai.com/v1}
+      - AI_API_KEY=${AI_API_KEY:-}
+      - AI_MODEL=${AI_MODEL:-gpt-4.1-mini}
+      - AI_MAX_STEPS=${AI_MAX_STEPS:-30}
+      - AI_TEMPERATURE=${AI_TEMPERATURE:-0.2}
+      # inotify не работает на bind-монтах Windows (WSL), поэтому polling
+      - CHOKIDAR_USEPOLLING=true
+      - CHOKIDAR_INTERVAL=300
+    ports:
+      - "127.0.0.1:8081:8080"
+      - "127.0.0.1:5173:5173"
+    volumes:
+      - ./server/src:/app/server/src
+      - ./web/src:/app/web/src
+      - ./web/index.html:/app/web/index.html
+      - ./web/vite.config.ts:/app/web/vite.config.ts
+      # Ключи доступны только на чтение; данные dev-сервер держит в своём /data
+      # (монтирование ./data опущено, чтобы не конфликтовать с prod-контейнером).
+      - ./keys:/keys:ro
+    restart: unless-stopped
