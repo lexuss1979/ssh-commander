@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+data/profiles.json
+keys/*
+!keys/.gitkeep
+*.log
+.DS_Store
+

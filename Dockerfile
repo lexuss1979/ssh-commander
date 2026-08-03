@@ -1,0 +1,27 @@
+# --- Build web ---
+FROM node:20-alpine AS web-builder
+WORKDIR /app/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
+# --- Build server ---
+FROM node:20-alpine AS server-builder
+WORKDIR /app/server
+COPY server/package.json server/package-lock.json ./
+RUN npm ci
+COPY server/tsconfig.json ./
+COPY server/src ./src
+RUN npm run build
+
+# --- Runtime ---
+FROM node:20-alpine
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=web-builder /app/web/dist ./web/dist
+COPY --from=server-builder /app/server/dist ./dist
+COPY --from=server-builder /app/server/node_modules ./node_modules
+ENV DATA_DIR=/data KEYS_DIR=/keys WEB_DIST=/app/web/dist
+EXPOSE 8080
+CMD ["node", "dist/index.js"]

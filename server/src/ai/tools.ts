@@ -1,0 +1,142 @@
+import type { ToolDef } from './client.js';
+
+const str = (description: string) => ({ type: 'string', description });
+const required = (name: string, description: string) => ({
+  type: 'object',
+  properties: { [name]: str(description) },
+  required: [name],
+});
+
+export const toolDefs: ToolDef[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'exec_readonly',
+      description:
+        'Выполнить безопасную команду чтения на сервере (ls, cat, head, tail, grep, find, df, free, ps, ss и т.п.). Выполняется автоматически без подтверждения. Команды записи, удаления и управления системой в этом инструменте запрещены — используйте exec.',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: str('Команда для выполнения'),
+        },
+        required: ['command'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'exec',
+      description:
+        'Выполнить произвольную shell-команду на сервере (включая команды записи/удаления/управления). Требует подтверждения пользователя.',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: str('Команда для выполнения'),
+        },
+        required: ['command'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_file',
+      description: 'Прочитать текстовый файл на сервере (до 256 КБ).',
+      parameters: required('path', 'Абсолютный путь к файлу'),
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_dir',
+      description: 'Показать содержимое директории на сервере.',
+      parameters: required('path', 'Абсолютный путь к директории'),
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'write_file',
+      description: 'Записать текстовый файл на сервере (создать или перезаписать). Требует подтверждения пользователя.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: str('Абсолютный путь к файлу'),
+          content: str('Содержимое файла'),
+        },
+        required: ['path', 'content'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'docker_ps',
+      description: 'Список контейнеров Docker (все, включая остановленные).',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'docker_logs',
+      description: 'Последние строки логов контейнера Docker.',
+      parameters: {
+        type: 'object',
+        properties: {
+          containerId: str('ID или имя контейнера'),
+          tail: str('Количество строк (по умолчанию 100)'),
+        },
+        required: ['containerId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'docker_inspect',
+      description: 'Подробная информация о контейнере, образе, volume или сети Docker.',
+      parameters: required('target', 'ID или имя объекта Docker'),
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'docker_action',
+      description:
+        'Управляющее действие с Docker: start/stop/restart/rm для контейнера, pull/rmi для образа, run для запуска контейнера. Требует подтверждения пользователя.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: str('Одно из: start, stop, restart, rm, pull, rmi, run'),
+          target: str('ID или имя контейнера/образа (для start/stop/restart/rm/rmi)'),
+          image: str('Образ для pull/run'),
+          name: str('Имя контейнера (для run)'),
+          ports: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Проброс портов вида "8080:80" (для run)',
+          },
+          env: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Переменные окружения вида "KEY=VALUE" (для run)',
+          },
+          command: str('Команда внутри контейнера (для run)'),
+        },
+        required: ['action'],
+      },
+    },
+  },
+];
+
+export const READ_ONLY_TOOLS = new Set([
+  'exec_readonly',
+  'read_file',
+  'list_dir',
+  'docker_ps',
+  'docker_logs',
+  'docker_inspect',
+]);
+
