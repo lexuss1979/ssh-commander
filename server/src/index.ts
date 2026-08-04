@@ -13,6 +13,7 @@ import { filesRouter } from './routes/files.js';
 import { dockerRouter } from './routes/docker.js';
 import { aiRouter } from './routes/ai.js';
 import { metricsRouter } from './routes/metrics.js';
+import { overviewRouter } from './routes/overview.js';
 import { terminalRouter } from './routes/terminal.js';
 import { requireProfile } from './profiles.js';
 import { attachTerminal } from './ws/terminal.js';
@@ -35,6 +36,7 @@ app.use('/api/files', requireAuth, filesRouter);
 app.use('/api/docker', requireAuth, dockerRouter);
 app.use('/api/ai', requireAuth, aiRouter);
 app.use('/api/metrics', requireAuth, metricsRouter);
+app.use('/api/overview', requireAuth, overviewRouter);
 app.use('/api/terminal', requireAuth, terminalRouter);
 
 // SPA static files (built web app).

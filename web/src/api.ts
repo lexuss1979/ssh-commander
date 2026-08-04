@@ -78,6 +78,50 @@ export interface KeyEntry {
   path: string;
 }
 
+export interface ProfilesImportSummary {
+  imported: number;
+  renamed: Array<{ from: string; to: string }>;
+  keysSaved: number;
+  keysSkipped: string[];
+  needSecrets: string[];
+}
+
+/** Экспорт профилей в файл бэкапа (секреты — только с includeSecrets). */
+export async function exportProfilesBackup(opts: {
+  passphrase?: string;
+  includeSecrets: boolean;
+}): Promise<Blob> {
+  const res = await fetch('/api/profiles/export', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(opts),
+  });
+  if (!res.ok) {
+    if (res.status === 401) unauthorizedHandler?.();
+    let message = res.statusText;
+    try {
+      const body = await res.json();
+      message = body.error ?? message;
+    } catch {
+      /* keep statusText */
+    }
+    throw new ApiError(res.status, message);
+  }
+  return res.blob();
+}
+
+/** Импорт бэкапа профилей; для зашифрованного файла нужен passphrase. */
+export function importProfilesBackup(
+  backup: string,
+  passphrase?: string,
+): Promise<ProfilesImportSummary> {
+  return api<ProfilesImportSummary>('/api/profiles/import', {
+    method: 'POST',
+    body: JSON.stringify({ backup, passphrase }),
+  });
+}
+
 /** Импорт приватного ключа в хранилище keys/ (сохраняется с правами 0600). */
 export async function importKey(name: string, content: string, overwrite = false): Promise<KeyEntry> {
   const params = new URLSearchParams({ name });
@@ -133,6 +177,28 @@ export interface ServerMetrics {
 
 export function fetchMetrics(profileId: string): Promise<ServerMetrics> {
   return api<ServerMetrics>(`/api/metrics?profileId=${encodeURIComponent(profileId)}`);
+}
+
+export interface OverviewServerEntry {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  ok: boolean;
+  error?: string;
+  metrics?: ServerMetrics;
+  docker?: { containersTotal: number; containersRunning: number };
+}
+
+export interface OverviewResponse {
+  timestamp: number;
+  servers: OverviewServerEntry[];
+}
+
+/** Сводный снимок по всем профилям (вкладка «Серверы»). */
+export function fetchOverview(): Promise<OverviewResponse> {
+  return api<OverviewResponse>('/api/overview');
 }
 
 export async function fetchTerminalHistory(profileId: string, limit = 100): Promise<string[]> {

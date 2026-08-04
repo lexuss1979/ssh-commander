@@ -11,7 +11,7 @@ interface Props {
 
 const POLL_INTERVAL_MS = 3000;
 
-function formatBytes(bytes: number | null): string {
+export function formatBytes(bytes: number | null): string {
   if (bytes === null) return '—';
   const units = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ'];
   let v = bytes;
@@ -23,7 +23,7 @@ function formatBytes(bytes: number | null): string {
   return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
-function formatUptime(seconds: number | null): string {
+export function formatUptime(seconds: number | null): string {
   if (seconds === null) return '—';
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
@@ -33,7 +33,7 @@ function formatUptime(seconds: number | null): string {
   return `${m} мин`;
 }
 
-function formatPct(pct: number | null): string {
+export function formatPct(pct: number | null): string {
   return pct === null ? '—' : `${pct.toFixed(1)}%`;
 }
 
@@ -44,7 +44,7 @@ function meterClass(pct: number | null): string {
   return '';
 }
 
-function Meter({ percent }: { percent: number | null }) {
+export function Meter({ percent }: { percent: number | null }) {
   return (
     <div className="meter">
       <div

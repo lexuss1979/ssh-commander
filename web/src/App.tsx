@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, api, setUnauthorizedHandler } from './api';
 import type { Profile } from './types';
 import { LoginPage } from './pages/LoginPage';
+import { ServersPage } from './pages/ServersPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { TerminalPage } from './pages/TerminalPage';
 import { FilesPage } from './pages/FilesPage';
@@ -9,7 +10,7 @@ import { DockerPage } from './pages/DockerPage';
 import { AgentPage } from './pages/AgentPage';
 import { ProfileModal } from './components/ProfileModal';
 
-type Tab = 'overview' | 'terminal' | 'files' | 'docker';
+type Tab = 'servers' | 'overview' | 'terminal' | 'files' | 'docker';
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'overview', label: 'Обзор' },
@@ -44,7 +45,7 @@ export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [activeProfileId, setActiveProfileId] = useState('');
-  const [tab, setTab] = useState<Tab>('overview');
+  const [tab, setTab] = useState<Tab>('servers');
   const [terminalContainer, setTerminalContainer] = useState<{ id: string; name: string } | null>(null);
   const [showProfiles, setShowProfiles] = useState(false);
   const [toast, setToast] = useState('');
@@ -133,7 +134,7 @@ export default function App() {
     setAuthed(false);
     setProfiles([]);
     setActiveProfileId('');
-    setTab('overview');
+    setTab('servers');
   }, []);
 
   // Кнопка «Спросить агента» в терминале: раскрывает панель и передаёт контекст.
@@ -190,7 +191,18 @@ export default function App() {
         <div className="logo">ssh-commander</div>
 
         <div className="sidebar-section sidebar-profiles">
-          <label className="sidebar-label">Серверы</label>
+          <button
+            type="button"
+            className={`profile-list-item${tab === 'servers' ? ' active' : ''}`}
+            onClick={() => setTab('servers')}
+          >
+            <strong>Серверы</strong>
+            <span className="muted">Сводный дашборд</span>
+          </button>
+
+          <div className="sidebar-divider" />
+
+          <label className="sidebar-label">Площадки</label>
           <div className="profile-list">
             {profiles.length === 0 && (
               <div className="profile-list-empty muted">Нет серверов</div>
@@ -200,7 +212,10 @@ export default function App() {
                 key={p.id}
                 type="button"
                 className={`profile-list-item${p.id === activeProfileId ? ' active' : ''}`}
-                onClick={() => setActiveProfileId(p.id)}
+                onClick={() => {
+                  setActiveProfileId(p.id);
+                  if (tab === 'servers') setTab('overview');
+                }}
                 title={`${p.username}@${p.host}:${p.port}`}
               >
                 <strong>{p.name}</strong>
@@ -254,7 +269,17 @@ export default function App() {
 
         <div className="app-body">
           <main className="main">
-            {!activeProfile && (
+            <div className={`tab-page ${tab === 'servers' ? '' : 'hidden'}`}>
+              <ServersPage
+                showError={showError}
+                visible={tab === 'servers'}
+                onOpenProfile={(id) => {
+                  setActiveProfileId(id);
+                  setTab('overview');
+                }}
+              />
+            </div>
+            {!activeProfile && tab !== 'servers' && (
               <div className="empty-state">
                 <p>Сначала добавьте SSH-сервер.</p>
                 <button className="btn btn-primary" onClick={() => setShowProfiles(true)}>

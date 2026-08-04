@@ -310,6 +310,11 @@ button {
   border-color: var(--accent-soft-border);
 }
 
+.sidebar-divider {
+  border-top: 1px solid var(--border);
+  margin: 4px 0;
+}
+
 /* Результат «Проверить подключение» в форме сервера */
 .test-result {
   margin: 10px 0 0;
@@ -817,6 +822,37 @@ body.resizing-agent {
   font-size: 11px;
   color: var(--muted);
   line-height: 1.4;
+}
+
+.transfer-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.transfer-block input[type='password'] {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.transfer-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.transfer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.transfer-actions .btn {
+  flex: 1;
 }
 
 .inline-field {
@@ -1477,6 +1513,74 @@ body.resizing-agent {
   white-space: nowrap;
   font-family: monospace;
   font-size: 12px;
+}
+
+/* Servers (сводный дашборд всех профилей) */
+.servers-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.server-card {
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  width: 100%;
+  transition: border-color 0.15s ease;
+}
+
+.server-card:hover {
+  border-color: var(--accent);
+}
+
+.server-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.server-card-head .server-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.server-card-head .server-addr {
+  margin-left: auto;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.server-metric {
+  margin-top: 8px;
+}
+
+.server-metric-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.server-card-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.server-error {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--danger);
+  overflow-wrap: anywhere;
 }
 
 /* === Эпики 2–3: поиск по файлам и перенос директорий (FilesPage) === */
