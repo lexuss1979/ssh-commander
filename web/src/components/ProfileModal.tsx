@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { api } from '../api';
+import { useEffect, useRef, useState } from 'react';
+import { api, importKey, type KeyEntry } from '../api';
 import type { Profile } from '../types';
 import { Modal } from './Modal';
 
@@ -22,11 +22,6 @@ interface FormState {
   note: string;
 }
 
-interface KeyEntry {
-  name: string;
-  path: string;
-}
-
 const emptyForm: FormState = {
   name: '',
   host: '',
@@ -45,6 +40,8 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
   const [busy, setBusy] = useState(false);
   const [keys, setKeys] = useState<KeyEntry[]>([]);
   const [keysError, setKeysError] = useState('');
+  const [importBusy, setImportBusy] = useState(false);
+  const keyFileRef = useRef<HTMLInputElement>(null);
 
   const loadKeys = async () => {
     try {
@@ -53,6 +50,27 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
       setKeysError('');
     } catch (err) {
       setKeysError((err as Error).message);
+    }
+  };
+
+  // Импорт ключа с диска: файл уходит на сервер в keys/ (0600),
+  // после загрузки он сразу выбирается в форме.
+  const importKeyFile = async (file: File) => {
+    setImportBusy(true);
+    try {
+      let overwrite = false;
+      if (keys.some((k) => k.name === file.name)) {
+        overwrite = window.confirm(`Ключ «${file.name}» уже есть в хранилище. Перезаписать?`);
+        if (!overwrite) return;
+      }
+      const content = await file.text();
+      const key = await importKey(file.name, content, overwrite);
+      await loadKeys();
+      set('keyPath', key.path);
+    } catch (err) {
+      showError((err as Error).message);
+    } finally {
+      setImportBusy(false);
     }
   };
 
@@ -202,7 +220,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
                     {keysError
                       ? `Не удалось загрузить список: ${keysError}`
                       : keys.length === 0
-                        ? 'В папке keys/ нет файлов. Положите туда ключ и нажмите «Обновить».'
+                        ? 'В папке keys/ нет файлов. Импортируйте ключ кнопкой ниже или положите файл в keys/ вручную.'
                         : 'Файлы из папки keys/ (в контейнере — /keys).'}
                   </span>
                 </label>
@@ -217,6 +235,24 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
                     <button type="button" className="btn" onClick={() => void loadKeys()}>
                       Обновить
                     </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={importBusy}
+                      onClick={() => keyFileRef.current?.click()}
+                    >
+                      {importBusy ? 'Загрузка…' : 'Импортировать…'}
+                    </button>
+                    <input
+                      ref={keyFileRef}
+                      type="file"
+                      hidden
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = '';
+                        if (file) void importKeyFile(file);
+                      }}
+                    />
                   </div>
                 </label>
               </>
@@ -251,8 +287,9 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
             )}
           </div>
           <p className="hint">
-            Ключи монтируются в контейнер из папки <code>keys/</code>. Укажите путь внутри контейнера,
-            например <code>/keys/id_rsa</code>.
+            Ключи можно импортировать кнопкой «Импортировать…» — файл сохраняется в папку{' '}
+            <code>keys/</code> с правами <code>0600</code>. Либо положите ключ в <code>keys/</code>{' '}
+            вручную и укажите путь внутри контейнера, например <code>/keys/id_rsa</code>.
           </p>
         </div>
       </div>
