@@ -21,6 +21,10 @@ const profileSchema = profileInputSchema.extend({ id: z.string().min(1) });
 const storeSchema = z.object({ profiles: z.array(profileSchema).default([]) });
 
 let cache: Profile[] | null = null;
+// Set when the store file failed to parse: the broken file is moved aside
+// (kept for recovery) and persist() refuses to run until a restart with a
+// fixed file, so a corrupt store is never silently overwritten.
+let corrupt = false;
 
 function storePath(): string {
   return path.join(config.dataDir, 'profiles.json');
@@ -31,14 +35,29 @@ export function listProfiles(): Profile[] {
     try {
       const raw = fs.readFileSync(storePath(), 'utf8');
       cache = storeSchema.parse(JSON.parse(raw)).profiles;
-    } catch {
-      cache = [];
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        cache = [];
+      } else {
+        const backup = `${storePath()}.corrupt-${Date.now()}`;
+        try {
+          fs.renameSync(storePath(), backup);
+        } catch {
+          /* keep the original in place */
+        }
+        console.warn(`profiles store is unreadable, moved to ${backup}; refusing to overwrite it until restart:`, err);
+        corrupt = true;
+        cache = [];
+      }
     }
   }
   return cache.map((p) => ({ ...p }));
 }
 
 function persist(list: Profile[]): void {
+  if (corrupt) {
+    throw new Error('profiles store was corrupt at startup; refusing to overwrite it — fix or remove the *.corrupt-* file and restart');
+  }
   fs.mkdirSync(config.dataDir, { recursive: true });
   const tmp = `${storePath()}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify({ profiles: list }, null, 2));
@@ -46,14 +65,18 @@ function persist(list: Profile[]): void {
   cache = list.map((p) => ({ ...p }));
 }
 
-function validate(input: unknown): Profile {
-  const data = profileInputSchema.parse(input);
+function assertSecret(data: Pick<Profile, 'authType'> & Partial<Pick<Profile, 'keyPath' | 'password'>>): void {
   if (data.authType === 'key' && !data.keyPath) {
     throw new Error('keyPath is required for key auth');
   }
   if (data.authType === 'password' && !data.password) {
     throw new Error('password is required for password auth');
   }
+}
+
+function validate(input: unknown): Profile {
+  const data = profileInputSchema.parse(input);
+  assertSecret(data);
   return { ...data, id: crypto.randomUUID().slice(0, 8) };
 }
 
@@ -83,14 +106,21 @@ export function updateProfile(id: string, input: unknown): Profile {
   if (idx < 0) {
     throw new Error(`Profile ${id} not found`);
   }
+  const existing = list[idx];
   const data = profileInputSchema.parse(input);
-  if (data.authType === 'key' && !data.keyPath) {
-    throw new Error('keyPath is required for key auth');
+  // Switching the auth type always requires the matching secret; otherwise
+  // an omitted secret keeps the stored one (partial update without
+  // re-sending the password).
+  if (data.authType !== existing.authType) {
+    assertSecret(data);
   }
-  if (data.authType === 'password' && !data.password) {
-    throw new Error('password is required for password auth');
-  }
-  const updated: Profile = { ...data, id };
+  const updated: Profile = {
+    ...data,
+    id,
+    keyPath: data.keyPath ?? existing.keyPath,
+    password: data.password ?? existing.password,
+  };
+  assertSecret(updated);
   list[idx] = updated;
   persist(list);
   return { ...updated };

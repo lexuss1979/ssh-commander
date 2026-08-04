@@ -1,12 +1,41 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import type { Profile } from '../types';
+import { fetchTerminalHistory } from '../api';
 
 interface Props {
   profile: Profile;
   showError: (msg: string) => void;
+  visible: boolean;
+  /** Контейнерная сессия: shell внутри docker-контейнера вместо системного. */
+  container?: { id: string; name: string } | null;
+  onExitContainer?: () => void;
+  /** «Спросить агента»: передать контекст терминала AI-агенту. */
+  onAskAgent?: (text: string) => void;
+}
+
+// Лимиты контекста для кнопки «Спросить агента» (см. roadmap, эпик 7):
+// последние ~30 непустых строк, суммарно не более ~4 КБ.
+const ASK_AGENT_MAX_LINES = 30;
+const ASK_AGENT_MAX_CHARS = 4096;
+
+// Выделение xterm, если есть; иначе — хвост буфера (последние непустые строки).
+function collectTerminalContext(term: Terminal): string {
+  const selection = term.getSelection().trim();
+  if (selection) return selection.slice(-ASK_AGENT_MAX_CHARS);
+  const buf = term.buffer.active;
+  const lines: string[] = [];
+  let total = 0;
+  for (let i = buf.length - 1; i >= 0 && lines.length < ASK_AGENT_MAX_LINES; i--) {
+    const text = (buf.getLine(i)?.translateToString(true) ?? '').trimEnd();
+    if (!text.trim()) continue;
+    total += text.length;
+    if (total > ASK_AGENT_MAX_CHARS) break;
+    lines.unshift(text);
+  }
+  return lines.join('\n');
 }
 
 interface WsMessage {
@@ -16,12 +45,151 @@ interface WsMessage {
   rows?: number;
 }
 
-export function TerminalPage({ profile, showError }: Props) {
+interface HistoryPaletteProps {
+  profileId: string;
+  /** Вставить команду в терминал (без Enter) и закрыть палитру. */
+  onPick: (cmd: string) => void;
+  onClose: () => void;
+}
+
+function HistoryPalette({ profileId, onPick, onClose }: HistoryPaletteProps) {
+  const [commands, setCommands] = useState<string[] | null>(null);
+  const [error, setError] = useState('');
+  const [filter, setFilter] = useState('');
+  const [selected, setSelected] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchTerminalHistory(profileId)
+      .then((cmds) => {
+        if (!cancelled) setCommands(cmds);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Не удалось загрузить историю');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profileId]);
+
+  const filtered = useMemo(() => {
+    if (!commands) return [];
+    const q = filter.trim().toLowerCase();
+    if (!q) return commands;
+    return commands.filter((c) => c.toLowerCase().includes(q));
+  }, [commands, filter]);
+
+  // При смене фильтра выбор возвращается на первую строку.
+  useEffect(() => {
+    setSelected(0);
+  }, [filter]);
+
+  // Выбранная строка всегда в видимой области списка.
+  useEffect(() => {
+    listRef.current
+      ?.querySelector('.history-item.selected')
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [selected]);
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onClose();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelected((s) => Math.min(s + 1, filtered.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelected((s) => Math.max(s - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const cmd = filtered[selected];
+      if (cmd) onPick(cmd);
+    }
+  };
+
+  return (
+    <div className="history-palette" onKeyDown={onKeyDown}>
+      <input
+        className="history-filter"
+        autoFocus
+        placeholder="Фильтр команд… (↑↓ — выбор, Enter — вставить, Esc — закрыть)"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+      />
+      <div className="history-list" ref={listRef}>
+        {error && <div className="history-empty">{error}</div>}
+        {!error && commands === null && <div className="history-empty">Загрузка истории…</div>}
+        {!error && commands !== null && filtered.length === 0 && (
+          <div className="history-empty">
+            {commands.length === 0 ? 'История команд пуста' : 'Ничего не найдено'}
+          </div>
+        )}
+        {filtered.map((cmd, i) => (
+          <button
+            key={`${i}:${cmd}`}
+            type="button"
+            className={`history-item${i === selected ? ' selected' : ''}`}
+            onMouseEnter={() => setSelected(i)}
+            onClick={() => onPick(cmd)}
+          >
+            {cmd}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function TerminalPage({ profile, showError, visible, container, onExitContainer, onAskAgent }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const sendInputRef = useRef<(data: string) => void>(() => {});
+  const wsRef = useRef<WebSocket | null>(null);
   const [status, setStatus] = useState('connecting');
   const [sessionKey, setSessionKey] = useState(0);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const statusRef = useRef(status);
   statusRef.current = status;
+  const containerId = container?.id ?? '';
+
+  // В контейнерной сессии история системного shell не имеет смысла.
+  const openHistory = () => {
+    if (containerId) return;
+    setHistoryOpen(true);
+  };
+  const openHistoryRef = useRef(openHistory);
+  openHistoryRef.current = openHistory;
+
+  const closeHistory = () => {
+    setHistoryOpen(false);
+    termRef.current?.focus();
+  };
+
+  const pickHistory = (cmd: string) => {
+    // Команда уходит как обычный ввод, без Enter — выполнение за пользователем.
+    sendInputRef.current(cmd);
+    closeHistory();
+  };
+
+  // «Спросить агента»: берём выделение или хвост буфера и отдаём наверх (App).
+  // В контейнерном режиме кнопка остаётся доступной: вывод контейнера — тоже
+  // полезный контекст для агента (он работает с хостом, но объяснить его может).
+  const askAgent = () => {
+    const term = termRef.current;
+    if (!term || !onAskAgent) return;
+    const text = collectTerminalContext(term);
+    if (!text) {
+      showError('Буфер терминала пуст — нечего отправлять агенту');
+      return;
+    }
+    term.clearSelection();
+    onAskAgent(text);
+  };
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -38,22 +206,46 @@ export function TerminalPage({ profile, showError }: Props) {
       },
       scrollback: 5000,
     });
+    termRef.current = term;
     const fit = new FitAddon();
+    fitRef.current = fit;
     term.loadAddon(fit);
     term.open(containerRef.current);
     fit.fit();
 
+    // Ctrl+R — палитра истории вместо reverse-i-search в readline.
+    // false = событие не уходит в xterm, обычный ввод не ломается.
+    term.attachCustomKeyEventHandler((ev) => {
+      if (
+        ev.type === 'keydown' &&
+        ev.ctrlKey &&
+        !ev.altKey &&
+        !ev.shiftKey &&
+        !ev.metaKey &&
+        ev.key.toLowerCase() === 'r'
+      ) {
+        openHistoryRef.current();
+        return false;
+      }
+      return true;
+    });
+
     let closed = false;
-    const ws = new WebSocket(
-      `/ws/terminal?profileId=${encodeURIComponent(profile.id)}&cols=${term.cols}&rows=${term.rows}`,
-    );
+    const wsParams = new URLSearchParams({
+      profileId: profile.id,
+      cols: String(term.cols),
+      rows: String(term.rows),
+    });
+    if (containerId) wsParams.set('container', containerId);
+    const ws = new WebSocket(`/ws/terminal?${wsParams}`);
+    wsRef.current = ws;
 
     const send = (msg: WsMessage) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
     };
+    sendInputRef.current = (data) => send({ type: 'input', data });
 
     term.onData((data) => send({ type: 'input', data }));
-    term.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }));
 
     ws.onopen = () => {
       if (!closed) {
@@ -66,6 +258,7 @@ export function TerminalPage({ profile, showError }: Props) {
       try {
         const msg = JSON.parse(e.data) as WsMessage;
         if (msg.type === 'output' && msg.data) term.write(msg.data);
+        if (msg.type === 'connected') setStatus('connected');
         if (msg.type === 'close') {
           setStatus('closed');
           term.write('\r\n\x1b[31m[сессия завершена]\x1b[0m\r\n');
@@ -94,11 +287,25 @@ export function TerminalPage({ profile, showError }: Props) {
 
     return () => {
       closed = true;
+      wsRef.current = null;
       ro.disconnect();
       ws.close();
       term.dispose();
+      termRef.current = null;
+      fitRef.current = null;
+      sendInputRef.current = () => {};
     };
-  }, [profile.id, sessionKey, showError]);
+  }, [profile.id, sessionKey, showError, containerId]);
+
+  // При display:none xterm теряет размеры — пересчитываем при возврате на вкладку.
+  useEffect(() => {
+    if (!visible) return;
+    try {
+      fitRef.current?.fit();
+    } catch {
+      /* контейнер ещё скрыт */
+    }
+  }, [visible]);
 
   return (
     <div className="page terminal-page">
@@ -106,6 +313,9 @@ export function TerminalPage({ profile, showError }: Props) {
         <span className="muted">
           {profile.name} — {profile.username}@{profile.host}
         </span>
+        {container && (
+          <span className="container-chip">контейнер: {container.name}</span>
+        )}
         <span className={`status-dot ${status}`} />
         <span className="status-text">
           {status === 'connected' && 'подключено'}
@@ -114,17 +324,49 @@ export function TerminalPage({ profile, showError }: Props) {
           {status === 'closed' && 'сессия завершена'}
           {status === 'error' && 'ошибка'}
         </span>
+        {!container && (
+          <button className="btn btn-ghost" onClick={openHistory} title="Ctrl+R">
+            История
+          </button>
+        )}
+        {onAskAgent && (
+          <button
+            className="btn btn-ghost"
+            onClick={askAgent}
+            title="Отправить выделение (или последние строки буфера) AI-агенту"
+          >
+            Спросить агента
+          </button>
+        )}
+        {container && onExitContainer && (
+          <button className="btn btn-ghost" onClick={onExitContainer}>
+            Системный shell
+          </button>
+        )}
         <button
           className="btn btn-ghost"
+          title="Переустановить SSH-подключение (применить новые группы и права)"
           onClick={() => {
-            setSessionKey((k) => k + 1);
-            setStatus('connecting');
+            const ws = wsRef.current;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              // Мягкий перезапуск: сервер закроет SSH и откроет новый shell,
+              // буфер терминала сохраняется.
+              setStatus('connecting');
+              ws.send(JSON.stringify({ type: 'restart' }));
+            } else {
+              // WS мёртв (сессия завершена/ошибка) — полный ремаунт терминала.
+              setSessionKey((k) => k + 1);
+              setStatus('connecting');
+            }
           }}
         >
-          Перезапустить
+          Обновить сессию
         </button>
       </div>
       <div className="terminal-container" ref={containerRef} />
+      {historyOpen && !container && (
+        <HistoryPalette profileId={profile.id} onPick={pickHistory} onClose={closeHistory} />
+      )}
     </div>
   );
 }

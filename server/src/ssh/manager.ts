@@ -9,6 +9,9 @@ interface Connection {
 }
 
 const connections = new Map<string, Connection>();
+// In-flight connect() promises, so parallel getClient() calls share one
+// connection attempt instead of racing into two clients.
+const pending = new Map<string, Promise<Connection>>();
 
 function connKey(profileId: string): string {
   return profileId;
@@ -38,16 +41,25 @@ export async function getClient(profile: Profile): Promise<Client> {
     return existing.client;
   }
 
+  let promise = pending.get(key);
+  if (!promise) {
+    promise = connect(key, profile).finally(() => {
+      if (pending.get(key) === promise) {
+        pending.delete(key);
+      }
+    });
+    pending.set(key, promise);
+  }
+  return (await promise).client;
+}
+
+function connect(key: string, profile: Profile): Promise<Connection> {
   const client = new Client();
   const conn: Connection = { client, profileId: profile.id, sftpPromise: null };
-  connections.set(key, conn);
 
-  await new Promise<void>((resolve, reject) => {
-    client.once('ready', () => resolve());
-    client.once('error', (err) => reject(new Error(`SSH error: ${err.message}`)));
-    client.connect(connectOptions(profile));
-  });
-
+  // Handlers are attached before connect(): on failure the client is closed
+  // and never lands in `connections`; on success `close` drops the cached
+  // entry so the next call reconnects (existing auto-reconnect behaviour).
   client.on('close', () => {
     if (connections.get(key) === conn) {
       connections.delete(key);
@@ -57,7 +69,21 @@ export async function getClient(profile: Profile): Promise<Client> {
     // The close event follows; just clean up quietly.
   });
 
-  return client;
+  return new Promise<Connection>((resolve, reject) => {
+    client.once('ready', () => {
+      connections.set(key, conn);
+      resolve(conn);
+    });
+    client.once('error', (err) => {
+      try {
+        client.end();
+      } catch {
+        /* noop */
+      }
+      reject(new Error(`SSH error: ${err.message}`));
+    });
+    client.connect(connectOptions(profile));
+  });
 }
 
 export async function exec(
@@ -128,29 +154,44 @@ export function execStream(
   command: string,
   onChunk: (chunk: string, isStderr: boolean) => void,
 ): ExecStreamHandle {
+  let channel: ClientChannel | null = null;
+  let closed = false;
   const handle: ExecStreamHandle = {
     code: Promise.resolve(null),
-    close: () => undefined,
+    close: () => {
+      closed = true;
+      if (channel) {
+        try {
+          channel.close();
+        } catch {
+          /* noop */
+        }
+      }
+    },
   };
 
   getClient(profile)
     .then((client) => {
-      client.exec(command, (err, channel) => {
+      client.exec(command, (err, ch) => {
         if (err) {
           onChunk(`SSH exec error: ${err.message}\n`, true);
           return;
         }
-        handle.close = () => {
+        // close() may have been called while exec() was in flight; kill the
+        // channel right away instead of leaking the remote process.
+        if (closed) {
           try {
-            channel.close();
+            ch.close();
           } catch {
             /* noop */
           }
-        };
+          return;
+        }
+        channel = ch;
         channel.on('data', (d: Buffer) => onChunk(d.toString(), false));
         channel.stderr.on('data', (d: Buffer) => onChunk(d.toString(), true));
         handle.code = new Promise<number | null>((resolve) => {
-          channel.on('close', (exitCode: number | null) => resolve(exitCode));
+          ch.on('close', (exitCode: number | null) => resolve(exitCode));
         });
         channel.on('error', () => {
           /* handled by close */
@@ -186,7 +227,7 @@ export async function openShell(
         resolve({
           channel,
           write: (data) => channel.write(data),
-          resize: (c, r) => channel.setWindow(r, c, r, c),
+          resize: (c, r) => channel.setWindow(r, c, 0, 0),
           destroy: () => {
             try {
               channel.close();
@@ -227,6 +268,25 @@ export async function withSftp<T>(
 ): Promise<T> {
   const sf = await getSftp(profile);
   return fn(sf);
+}
+
+/**
+ * Open a raw exec channel: the caller reads stdout via 'data', writes to
+ * stdin, collects `channel.stderr` and gets the exit code from 'close'.
+ * Used for streaming tar archives (download-dir / upload-dir). The caller
+ * owns the channel and must close it on abort.
+ */
+export async function execRawChannel(profile: Profile, command: string): Promise<ClientChannel> {
+  const client = await getClient(profile);
+  return new Promise<ClientChannel>((resolve, reject) => {
+    client.exec(command, (err, channel) => {
+      if (err) {
+        reject(new Error(`SSH exec error: ${err.message}`));
+        return;
+      }
+      resolve(channel);
+    });
+  });
 }
 
 export function closeProfileConnection(profileId: string): void {

@@ -10,7 +10,8 @@ const CODE_EXECUTION = /\b(eval|source|system\s*\(|exec\s*\(|popen\s*\()/;
 const BLOCKED_WORDS = new Set([
   'rm', 'mv', 'cp', 'dd', 'mkfs', 'mke2fs', 'mkswap', 'mkfs.ext4', 'mkfs.xfs',
   'reboot', 'shutdown', 'halt', 'poweroff', 'init', 'kill', 'pkill', 'killall',
-  'chmod', 'chown', 'chgrp', 'touch', 'mkdir', 'rmdir', 'ln', 'install', 'tee',
+  'chmod', 'chown', 'chgrp', 'chattr', 'setfacl', 'touch', 'mkdir', 'rmdir',
+  'ln', 'install', 'tee', 'unlink', 'wipefs', 'fdformat',
   'truncate', 'shred', 'systemctl', 'service', 'apt', 'apt-get', 'dpkg', 'yum',
   'dnf', 'pacman', 'snap', 'flatpak', 'brew', 'pip', 'pip3', 'pipx', 'npm',
   'yarn', 'pnpm', 'bun', 'npx', 'sudo', 'su', 'python', 'python2', 'python3',
@@ -22,6 +23,12 @@ const BLOCKED_WORDS = new Set([
   'base64', 'openssl', 'ssh-keygen', 'sshd', 'ufw', 'iptables', 'nft', 'setenforce',
   'swapoff', 'swapon', 'kubeadm', 'kubectl', 'helm', 'systemd-run', 'loginctl',
 ]);
+
+// find(1) flags that turn a read-only search into mutation/arbitrary exec.
+const BLOCKED_FLAGS = new Set(['-delete', '-exec', '-execdir', '-ok', '-okdir']);
+
+// Token prefixes catch tool families with many names: mkfs.*, xfs_* etc.
+const BLOCKED_PREFIXES = ['mkfs.', 'xfs_', 'e2fs', 'ntfs'];
 
 export interface GuardResult {
   ok: boolean;
@@ -50,6 +57,14 @@ export function checkReadOnlyCommand(command: string): GuardResult {
   const found = tokens.find((t) => BLOCKED_WORDS.has(t));
   if (found) {
     return { ok: false, reason: `Command '${found}' is not allowed in read-only mode` };
+  }
+  const flag = tokens.find((t) => BLOCKED_FLAGS.has(t));
+  if (flag) {
+    return { ok: false, reason: `Flag '${flag}' is not allowed in read-only mode` };
+  }
+  const prefixed = tokens.find((t) => BLOCKED_PREFIXES.some((p) => t.startsWith(p)));
+  if (prefixed) {
+    return { ok: false, reason: `Command '${prefixed}' is not allowed in read-only mode` };
   }
   return { ok: true };
 }

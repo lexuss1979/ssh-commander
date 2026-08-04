@@ -32,6 +32,7 @@ export function hasSession(token: string): boolean {
 
 export function isRateLimited(ip: string): boolean {
   const now = Date.now();
+  pruneLoginAttempts(now);
   const entry = loginAttempts.get(ip);
   if (!entry || entry.resetAt <= now) {
     loginAttempts.set(ip, { count: 1, resetAt: now + 15 * 60 * 1000 });
@@ -39,6 +40,18 @@ export function isRateLimited(ip: string): boolean {
   }
   entry.count += 1;
   return entry.count > 10;
+}
+
+/** A successful login clears the failure counter for this IP. */
+export function resetLoginAttempts(ip: string): void {
+  loginAttempts.delete(ip);
+}
+
+// Drop expired entries so the map does not grow with one-off IPs.
+function pruneLoginAttempts(now: number): void {
+  for (const [ip, entry] of loginAttempts) {
+    if (entry.resetAt <= now) loginAttempts.delete(ip);
+  }
 }
 
 export function readCookie(header: string | undefined, name: string): string {

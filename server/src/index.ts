@@ -12,6 +12,8 @@ import { keysRouter } from './routes/keys.js';
 import { filesRouter } from './routes/files.js';
 import { dockerRouter } from './routes/docker.js';
 import { aiRouter } from './routes/ai.js';
+import { metricsRouter } from './routes/metrics.js';
+import { terminalRouter } from './routes/terminal.js';
 import { requireProfile } from './profiles.js';
 import { attachTerminal } from './ws/terminal.js';
 import { handleAgentWs } from './ws/agent.js';
@@ -32,6 +34,8 @@ app.use('/api/keys', requireAuth, keysRouter);
 app.use('/api/files', requireAuth, filesRouter);
 app.use('/api/docker', requireAuth, dockerRouter);
 app.use('/api/ai', requireAuth, aiRouter);
+app.use('/api/metrics', requireAuth, metricsRouter);
+app.use('/api/terminal', requireAuth, terminalRouter);
 
 // SPA static files (built web app).
 if (fs.existsSync(config.webDist)) {
@@ -102,7 +106,8 @@ server.on('upgrade', (req, socket, head) => {
     if (url.pathname === '/ws/terminal') {
       const cols = Number(url.searchParams.get('cols')) || 80;
       const rows = Number(url.searchParams.get('rows')) || 24;
-      attachTerminal(ws, profile, cols, rows);
+      const container = url.searchParams.get('container') || undefined;
+      attachTerminal(ws, profile, cols, rows, container);
     } else {
       const dialogueId = url.searchParams.get('dialogueId') ?? undefined;
       handleAgentWs(ws, profile, dialogueId);

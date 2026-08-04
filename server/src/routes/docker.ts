@@ -1,12 +1,21 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { requireProfile } from '../profiles.js';
+import { assertSafePath } from '../util/path.js';
 import {
+  composeDown,
+  composePs,
+  composeUp,
   containerAction,
+  containerStats,
+  detectCompose,
+  dockerExec,
   inspect,
   listContainers,
   listImages,
   listNetworks,
   listVolumes,
+  prune,
   pullImage,
   removeImage,
   removeNetwork,
@@ -72,11 +81,17 @@ dockerRouter.post('/containers', async (req, res) => {
 });
 
 dockerRouter.get('/containers/:id/logs', async (req, res) => {
-  const profile = requireProfile(profileId(req));
-  const tail = Math.max(1, Number(req.query.tail ?? 200));
+  let profile;
+  try {
+    profile = requireProfile(profileId(req));
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+    return;
+  }
+  const tailNum = Number(req.query.tail ?? 200);
+  const tail = Number.isFinite(tailNum) ? Math.max(1, Math.floor(tailNum)) : 200;
   const follow = req.query.stream === '1' || req.query.follow === '1';
   if (!follow) {
-    const { dockerExec } = await import('../services/docker.js');
     try {
       const result = await dockerExec(profile, ['logs', '--tail', String(tail), req.params.id], {
         timeoutMs: 30000,
@@ -171,4 +186,72 @@ dockerRouter.post('/networks/:name/remove', async (req, res) => {
     res.status(400).json({ error: (err as Error).message });
   }
 });
+
+dockerRouter.get('/stats', async (req, res) => {
+  try {
+    res.json(await containerStats(requireProfile(profileId(req))));
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+const pruneSchema = z.object({
+  profileId: z.string().min(1),
+  target: z.enum(['containers', 'images', 'volumes', 'system']),
+});
+
+dockerRouter.post('/prune', async (req, res) => {
+  try {
+    const parsed = pruneSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Некорректный target очистки' });
+      return;
+    }
+    const output = await prune(requireProfile(parsed.data.profileId), parsed.data.target);
+    res.json({ ok: true, output });
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+dockerRouter.get('/compose/status', async (req, res) => {
+  try {
+    const info = await detectCompose(requireProfile(profileId(req)));
+    res.json({ available: info !== null, kind: info?.kind ?? null });
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+dockerRouter.get('/compose/ps', async (req, res) => {
+  try {
+    const path = assertSafePath(String(req.query.path ?? ''));
+    res.json(await composePs(requireProfile(profileId(req)), path));
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+const composeActionSchema = z.object({
+  profileId: z.string().min(1),
+  path: z.string().min(1),
+});
+
+for (const action of ['up', 'down'] as const) {
+  dockerRouter.post(`/compose/${action}`, async (req, res) => {
+    try {
+      const parsed = composeActionSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: 'Укажите profileId и path проекта' });
+        return;
+      }
+      const path = assertSafePath(parsed.data.path);
+      const profile = requireProfile(parsed.data.profileId);
+      const output = action === 'up' ? await composeUp(profile, path) : await composeDown(profile, path);
+      res.json({ ok: true, output });
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+}
 

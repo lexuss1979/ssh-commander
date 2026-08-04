@@ -256,38 +256,157 @@ button {
   color: var(--muted);
 }
 
-.nav {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1;
-}
-
-.nav-item {
-  text-align: left;
-  background: transparent;
-  color: var(--text);
-  border: 1px solid transparent;
-  border-radius: 6px;
-  padding: 9px 12px;
-  font-size: 14px;
-  cursor: pointer;
-}
-
-.nav-item:hover {
-  background: var(--bg-input);
-}
-
-.nav-item.active {
-  background: var(--bg-input);
-  border-color: var(--accent);
-  color: var(--accent-hover);
-  font-weight: 600;
-}
-
 .sidebar-footer {
   display: flex;
   flex-direction: column;
+  margin-top: auto;
+}
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Верхний таббар разделов */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+  min-height: 44px;
+}
+
+.topbar-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.topbar-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  padding: 12px 14px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.topbar-tab:hover {
+  color: var(--text);
+}
+
+.topbar-tab.active {
+  color: var(--accent-hover);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.topbar-agent-toggle {
+  margin-left: auto;
+}
+
+.topbar-agent-toggle.active {
+  background: var(--active-bg);
+  color: var(--accent-hover);
+}
+
+.app-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+
+/* Keep-alive вкладки: скрываются, но не размонтируются */
+.tab-page {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tab-page.hidden {
+  display: none;
+}
+
+/* Правая панель агента */
+.agent-resizer {
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+}
+
+.agent-resizer:hover,
+body.resizing-agent .agent-resizer {
+  background: var(--accent-soft-border);
+}
+
+body.resizing-agent {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.agent-panel {
+  flex-shrink: 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.agent-panel.collapsed {
+  display: none;
+}
+
+.agent-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+
+/* В узкой панели список диалогов укладывается над чатом, а не сбоку */
+.agent-panel .agent-page {
+  flex-direction: column;
+}
+
+.agent-panel .agent-sidebar {
+  width: auto;
+  flex-shrink: 0;
+  max-height: 170px;
+  border-right: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.agent-panel .agent-messages {
+  padding: 12px;
+}
+
+/* На узких окнах панель агента — оверлей поверх контента */
+@media (max-width: 900px) {
+  .agent-resizer {
+    display: none;
+  }
+
+  .agent-panel:not(.collapsed) {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 60;
+    max-width: 85vw;
+    box-shadow: -8px 0 24px var(--shadow-lg);
+  }
 }
 
 .main {
@@ -1182,4 +1301,428 @@ button {
   resize: vertical;
   min-height: 42px;
   max-height: 160px;
+}
+
+/* Overview (мониторинг сервера) */
+.overview-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  scrollbar-gutter: stable;
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.overview-card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  min-width: 0;
+}
+
+.overview-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 10px;
+}
+
+.overview-big {
+  font-size: 26px;
+  font-weight: 600;
+}
+
+.overview-sub {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-input);
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.meter-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.meter-fill.warn {
+  background: var(--warn);
+}
+
+.meter-fill.danger {
+  background: var(--danger);
+}
+
+.disk-row {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.disk-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.disk-row-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.disk-row-head .mount {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.disk-row-head .sizes {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.overview-processes {
+  margin-top: 16px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.overview-processes .overview-card-title {
+  padding: 14px 16px 0;
+}
+
+.overview-processes .data-table td.proc-command {
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+/* === Эпики 2–3: поиск по файлам и перенос директорий (FilesPage) === */
+.search-panel {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.search-input {
+  flex: 1;
+  min-width: 120px;
+  width: auto;
+}
+
+.search-mode {
+  display: flex;
+}
+
+.search-mode .btn {
+  border-radius: 0;
+}
+
+.search-mode .btn:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.search-mode .btn:last-child {
+  border-radius: 0 6px 6px 0;
+  margin-left: -1px;
+}
+
+.search-mode .btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft-border);
+  color: var(--accent-hover);
+  position: relative;
+}
+
+.search-results {
+  max-height: 280px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-raised);
+}
+
+.search-results ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.search-results li {
+  padding: 2px 0;
+}
+
+.search-result-path {
+  word-break: break-all;
+}
+
+.search-result-line {
+  color: var(--muted);
+}
+
+.search-preview {
+  margin: 2px 0 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* === Эпик 5: docker stats / exec / prune / compose === */
+
+/* Чип «контейнер: …» в шапке терминала при контейнерной сессии. */
+.container-chip {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  background: var(--bg-input);
+  border: 1px solid var(--accent, var(--border));
+  color: var(--accent, var(--text));
+  white-space: nowrap;
+}
+
+/* Toast для информационных сообщений (результат prune/compose) —
+   без красной рамки ошибочного варианта. */
+.toast.toast-notice {
+  border-color: var(--border);
+}
+
+/* Секция Compose на DockerPage. */
+.compose-section {
+  padding: 12px 16px;
+}
+
+.compose-unavailable {
+  padding: 14px 16px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--bg-raised);
+}
+
+.compose-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.compose-controls .compose-path {
+  flex: 1;
+  min-width: 260px;
+}
+
+/* === Редактор файлов (CodeMirror, эпик 6) === */
+.code-editor-wrap {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-code);
+}
+
+.code-editor-wrap .cm-editor {
+  height: 55vh;
+  font-size: 13px;
+}
+
+.code-editor-wrap .cm-scroller {
+  overflow: auto;
+  scrollbar-gutter: stable;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+/* Светлая тема: вписываем стандартные цвета CM в палитру приложения */
+[data-theme='light'] .code-editor-wrap .cm-editor {
+  background: var(--bg-input);
+  color: var(--text);
+}
+
+[data-theme='light'] .code-editor-wrap .cm-gutters {
+  background: var(--bg-input);
+  color: var(--muted);
+  border-right: 1px solid var(--border);
+}
+
+[data-theme='light'] .code-editor-wrap .cm-activeLine {
+  background: var(--bg-hover);
+}
+
+[data-theme='light'] .code-editor-wrap .cm-activeLineGutter {
+  background: var(--bg-hover);
+}
+
+.code-editor-wrap .cm-editor.cm-focused {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* Панель поиска (Ctrl+F) поверх редактора */
+.code-editor-wrap .cm-panels {
+  background: var(--bg-raised);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+
+.code-editor-wrap .cm-panel.cm-search input,
+.code-editor-wrap .cm-panel.cm-search button {
+  font-size: 12px;
+}
+
+.code-editor-wrap .cm-searchMatch {
+  background: rgba(229, 192, 123, 0.35);
+  outline: 1px solid var(--warn-soft-border);
+}
+
+.code-editor-wrap .cm-searchMatch-selected {
+  background: rgba(229, 192, 123, 0.6);
+}
+
+/* Эпик 4: палитра истории команд терминала (поверх xterm, в стиле модалок). */
+.terminal-page {
+  position: relative;
+}
+
+.history-palette {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 560px;
+  max-width: calc(100% - 32px);
+  max-height: 60%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 48px var(--shadow-lg);
+  z-index: 50;
+  overflow: hidden;
+}
+
+.history-filter {
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--bg-input);
+  padding: 12px 16px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text);
+  outline: none;
+}
+
+.history-list {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+}
+
+.history-item {
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  padding: 7px 10px;
+  font-family: Menlo, Consolas, "JetBrains Mono", monospace;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-item.selected {
+  background: var(--bg-input);
+  outline: 1px solid var(--accent);
+}
+
+.history-empty {
+  padding: 18px 16px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* === Эпик 8: режим планирования агента (planMode) === */
+
+/* Переключатель «План» в тулбаре чата агента. */
+.plan-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.plan-toggle input {
+  accent-color: var(--accent);
+  cursor: pointer;
+  margin: 0;
+}
+
+/* Карточка «План готов» под списком сообщений. */
+.plan-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 12px 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent, var(--border));
+  border-radius: 8px;
+  background: var(--bg-raised);
+}
+
+.plan-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.plan-card-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.plan-card-hint {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.plan-card .btn {
+  flex-shrink: 0;
 }

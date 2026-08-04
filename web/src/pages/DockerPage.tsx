@@ -6,16 +6,34 @@ import { Modal } from '../components/Modal';
 interface Props {
   profile: Profile;
   showError: (msg: string) => void;
+  visible: boolean;
+  onExecContainer: (id: string, name: string) => void;
 }
 
-type Section = 'containers' | 'images' | 'volumes' | 'networks';
+type Section = 'containers' | 'images' | 'volumes' | 'networks' | 'compose';
 type ContainerAction = 'start' | 'stop' | 'restart' | 'rm';
+type PruneTarget = 'containers' | 'images' | 'volumes' | 'system';
+
+interface ComposeStatus {
+  available: boolean;
+  kind: 'v2' | 'v1' | null;
+}
+
+// Лимит буфера логов в LogsModal (~500 КБ текста).
+const LOG_BUFFER_LIMIT = 500 * 1024;
+
+const PRUNE_LABELS: Record<PruneTarget, string> = {
+  containers: 'все остановленные контейнеры',
+  images: 'все dangling-образы (без тега и не используемые)',
+  volumes: 'все неиспользуемые volumes — данные будут потеряны',
+  system: 'остановленные контейнеры, неиспользуемые сети, dangling-образы и кэш сборки',
+};
 
 function q(profileId: string): string {
   return `?profileId=${encodeURIComponent(profileId)}`;
 }
 
-export function DockerPage({ profile, showError }: Props) {
+export function DockerPage({ profile, showError, visible, onExecContainer }: Props) {
   const [section, setSection] = useState<Section>('containers');
   const [containers, setContainers] = useState<DockerEntity[]>([]);
   const [images, setImages] = useState<DockerEntity[]>([]);
@@ -25,9 +43,70 @@ export function DockerPage({ profile, showError }: Props) {
   const [runOpen, setRunOpen] = useState(false);
   const [pullImageName, setPullImageName] = useState('');
   const [logsTarget, setLogsTarget] = useState<{ id: string; name: string } | null>(null);
+  const [stats, setStats] = useState<Record<string, DockerEntity>>({});
+  const [statsFailed, setStatsFailed] = useState(false);
+  const [notice, setNotice] = useState('');
+  const noticeTimer = useRef<number | null>(null);
+  const [composeStatus, setComposeStatus] = useState<ComposeStatus | null>(null);
+  const [composePath, setComposePath] = useState(() => {
+    try {
+      return localStorage.getItem(`sc-compose-path:${profile.id}`) ?? '';
+    } catch {
+      return '';
+    }
+  });
+  const [composeServices, setComposeServices] = useState<DockerEntity[]>([]);
+  const [composeBusy, setComposeBusy] = useState(false);
+
+  const showNotice = useCallback((msg: string) => {
+    setNotice(msg);
+    if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(''), 8000);
+  }, []);
+
+  const saveComposePath = (p: string) => {
+    setComposePath(p);
+    try {
+      localStorage.setItem(`sc-compose-path:${profile.id}`, p);
+    } catch {
+      /* localStorage может быть недоступен */
+    }
+  };
+
+  const loadComposePs = useCallback(
+    async (path: string) => {
+      if (!path.trim()) return;
+      setLoading(true);
+      try {
+        setComposeServices(
+          await api<DockerEntity[]>(
+            `/api/docker/compose/ps${q(profile.id)}&path=${encodeURIComponent(path.trim())}`,
+          ),
+        );
+      } catch (err) {
+        setComposeServices([]);
+        showError((err as Error).message);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [profile.id, showError],
+  );
 
   const load = useCallback(
     async (sec: Section = section) => {
+      if (sec === 'compose') {
+        try {
+          const status = composeStatus ?? (await api<ComposeStatus>(`/api/docker/compose/status${q(profile.id)}`));
+          setComposeStatus(status);
+          if (status.available && status.kind === 'v2' && composePath.trim()) {
+            await loadComposePs(composePath);
+          }
+        } catch (err) {
+          showError((err as Error).message);
+        }
+        return;
+      }
       setLoading(true);
       try {
         if (sec === 'containers') {
@@ -45,13 +124,87 @@ export function DockerPage({ profile, showError }: Props) {
         setLoading(false);
       }
     },
-    [profile.id, section, showError],
+    [profile.id, section, showError, composeStatus, composePath, loadComposePs],
   );
 
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile.id, section]);
+
+  // Снимок docker stats polling'ом 3 с; только когда вкладка видима и
+  // активна секция контейнеров. Если stats недоступен — отключаемся тихо.
+  const statsActive = visible && section === 'containers' && !statsFailed;
+  useEffect(() => {
+    if (!statsActive) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const rows = await api<DockerEntity[]>(`/api/docker/stats${q(profile.id)}`);
+        if (cancelled) return;
+        const map: Record<string, DockerEntity> = {};
+        for (const row of rows) {
+          if (row.Name) map[String(row.Name)] = row;
+          if (row.Container) map[String(row.Container)] = row;
+        }
+        setStats(map);
+      } catch {
+        if (!cancelled) setStatsFailed(true);
+      }
+    };
+    void tick();
+    const timer = window.setInterval(() => void tick(), 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [statsActive, profile.id]);
+
+  const runPrune = async (target: PruneTarget) => {
+    if (!window.confirm(`Очистка удалит: ${PRUNE_LABELS[target]}.\nПродолжить?`)) return;
+    try {
+      const res = await api<{ output: string }>('/api/docker/prune', {
+        method: 'POST',
+        body: JSON.stringify({ profileId: profile.id, target }),
+      });
+      const reclaimed = /Total reclaimed space:\s*(.+)/.exec(res.output)?.[1];
+      showNotice(reclaimed ? `Освобождено: ${reclaimed}` : res.output || 'Очистка завершена');
+      void load();
+    } catch (err) {
+      showError((err as Error).message);
+    }
+  };
+
+  const reconnect = async () => {
+    try {
+      await api(`/api/profiles/${encodeURIComponent(profile.id)}/reconnect`, { method: 'POST' });
+      void load();
+    } catch (err) {
+      showError((err as Error).message);
+    }
+  };
+
+  const composeAction = async (action: 'up' | 'down') => {
+    const path = composePath.trim();
+    if (!path) {
+      showError('Укажите путь к проекту (каталог с compose-файлом)');
+      return;
+    }
+    if (action === 'down' && !window.confirm(`Остановить проект и удалить его контейнеры/сети (compose down) в ${path}?`)) return;
+    setComposeBusy(true);
+    try {
+      await api(`/api/docker/compose/${action}`, {
+        method: 'POST',
+        body: JSON.stringify({ profileId: profile.id, path }),
+      });
+      showNotice(action === 'up' ? 'Проект запущен (up -d)' : 'Проект остановлен (down)');
+      await loadComposePs(path);
+    } catch (err) {
+      showError((err as Error).message);
+    } finally {
+      setComposeBusy(false);
+    }
+  };
 
   const containerAction = async (id: string, action: ContainerAction, name: string) => {
     const labels: Record<ContainerAction, string> = {
@@ -125,6 +278,7 @@ export function DockerPage({ profile, showError }: Props) {
               ['images', 'Образы'],
               ['volumes', 'Volumes'],
               ['networks', 'Сети'],
+              ['compose', 'Compose'],
             ] as Array<[Section, string]>
           ).map(([id, label]) => (
             <button
@@ -140,6 +294,18 @@ export function DockerPage({ profile, showError }: Props) {
           {section === 'containers' && (
             <button className="btn" onClick={() => setRunOpen(true)}>+ Запустить</button>
           )}
+          {(section === 'containers' || section === 'images' || section === 'volumes') && (
+            <button className="btn" onClick={() => void runPrune(section)}>Очистка</button>
+          )}
+          {section !== 'compose' && (
+            <button
+              className="btn btn-ghost"
+              title="System prune: контейнеры, сети, dangling-образы, кэш сборки"
+              onClick={() => void runPrune('system')}
+            >
+              Полная очистка
+            </button>
+          )}
           {section === 'images' && (
             <label className="inline-form">
               <input
@@ -152,6 +318,13 @@ export function DockerPage({ profile, showError }: Props) {
             </label>
           )}
           <button className="btn btn-ghost" onClick={() => void load()}>Обновить</button>
+          <button
+            className="btn btn-ghost"
+            title="Переустановить SSH-подключение (применить новые группы и права)"
+            onClick={() => void reconnect()}
+          >
+            Переподключить
+          </button>
         </div>
       </div>
 
@@ -164,17 +337,20 @@ export function DockerPage({ profile, showError }: Props) {
                 <th>Имя</th>
                 <th>Образ</th>
                 <th>Статус</th>
+                <th>CPU %</th>
+                <th>MEM</th>
                 <th>Порты</th>
                 <th className="col-actions">Действия</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={6} className="muted">Загрузка…</td></tr>}
-              {!loading && containers.length === 0 && <tr><td colSpan={6} className="muted">Контейнеров нет</td></tr>}
+              {loading && <tr><td colSpan={8} className="muted">Загрузка…</td></tr>}
+              {!loading && containers.length === 0 && <tr><td colSpan={8} className="muted">Контейнеров нет</td></tr>}
               {containers.map((c) => {
                 const id = String(c.ID ?? c.ContainerID ?? '');
                 const name = String(c.Names ?? id).replace(/^\//, '');
                 const running = String(c.State ?? '').toLowerCase() === 'running' || /^Up /.test(String(c.Status ?? ''));
+                const st = stats[name] ?? stats[shortId(id)];
                 return (
                   <tr key={id}>
                     <td className="mono">{shortId(id)}</td>
@@ -183,12 +359,15 @@ export function DockerPage({ profile, showError }: Props) {
                     <td>
                       <span className={`status-chip ${running ? 'ok' : 'muted'}`}>{String(c.Status ?? '')}</span>
                     </td>
+                    <td className="mono">{st ? String(st.CPUPerc ?? '—') : '—'}</td>
+                    <td className="mono">{st ? String(st.MemUsage ?? st.MemPerc ?? '—') : '—'}</td>
                     <td className="mono">{String(c.Ports ?? '')}</td>
                     <td className="col-actions">
                       <div className="row-actions">
                         <button className="btn btn-mini" onClick={() => void containerAction(id, 'start', name)} title="Старт">▶</button>
                         <button className="btn btn-mini" onClick={() => void containerAction(id, 'stop', name)} title="Стоп">■</button>
                         <button className="btn btn-mini" onClick={() => void containerAction(id, 'restart', name)} title="Рестарт">↻</button>
+                        <button className="btn btn-mini" onClick={() => onExecContainer(id, name)} title="Терминал в контейнере">❯</button>
                         <button className="btn btn-mini" onClick={() => setLogsTarget({ id, name })} title="Логи">📄</button>
                         <button className="btn btn-mini btn-danger" onClick={() => void containerAction(id, 'rm', name)} title="Удалить">✕</button>
                       </div>
@@ -288,6 +467,85 @@ export function DockerPage({ profile, showError }: Props) {
             </tbody>
           </table>
         )}
+
+        {section === 'compose' && (
+          <div className="compose-section">
+            {!composeStatus && <div className="muted">Проверка доступности Docker Compose…</div>}
+            {composeStatus && !composeStatus.available && (
+              <div className="compose-unavailable">
+                Docker Compose не найден на сервере — секция недоступна.
+              </div>
+            )}
+            {composeStatus?.available && composeStatus.kind === 'v1' && (
+              <div className="compose-unavailable">
+                Найден только docker-compose (v1). Поддерживается Compose v2
+                (плагин <code>docker compose</code>) — обновите Docker на сервере.
+              </div>
+            )}
+            {composeStatus?.available && composeStatus.kind === 'v2' && (
+              <>
+                <div className="compose-controls">
+                  <input
+                    className="compose-path"
+                    value={composePath}
+                    onChange={(e) => saveComposePath(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && void loadComposePs(composePath)}
+                    placeholder="/srv/my-project — каталог с compose-файлом"
+                  />
+                  <button
+                    className="btn btn-primary"
+                    disabled={composeBusy || !composePath.trim()}
+                    onClick={() => void composeAction('up')}
+                  >
+                    Запустить (up -d)
+                  </button>
+                  <button
+                    className="btn"
+                    disabled={composeBusy || !composePath.trim()}
+                    onClick={() => void composeAction('down')}
+                  >
+                    Остановить (down)
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    disabled={!composePath.trim()}
+                    onClick={() => void loadComposePs(composePath)}
+                  >
+                    Обновить
+                  </button>
+                </div>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Сервис</th>
+                      <th>Имя</th>
+                      <th>State</th>
+                      <th>Статус</th>
+                      <th>Порты</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loading && <tr><td colSpan={5} className="muted">Загрузка…</td></tr>}
+                    {!loading && composeServices.length === 0 && (
+                      <tr><td colSpan={5} className="muted">
+                        {composePath.trim() ? 'Сервисов нет (проект не запущен?)' : 'Укажите путь к проекту'}
+                      </td></tr>
+                    )}
+                    {composeServices.map((s) => (
+                      <tr key={String(s.Name ?? s.ID ?? '')}>
+                        <td>{String(s.Service ?? '')}</td>
+                        <td className="mono">{String(s.Name ?? '')}</td>
+                        <td>{String(s.State ?? '')}</td>
+                        <td>{String(s.Status ?? '')}</td>
+                        <td className="mono">{String(s.Ports ?? '')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {runOpen && (
@@ -306,10 +564,13 @@ export function DockerPage({ profile, showError }: Props) {
         <LogsModal
           profile={profile}
           target={logsTarget}
+          visible={visible}
           onClose={() => setLogsTarget(null)}
           showError={showError}
         />
       )}
+
+      {notice && <div className="toast toast-notice">{notice}</div>}
     </div>
   );
 }
@@ -387,9 +648,10 @@ function RunContainerModal({ profile, onClose, onDone, showError }: {
   );
 }
 
-function LogsModal({ profile, target, onClose, showError }: {
+function LogsModal({ profile, target, visible, onClose, showError }: {
   profile: Profile;
   target: { id: string; name: string };
+  visible: boolean;
   onClose: () => void;
   showError: (msg: string) => void;
 }) {
@@ -398,18 +660,28 @@ function LogsModal({ profile, target, onClose, showError }: {
   const preRef = useRef<HTMLPreElement>(null);
 
   const append = (text: string) => {
-    if (preRef.current) {
-      preRef.current.textContent += text;
-      preRef.current.scrollTop = preRef.current.scrollHeight;
+    const el = preRef.current;
+    if (!el) return;
+    let next = (el.textContent ?? '') + text;
+    // Буфер не растёт бесконечно: держим хвост ~500 КБ, отрезая по границе строки.
+    if (next.length > LOG_BUFFER_LIMIT) {
+      const nl = next.indexOf('\n', next.length - LOG_BUFFER_LIMIT);
+      next = next.slice(nl >= 0 ? nl + 1 : next.length - LOG_BUFFER_LIMIT);
     }
+    el.textContent = next;
+    el.scrollTop = el.scrollHeight;
   };
 
   useEffect(() => {
+    // Вкладка скрыта (keep-alive) — стрим логов на паузе, возобновится при возврате.
+    if (!visible) return;
     const params = new URLSearchParams({ profileId: profile.id, tail: '200' });
     if (follow) params.set('stream', '1');
     let cancelled = false;
     const controller = new AbortController();
     setStarted(true);
+    // Перезапуск стрима (смена follow, возврат на вкладку) — начинаем с чистого буфера.
+    if (preRef.current) preRef.current.textContent = '';
 
     void fetch(`/api/docker/containers/${encodeURIComponent(target.id)}/logs?${params}`, {
       credentials: 'same-origin',
@@ -444,7 +716,7 @@ function LogsModal({ profile, target, onClose, showError }: {
       cancelled = true;
       controller.abort();
     };
-  }, [profile.id, target.id, follow, showError]);
+  }, [profile.id, target.id, follow, visible, showError]);
 
   return (
     <Modal title={`Логи: ${target.name}`} onClose={onClose} wide>
@@ -462,4 +734,3 @@ function LogsModal({ profile, target, onClose, showError }: {
     </Modal>
   );
 }
-

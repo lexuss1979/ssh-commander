@@ -8,6 +8,16 @@ profilesRouter.get('/', (_req, res) => {
   res.json(listProfiles());
 });
 
+/**
+ * Closes the cached SSH connection for the profile. The next request
+ * (terminal, SFTP, docker, agent) opens a fresh connection, so changes
+ * applied at login time — e.g. new group memberships — take effect.
+ */
+profilesRouter.post('/:id/reconnect', (req, res) => {
+  closeProfileConnection(req.params.id);
+  res.json({ ok: true });
+});
+
 profilesRouter.post('/', (req, res) => {
   try {
     res.status(201).json(createProfile(req.body));
@@ -34,4 +44,3 @@ profilesRouter.delete('/:id', (req, res) => {
     res.status(400).json({ error: (err as Error).message });
   }
 });
-

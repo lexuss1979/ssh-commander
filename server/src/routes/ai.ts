@@ -10,23 +10,31 @@ import {
 export const aiRouter = Router();
 
 aiRouter.get('/dialogues', (req, res) => {
-  const profileId = String(req.query.profileId ?? '');
-  if (!profileId) {
-    res.status(400).json({ error: 'profileId is required' });
-    return;
+  try {
+    const profileId = String(req.query.profileId ?? '');
+    if (!profileId) {
+      res.status(400).json({ error: 'profileId is required' });
+      return;
+    }
+    requireProfile(profileId);
+    res.json({ dialogues: listDialogues(profileId) });
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
   }
-  requireProfile(profileId);
-  res.json({ dialogues: listDialogues(profileId) });
 });
 
 aiRouter.post('/dialogues', (req, res) => {
-  const profileId = String(req.body?.profileId ?? '');
-  if (!profileId) {
-    res.status(400).json({ error: 'profileId is required' });
-    return;
+  try {
+    const profileId = String(req.body?.profileId ?? '');
+    if (!profileId) {
+      res.status(400).json({ error: 'profileId is required' });
+      return;
+    }
+    requireProfile(profileId);
+    res.json({ dialogue: createDialogue(profileId) });
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
   }
-  requireProfile(profileId);
-  res.json({ dialogue: createDialogue(profileId) });
 });
 
 aiRouter.get('/dialogues/:id', (req, res) => {

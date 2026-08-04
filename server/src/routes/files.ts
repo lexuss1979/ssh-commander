@@ -1,5 +1,7 @@
 import express, { Router } from 'express';
-import { exec, getSftp, withSftp } from '../ssh/manager.js';
+import { Readable } from 'node:stream';
+import { z } from 'zod';
+import { exec, execRawChannel, getSftp, withSftp } from '../ssh/manager.js';
 import {
   chmod as sftpChmod,
   mkdir as sftpMkdir,
@@ -12,6 +14,8 @@ import {
   writeFile as sftpWriteFile,
 } from '../ssh/sftp.js';
 import { requireProfile } from '../profiles.js';
+import { searchFiles, SEARCH_MAX_RESULTS } from '../services/file-search.js';
+import { buildTarDownloadCommand, buildTarUploadCommand, tarError } from '../services/transfer.js';
 import { assertSafePath, basename, dirname, joinRemotePath, modeToString } from '../util/path.js';
 import { shq } from '../util/shell.js';
 import type { FileEntry } from '../types.js';
@@ -224,6 +228,129 @@ filesRouter.post(
       }),
     );
     res.json({ ok: true, path: target });
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+  },
+);
+
+const searchQuerySchema = z.object({
+  profileId: z.string().min(1, 'Укажите профиль'),
+  path: z.string().min(1).default('/'),
+  pattern: z.string().min(1, 'Укажите строку поиска'),
+  mode: z.enum(['name', 'content']).default('name'),
+  glob: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(SEARCH_MAX_RESULTS).default(200),
+});
+
+filesRouter.get('/search', async (req, res) => {
+  try {
+    const parsed = searchQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Некорректные параметры поиска' });
+      return;
+    }
+    const q = parsed.data;
+    const profile = requireProfile(q.profileId);
+    const results = await searchFiles(profile, {
+      path: normalizePath(q.path),
+      pattern: q.pattern,
+      mode: q.mode,
+      glob: q.glob,
+      limit: q.limit,
+    });
+    res.json({ results });
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+filesRouter.get('/download-dir', async (req, res) => {
+  try {
+    const profile = requireProfile(profileId(req));
+    const path = assertSafePath(normalizePath(String(req.query.path ?? '')));
+    // Проверка ДО начала отдачи тела: путь существует и это директория.
+    const stat = await withSftp(profile, (sftp) => sftpStat(sftp, path));
+    if ((stat.mode & 0o170000) !== 0o040000) {
+      res.status(400).json({ error: 'Это не директория' });
+      return;
+    }
+    res.setHeader('Content-Type', 'application/gzip');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(basename(path))}.tar.gz"`,
+    );
+    const channel = await execRawChannel(profile, buildTarDownloadCommand(path));
+    let stderr = '';
+    channel.stderr.on('data', (d: Buffer) => {
+      if (stderr.length < 65536) stderr += d.toString();
+    });
+    // end: false — ответ завершаем сами по 'close': если tar упал до первого
+    // байта stdout (например, tar не установлен), успеваем отдать JSON-ошибку.
+    channel.pipe(res, { end: false });
+    channel.on('close', (code: number | null) => {
+      if (code !== 0 && !res.headersSent) {
+        res.status(500).json({ error: tarError(stderr, code) });
+        return;
+      }
+      res.end();
+    });
+    channel.on('error', () => {
+      if (!res.headersSent) res.status(500).json({ error: 'Ошибка SSH-канала' });
+      else res.end();
+    });
+    req.on('close', () => {
+      try {
+        channel.close();
+      } catch {
+        /* noop */
+      }
+    });
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+filesRouter.post(
+  '/upload-dir',
+  express.raw({ type: '*/*', limit: '200mb' }),
+  async (req, res) => {
+  try {
+    const profile = requireProfile(profileId(req));
+    const path = assertSafePath(normalizePath(String(req.query.path ?? '')));
+    const body = req.body as Buffer | undefined;
+    if (!Buffer.isBuffer(body) || body.length === 0) {
+      res.status(400).json({ error: 'Тело запроса должно быть архивом tar.gz' });
+      return;
+    }
+    const stat = await withSftp(profile, (sftp) => sftpStat(sftp, path));
+    if ((stat.mode & 0o170000) !== 0o040000) {
+      res.status(400).json({ error: 'Целевой путь — не директория' });
+      return;
+    }
+    const channel = await execRawChannel(profile, buildTarUploadCommand(path));
+    let stderr = '';
+    channel.stderr.on('data', (d: Buffer) => {
+      if (stderr.length < 65536) stderr += d.toString();
+    });
+    req.on('close', () => {
+      try {
+        channel.close();
+      } catch {
+        /* noop */
+      }
+    });
+    const code = await new Promise<number | null>((resolve) => {
+      channel.on('close', (c: number | null) => resolve(c));
+      channel.on('error', () => resolve(null));
+      // Readable.pipe даёт backpressure и закрывает stdin по окончании тела.
+      Readable.from(body).pipe(channel);
+    });
+    if (code !== 0) {
+      res.status(500).json({ error: tarError(stderr, code) });
+      return;
+    }
+    res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
   }

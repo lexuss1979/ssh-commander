@@ -57,6 +57,10 @@ const dialogueSchema = z.object({
 const storeSchema = z.object({ dialogues: z.array(dialogueSchema).default([]) });
 
 let cache: Dialogue[] | null = null;
+// Set when the store file failed to parse: the broken file is moved aside
+// (kept for recovery) and persist() refuses to run until a restart with a
+// fixed file, so a corrupt store is never silently overwritten.
+let corrupt = false;
 
 function storePath(): string {
   return path.join(config.dataDir, 'ai-dialogues.json');
@@ -67,14 +71,29 @@ function load(): Dialogue[] {
     try {
       const raw = fs.readFileSync(storePath(), 'utf8');
       cache = storeSchema.parse(JSON.parse(raw)).dialogues;
-    } catch {
-      cache = [];
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        cache = [];
+      } else {
+        const backup = `${storePath()}.corrupt-${Date.now()}`;
+        try {
+          fs.renameSync(storePath(), backup);
+        } catch {
+          /* keep the original in place */
+        }
+        console.warn(`dialogues store is unreadable, moved to ${backup}; refusing to overwrite it until restart:`, err);
+        corrupt = true;
+        cache = [];
+      }
     }
   }
   return cache;
 }
 
 function persist(list: Dialogue[]): void {
+  if (corrupt) {
+    throw new Error('dialogues store was corrupt at startup; refusing to overwrite it — fix or remove the *.corrupt-* file and restart');
+  }
   fs.mkdirSync(config.dataDir, { recursive: true });
   const tmp = `${storePath()}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify({ dialogues: list }, null, 2));
