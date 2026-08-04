@@ -6,6 +6,9 @@ import { Markdown } from '../components/Markdown';
 interface Props {
   profile: Profile;
   showError: (msg: string) => void;
+  /** Одноразовый запрос «Спросить агента» из терминала (расходуется эффектом ниже). */
+  agentRequest?: { id: number; text: string } | null;
+  onAgentRequestConsumed?: () => void;
 }
 
 interface ToolCallView {
@@ -27,7 +30,7 @@ interface ChatMessageView {
 
 let nextId = 1;
 
-export function AgentPage({ profile, showError }: Props) {
+export function AgentPage({ profile, showError, agentRequest, onAgentRequestConsumed }: Props) {
   const [messages, setMessages] = useState<ChatMessageView[]>([]);
   const [input, setInput] = useState('');
   const [connected, setConnected] = useState(false);
@@ -35,8 +38,20 @@ export function AgentPage({ profile, showError }: Props) {
   const [dialogues, setDialogues] = useState<DialogueSummary[]>([]);
   const [activeDialogueId, setActiveDialogueId] = useState('');
   const [loading, setLoading] = useState(true);
+  // Режим планирования: сообщения уходят с planMode=true, агент сначала
+  // составляет план без инструментов и ждёт approve_plan.
+  const [planMode, setPlanMode] = useState(false);
+  const [planReady, setPlanReady] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // Актуальные значения для эффекта «Спросить агента» — без добавления в deps,
+  // чтобы смена состояния не расходовала запрос повторно.
+  const connectedRef = useRef(connected);
+  connectedRef.current = connected;
+  const runningRef = useRef(running);
+  runningRef.current = running;
+  const activeDialogueIdRef = useRef(activeDialogueId);
+  activeDialogueIdRef.current = activeDialogueId;
 
   const pushAssistantToken = useCallback((token: string) => {
     setMessages((prev) => {
@@ -140,6 +155,7 @@ export function AgentPage({ profile, showError }: Props) {
     setActiveDialogueId('');
     setMessages([]);
     setRunning(false);
+    setPlanReady(false);
     setLoading(true);
     void (async () => {
       try {
@@ -176,6 +192,7 @@ export function AgentPage({ profile, showError }: Props) {
     let cancelled = false;
     setMessages([]);
     setRunning(false);
+    setPlanReady(false);
 
     void api<{ dialogue: Dialogue }>(`/api/ai/dialogues/${encodeURIComponent(activeDialogueId)}`)
       .then(({ dialogue }) => {
@@ -229,6 +246,10 @@ export function AgentPage({ profile, showError }: Props) {
         }
         case 'running':
           setRunning(true);
+          setPlanReady(false);
+          break;
+        case 'plan_ready':
+          setPlanReady(true);
           break;
         case 'done': {
           setRunning(false);
@@ -265,12 +286,34 @@ export function AgentPage({ profile, showError }: Props) {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages]);
 
+  // Запрос «Спросить агента» из терминала: если WS готов и агент свободен —
+  // отправляем сообщение сразу; иначе (нет соединения или идёт выполнение)
+  // подставляем текст в поле ввода, чтобы пользователь отправил сам и текущий
+  // поток не сломался. Запрос одноразовый: id запоминаем, App сбрасывает стейт.
+  const lastHandledRequestRef = useRef(0);
+  useEffect(() => {
+    if (!agentRequest || agentRequest.id === lastHandledRequestRef.current) return;
+    lastHandledRequestRef.current = agentRequest.id;
+    const content = `Объясни этот вывод терминала:\n\`\`\`\n${agentRequest.text}\n\`\`\``;
+    if (connectedRef.current && !runningRef.current && activeDialogueIdRef.current) {
+      setMessages((prev) => [...prev, { id: nextId++, role: 'user', content }]);
+      setPlanReady(false);
+      sendWs({ type: 'message', content, planMode });
+    } else {
+      setInput(content);
+    }
+    onAgentRequestConsumed?.();
+  }, [agentRequest, planMode, sendWs, onAgentRequestConsumed]);
+
   const send = () => {
     const content = input.trim();
     if (!content || !connected || running || !activeDialogueId) return;
     setMessages((prev) => [...prev, { id: nextId++, role: 'user', content }]);
     setInput('');
-    sendWs({ type: 'message', content });
+    setPlanReady(false);
+    // Правки к ожидающему плану — это тоже message с planMode=true:
+    // сервер пересоставит план. Выход из режима — снять переключатель «План».
+    sendWs({ type: 'message', content, planMode });
   };
 
   return (
@@ -321,6 +364,17 @@ export function AgentPage({ profile, showError }: Props) {
           <span className="status-text">
             {running ? 'выполняется…' : connected ? 'готов' : 'нет соединения'}
           </span>
+          <label
+            className="plan-toggle"
+            title="Сначала составить пошаговый план и показать его на подтверждение — ничего не выполняя"
+          >
+            <input
+              type="checkbox"
+              checked={planMode}
+              onChange={(e) => setPlanMode(e.target.checked)}
+            />
+            План
+          </label>
           {running && (
             <button className="btn btn-danger" onClick={() => sendWs({ type: 'stop' })}>
               Стоп
@@ -363,6 +417,10 @@ export function AgentPage({ profile, showError }: Props) {
             </div>
           ))}
         </div>
+
+        {planReady && !running && (
+          <PlanCard onExecute={() => sendWs({ type: 'approve_plan' })} />
+        )}
 
         <div className="agent-input">
           <textarea
@@ -456,6 +514,8 @@ function ToolCard({ tool, onApprove, onReject }: {
   onReject: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // Решение отправлено на сервер — блокируем кнопки до смены статуса карточки.
+  const [decided, setDecided] = useState(false);
   const labels: Record<string, string> = {
     exec: 'Выполнить команду',
     exec_readonly: 'Команда чтения',
@@ -478,10 +538,28 @@ function ToolCard({ tool, onApprove, onReject }: {
         <span className="tool-name" title={name}>{name}</span>
         {tool.status === 'pending' ? (
           <>
-            <span className="tool-status">ждёт подтверждения</span>
+            <span className="tool-status">{decided ? 'отправлено…' : 'ждёт подтверждения'}</span>
             <span className="tool-actions-mini">
-              <button className="btn btn-mini btn-primary" onClick={onApprove}>Подтвердить</button>
-              <button className="btn btn-mini btn-danger" onClick={onReject}>Отклонить</button>
+              <button
+                className="btn btn-mini btn-primary"
+                disabled={decided}
+                onClick={() => {
+                  setDecided(true);
+                  onApprove();
+                }}
+              >
+                Подтвердить
+              </button>
+              <button
+                className="btn btn-mini btn-danger"
+                disabled={decided}
+                onClick={() => {
+                  setDecided(true);
+                  onReject();
+                }}
+              >
+                Отклонить
+              </button>
             </span>
           </>
         ) : (
@@ -512,6 +590,34 @@ function ToolCard({ tool, onApprove, onReject }: {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Карточка «План готов»: запускает исполнение плана (approve_plan).
+// Отказ от плана — просто написать правки в чат: план будет пересоставлен.
+function PlanCard({ onExecute }: { onExecute: () => void }) {
+  // Решение отправлено на сервер — блокируем кнопку (паттерн как в ToolCard).
+  const [sent, setSent] = useState(false);
+  return (
+    <div className="plan-card">
+      <div className="plan-card-info">
+        <span className="plan-card-title">План готов</span>
+        <span className="plan-card-hint muted">
+          Нажмите «Выполнить», чтобы агент приступил к плану (действия записи по-прежнему потребуют
+          подтверждения), или напишите правки — план будет пересоставлен.
+        </span>
+      </div>
+      <button
+        className="btn btn-primary"
+        disabled={sent}
+        onClick={() => {
+          setSent(true);
+          onExecute();
+        }}
+      >
+        {sent ? 'Запущено…' : 'Выполнить'}
+      </button>
     </div>
   );
 }

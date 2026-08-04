@@ -2,6 +2,7 @@ import type { WebSocket } from 'ws';
 import { config } from '../config.js';
 import { streamChatCompletion, type ChatMessage, type ToolCall } from './client.js';
 import { sanitizeMessages } from './messages.js';
+import { buildPlanRequestMessages, toolsForRequest } from './plan.js';
 import { toolDefs, READ_ONLY_TOOLS } from './tools.js';
 import { checkReadOnlyCommand } from './guard.js';
 import { exec, withSftp } from '../ssh/manager.js';
@@ -11,7 +12,7 @@ import {
   writeFile as sftpWriteFile,
   stat as sftpStat,
 } from '../ssh/sftp.js';
-import type { Profile } from '../types.js';
+import type { ExecResult, Profile } from '../types.js';
 import {
   inspect,
   listContainers,
@@ -48,6 +49,8 @@ export class AgentSession {
   private running = false;
   private wsClosed = false;
   private loopAbort: AbortController | null = null;
+  // План составлен и ждёт approve_plan (или правок обычным message с planMode=true).
+  private planPending = false;
 
   constructor(
     private profile: Profile,
@@ -80,6 +83,10 @@ export class AgentSession {
     return this.running;
   }
 
+  get isPlanPending(): boolean {
+    return this.planPending;
+  }
+
   notifyDialogue(): void {
     this.send({ type: 'dialogue', id: this.dialogueId });
   }
@@ -89,7 +96,23 @@ export class AgentSession {
       case 'message': {
         const content = String(data.content ?? '').trim();
         if (content && !this.running) {
-          void this.runLoop(content);
+          if (data.planMode === true) {
+            // Режим планирования (или правки к ожидающему плану): составляем план заново.
+            void this.runPlan(content);
+          } else {
+            // planMode=false/отсутствует — выход из режима планирования.
+            this.planPending = false;
+            void this.runLoop(content);
+          }
+        }
+        break;
+      }
+      case 'approve_plan': {
+        // План подтверждён: продолжаем тот же диалог обычным циклом с инструментами
+        // (per-tool approve для мутирующих инструментов сохраняется).
+        if (this.planPending && !this.running) {
+          this.planPending = false;
+          void this.runLoop('План подтверждён пользователем. Приступай к его выполнению по шагам.');
         }
         break;
       }
@@ -120,6 +143,7 @@ export class AgentSession {
 
   stop(): void {
     this.stopRequested = true;
+    this.planPending = false;
     this.loopAbort?.abort();
     for (const pending of this.pending.values()) {
       pending.resolve('aborted');
@@ -150,6 +174,60 @@ export class AgentSession {
     return new Promise((resolve) => {
       this.pending.set(callId, { callId, resolve });
     });
+  }
+
+  /**
+   * Шаг планирования: один запрос к API БЕЗ инструментов (ключ `tools`
+   * отсутствует в теле запроса) с дополненным системным промптом. Ответ
+   * модели — план — стримится как обычное assistant-сообщение (token/message),
+   * затем отправляется `plan_ready`, и сессия ждёт `approve_plan` или правок.
+   * Шаг планирования НЕ расходует лимит AI_MAX_STEPS: счётчик шагов ведётся
+   * только в runLoop (исполнение с инструментами).
+   */
+  private async runPlan(userContent: string): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+    this.stopRequested = false;
+    this.planPending = false;
+    this.messages = sanitizeMessages(this.messages);
+    this.messages.push({ role: 'user', content: userContent });
+    this.save();
+    this.send({ type: 'running', steps: config.ai.maxSteps });
+
+    try {
+      this.loopAbort = new AbortController();
+      let assistant: ChatMessage;
+      try {
+        assistant = await streamChatCompletion({
+          messages: buildPlanRequestMessages(sanitizeMessages(this.messages)),
+          tools: toolsForRequest(true),
+          signal: this.loopAbort.signal,
+          onToken: (token) => this.send({ type: 'token', content: token }),
+        });
+      } catch (err) {
+        if (this.stopRequested) {
+          this.send({ type: 'done', stopped: true, note: 'Агент остановлен пользователем.' });
+        } else {
+          this.send({ type: 'error', message: String((err as Error).message ?? err) });
+        }
+        return;
+      }
+
+      // Инструменты в запросе не передавались; если модель всё же вернула
+      // tool_calls — игнорируем их и сохраняем только текст плана.
+      this.send({ type: 'message', role: 'assistant', content: assistant.content ?? '' });
+      this.messages.push({ role: 'assistant', content: assistant.content });
+      this.save();
+      this.planPending = true;
+      this.send({ type: 'plan_ready' });
+      this.send({ type: 'done' });
+    } catch (err) {
+      this.send({ type: 'error', message: String((err as Error).message ?? err) });
+    } finally {
+      this.save();
+      this.running = false;
+      this.loopAbort = null;
+    }
   }
 
   private async runLoop(userContent: string): Promise<void> {
@@ -295,6 +373,20 @@ export class AgentSession {
     };
   }
 
+  /**
+   * Format a shell exec result for the model: the exit code is always
+   * included, and a non-zero code is reported as an error so the model
+   * sees the failure instead of a silent "ok".
+   */
+  private execToolResult(result: ExecResult): { status: 'ok' | 'error'; output: string; truncated: boolean } {
+    const body = [result.stdout, result.stderr].filter(Boolean).join('\n') || '(пустой вывод)';
+    const output = `${body}\n(exit code: ${result.code ?? 'unknown'})`;
+    if (result.code !== 0) {
+      return { status: 'error', ...this.truncate(`Команда завершилась с ошибкой.\n${output}`) };
+    }
+    return { status: 'ok', ...this.truncate(output) };
+  }
+
   private async runTool(
     name: string,
     args: Record<string, unknown>,
@@ -308,20 +400,12 @@ export class AgentSession {
             return { status: 'error', output: `Отклонено: ${guard.reason}`, truncated: false };
           }
           const result = await exec(this.profile, command, { timeoutMs: 60000 });
-          const output = [result.stdout, result.stderr].filter(Boolean).join('\n') || '(пустой вывод)';
-          return {
-            status: 'ok',
-            ...this.truncate(output),
-          };
+          return this.execToolResult(result);
         }
         case 'exec': {
           const command = String(args.command ?? '');
           const result = await exec(this.profile, command, { timeoutMs: 120000 });
-          const output = [result.stdout, result.stderr].filter(Boolean).join('\n') || '(пустой вывод)';
-          return {
-            status: 'ok',
-            ...this.truncate(output),
-          };
+          return this.execToolResult(result);
         }
         case 'read_file': {
           const path = String(args.path ?? '');

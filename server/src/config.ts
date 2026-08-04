@@ -33,6 +33,11 @@ function int(name: string, def: number): number {
   return Number.isFinite(v) && v > 0 ? Math.floor(v) : def;
 }
 
+function float(name: string, def: number): number {
+  const v = Number(process.env[name]);
+  return Number.isFinite(v) ? v : def;
+}
+
 export const config = {
   host: process.env.APP_HOST || '0.0.0.0',
   port: int('APP_PORT', 8080),
@@ -46,7 +51,7 @@ export const config = {
     apiKey: process.env.AI_API_KEY || '',
     model: process.env.AI_MODEL || 'gpt-4.1-mini',
     maxSteps: int('AI_MAX_STEPS', 30),
-    temperature: Number(process.env.AI_TEMPERATURE ?? 0.2),
+    temperature: float('AI_TEMPERATURE', 0.2),
   },
 };
 

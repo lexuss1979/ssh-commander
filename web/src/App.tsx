@@ -1,27 +1,51 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ApiError, api } from './api';
+import { ApiError, api, setUnauthorizedHandler } from './api';
 import type { Profile } from './types';
 import { LoginPage } from './pages/LoginPage';
+import { OverviewPage } from './pages/OverviewPage';
 import { TerminalPage } from './pages/TerminalPage';
 import { FilesPage } from './pages/FilesPage';
 import { DockerPage } from './pages/DockerPage';
 import { AgentPage } from './pages/AgentPage';
 import { ProfileModal } from './components/ProfileModal';
 
-type Tab = 'terminal' | 'files' | 'docker' | 'agent';
+type Tab = 'overview' | 'terminal' | 'files' | 'docker';
 
 const TABS: Array<{ id: Tab; label: string }> = [
+  { id: 'overview', label: 'Обзор' },
   { id: 'terminal', label: 'Терминал' },
   { id: 'files', label: 'Файлы' },
   { id: 'docker', label: 'Docker' },
-  { id: 'agent', label: 'AI-агент' },
 ];
+
+const AGENT_MIN_WIDTH = 360;
+const AGENT_MAX_WIDTH = 720;
+const AGENT_DEFAULT_WIDTH = 420;
+
+function loadAgentWidth(): number {
+  try {
+    const v = Number(localStorage.getItem('sc-agent-width'));
+    if (v >= AGENT_MIN_WIDTH && v <= AGENT_MAX_WIDTH) return v;
+  } catch {
+    /* localStorage может быть недоступен */
+  }
+  return AGENT_DEFAULT_WIDTH;
+}
+
+function loadAgentOpen(): boolean {
+  try {
+    return localStorage.getItem('sc-agent-open') !== '0';
+  } catch {
+    return true;
+  }
+}
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [activeProfileId, setActiveProfileId] = useState('');
-  const [tab, setTab] = useState<Tab>('terminal');
+  const [tab, setTab] = useState<Tab>('overview');
+  const [terminalContainer, setTerminalContainer] = useState<{ id: string; name: string } | null>(null);
   const [showProfiles, setShowProfiles] = useState(false);
   const [toast, setToast] = useState('');
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -31,6 +55,11 @@ export default function App() {
       return 'dark';
     }
   });
+  const [agentWidth, setAgentWidth] = useState<number>(loadAgentWidth);
+  const [agentOpen, setAgentOpen] = useState<boolean>(loadAgentOpen);
+  // Одноразовый запрос из терминала («Спросить агента»): AgentPage расходует
+  // его и сбрасывает через onAgentRequestConsumed.
+  const [agentRequest, setAgentRequest] = useState<{ id: number; text: string } | null>(null);
   const toastTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -41,6 +70,15 @@ export default function App() {
       /* localStorage может быть недоступен */
     }
   }, [theme]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('sc-agent-width', String(agentWidth));
+      localStorage.setItem('sc-agent-open', agentOpen ? '1' : '0');
+    } catch {
+      /* localStorage может быть недоступен */
+    }
+  }, [agentWidth, agentOpen]);
 
   const showError = useCallback((msg: string) => {
     setToast(msg);
@@ -58,6 +96,12 @@ export default function App() {
     applyProfiles(list);
   }, [applyProfiles]);
 
+  // Истёкшая сессия (401 на любом запросе) — возвращаемся на страницу логина.
+  useEffect(() => {
+    setUnauthorizedHandler(() => setAuthed(false));
+    return () => setUnauthorizedHandler(null);
+  }, []);
+
   useEffect(() => {
     api<Profile[]>('/api/profiles')
       .then((list) => {
@@ -65,13 +109,15 @@ export default function App() {
         setAuthed(true);
       })
       .catch((err) => {
-        if (err instanceof ApiError && err.status === 401) {
-          setAuthed(false);
-        } else {
-          setAuthed(false);
+        // На логин уводит только 401 (сработает и глобальный обработчик);
+        // прочие ошибки (сеть, 5xx) — показываем toast, пользователь остаётся.
+        if (!(err instanceof ApiError && err.status === 401)) {
+          showError((err as Error).message);
+          return;
         }
+        setAuthed(false);
       });
-  }, [applyProfiles]);
+  }, [applyProfiles, showError]);
 
   const handleLogin = useCallback(
     async (password: string) => {
@@ -87,15 +133,53 @@ export default function App() {
     setAuthed(false);
     setProfiles([]);
     setActiveProfileId('');
-    setTab('terminal');
+    setTab('overview');
   }, []);
 
+  // Кнопка «Спросить агента» в терминале: раскрывает панель и передаёт контекст.
+  const handleAskAgent = useCallback((text: string) => {
+    setAgentOpen(true);
+    setAgentRequest({ id: Date.now(), text });
+  }, []);
+
+  // Drag-разделитель панели агента: ширина считается от правого края окна.
+  const onResizerMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = agentWidth;
+      const onMove = (ev: MouseEvent) => {
+        const next = startWidth + (startX - ev.clientX);
+        setAgentWidth(Math.min(AGENT_MAX_WIDTH, Math.max(AGENT_MIN_WIDTH, next)));
+      };
+      const onUp = () => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        document.body.classList.remove('resizing-agent');
+      };
+      document.body.classList.add('resizing-agent');
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    },
+    [agentWidth],
+  );
+
   if (authed === null) {
-    return <div className="boot">Загрузка…</div>;
+    return (
+      <>
+        <div className="boot">Загрузка…</div>
+        {toast && <div className="toast">{toast}</div>}
+      </>
+    );
   }
 
   if (!authed) {
-    return <LoginPage onLogin={handleLogin} showError={showError} />;
+    return (
+      <>
+        <LoginPage onLogin={handleLogin} showError={showError} />
+        {toast && <div className="toast">{toast}</div>}
+      </>
+    );
   }
 
   const activeProfile = profiles.find((p) => p.id === activeProfileId);
@@ -124,18 +208,6 @@ export default function App() {
           </button>
         </div>
 
-        <nav className="nav">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              className={`nav-item ${tab === t.id ? 'active' : ''}`}
-              onClick={() => setTab(t.id)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
-
         <div className="sidebar-footer">
           <button
             className="btn btn-ghost btn-block"
@@ -149,20 +221,109 @@ export default function App() {
         </div>
       </aside>
 
-      <main className="main">
-        {!activeProfile && (
-          <div className="empty-state">
-            <p>Сначала добавьте SSH-сервер.</p>
-            <button className="btn btn-primary" onClick={() => setShowProfiles(true)}>
-              Добавить сервер
+      <div className="app-main">
+        <div className="topbar">
+          <nav className="topbar-tabs">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                className={`topbar-tab ${tab === t.id ? 'active' : ''}`}
+                onClick={() => setTab(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </nav>
+          {activeProfile && (
+            <button
+              className={`btn btn-ghost topbar-agent-toggle ${agentOpen ? 'active' : ''}`}
+              onClick={() => setAgentOpen((o) => !o)}
+              title={agentOpen ? 'Скрыть панель агента' : 'Показать панель агента'}
+            >
+              AI-агент
             </button>
-          </div>
-        )}
-        {activeProfile && tab === 'terminal' && <TerminalPage profile={activeProfile} showError={showError} />}
-        {activeProfile && tab === 'files' && <FilesPage profile={activeProfile} showError={showError} />}
-        {activeProfile && tab === 'docker' && <DockerPage profile={activeProfile} showError={showError} />}
-        {activeProfile && tab === 'agent' && <AgentPage profile={activeProfile} showError={showError} />}
-      </main>
+          )}
+        </div>
+
+        <div className="app-body">
+          <main className="main">
+            {!activeProfile && (
+              <div className="empty-state">
+                <p>Сначала добавьте SSH-сервер.</p>
+                <button className="btn btn-primary" onClick={() => setShowProfiles(true)}>
+                  Добавить сервер
+                </button>
+              </div>
+            )}
+            {activeProfile && (
+              <>
+                <div className={`tab-page ${tab === 'overview' ? '' : 'hidden'}`}>
+                  <OverviewPage
+                    key={activeProfile.id}
+                    profile={activeProfile}
+                    showError={showError}
+                    visible={tab === 'overview'}
+                  />
+                </div>
+                <div className={`tab-page ${tab === 'terminal' ? '' : 'hidden'}`}>
+                  <TerminalPage
+                    key={activeProfile.id}
+                    profile={activeProfile}
+                    showError={showError}
+                    visible={tab === 'terminal'}
+                    container={terminalContainer}
+                    onExitContainer={() => setTerminalContainer(null)}
+                    onAskAgent={handleAskAgent}
+                  />
+                </div>
+                <div className={`tab-page ${tab === 'files' ? '' : 'hidden'}`}>
+                  <FilesPage key={activeProfile.id} profile={activeProfile} showError={showError} />
+                </div>
+                <div className={`tab-page ${tab === 'docker' ? '' : 'hidden'}`}>
+                  <DockerPage
+                    key={activeProfile.id}
+                    profile={activeProfile}
+                    showError={showError}
+                    visible={tab === 'docker'}
+                    onExecContainer={(id, name) => {
+                      setTerminalContainer({ id, name });
+                      setTab('terminal');
+                    }}
+                  />
+                </div>
+              </>
+            )}
+          </main>
+
+          {activeProfile && agentOpen && (
+            <div className="agent-resizer" onMouseDown={onResizerMouseDown} />
+          )}
+          {activeProfile && (
+            <aside
+              className={`agent-panel ${agentOpen ? '' : 'collapsed'}`}
+              style={agentOpen ? { width: agentWidth } : undefined}
+            >
+              <div className="agent-panel-head">
+                <span className="sidebar-label">AI-агент</span>
+                <button
+                  className="btn btn-ghost btn-mini"
+                  onClick={() => setAgentOpen(false)}
+                  title="Свернуть панель"
+                >
+                  »
+                </button>
+              </div>
+              <AgentPage
+                key={activeProfile.id}
+                profile={activeProfile}
+                showError={showError}
+                agentRequest={agentRequest}
+                onAgentRequestConsumed={() => setAgentRequest(null)}
+              />
+            </aside>
+          )}
+        </div>
+      </div>
 
       {showProfiles && (
         <ProfileModal

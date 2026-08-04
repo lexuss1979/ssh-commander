@@ -1,15 +1,27 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { downloadUrl, formatDate, formatSize, api, uploadFile } from '../api';
-import type { FileEntry, FileListResponse, Profile } from '../types';
+import { useCallback, useEffect, useRef, useState, lazy, Suspense } from 'react';
+import {
+  api,
+  downloadDirUrl,
+  downloadUrl,
+  formatDate,
+  formatSize,
+  searchFiles,
+  uploadDirArchive,
+  uploadFile,
+} from '../api';
+import type { FileEntry, FileListResponse, FileSearchResult, Profile } from '../types';
 import { Modal } from '../components/Modal';
+
+// Редактор с подсветкой грузится отдельным чанком, чтобы не раздувать основной бандл
+const CodeEditor = lazy(() => import('../components/CodeEditor'));
 
 interface Props {
   profile: Profile;
   showError: (msg: string) => void;
 }
 
-function fileQuery(profileId: string, path: string, extra?: Record<string, string>): string {
-  const params = new URLSearchParams({ profileId, path, ...extra });
+function fileQuery(profileId: string, path: string): string {
+  const params = new URLSearchParams({ profileId, path });
   return `/api/files/list?${params}`;
 }
 
@@ -22,6 +34,12 @@ export function FilesPage({ profile, showError }: Props) {
   const [editLoading, setEditLoading] = useState(false);
   const [promptState, setPromptState] = useState<{ title: string; value: string; action: 'mkdir' | 'rename' | 'chmod' | 'newfile'; target?: FileEntry } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const archiveInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingArchive, setUploadingArchive] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchMode, setSearchMode] = useState<'name' | 'content'>('name');
+  const [searching, setSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<FileSearchResult[] | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -41,6 +59,56 @@ export function FilesPage({ profile, showError }: Props) {
 
   const navigate = (p: string) => setPath(p);
 
+  const uploadArchive = async (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    setUploadingArchive(true);
+    try {
+      await uploadDirArchive(profile.id, path, file);
+    } catch (err) {
+      showError(`${file.name}: ${(err as Error).message}`);
+    } finally {
+      setUploadingArchive(false);
+      if (archiveInputRef.current) archiveInputRef.current.value = '';
+    }
+    void load();
+  };
+
+  const runSearch = async () => {
+    const pattern = searchQuery.trim();
+    if (!pattern) return;
+    setSearching(true);
+    try {
+      setSearchResults(await searchFiles(profile.id, path, pattern, searchMode));
+    } catch (err) {
+      setSearchResults(null);
+      showError((err as Error).message);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const openSearchResult = async (result: FileSearchResult) => {
+    const parent = result.path.replace(/\/[^/]*$/, '') || '/';
+    const name = result.path.split('/').pop() ?? result.path;
+    const openAsFile = () => {
+      navigate(parent);
+      void openEditor({ name, path: result.path, isDirectory: false, isSymlink: false, size: 0, mtime: 0, mode: '' });
+    };
+    if (searchMode === 'content') {
+      // совпадение по содержимому — это всегда файл
+      openAsFile();
+      return;
+    }
+    // по имени тип неизвестен: пробуем открыть как директорию, иначе — как файл
+    try {
+      await api<FileListResponse>(fileQuery(profile.id, result.path));
+      navigate(result.path);
+    } catch {
+      openAsFile();
+    }
+  };
+
   const upload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     for (const file of Array.from(files)) {
@@ -54,10 +122,13 @@ export function FilesPage({ profile, showError }: Props) {
   };
 
   const remove = async (entry: FileEntry) => {
-    const isDir = entry.isDirectory;
-    const recursive = isDir && window.confirm(`Удалить директорию ${entry.path} рекурсивно? Это необратимо.`);
-    if (!isDir && !window.confirm(`Удалить файл ${entry.path}?`)) return;
-    if (isDir && !recursive) return;
+    let recursive = false;
+    if (entry.isDirectory) {
+      recursive = window.confirm(`Удалить директорию ${entry.path} и всё содержимое (рекурсивно)? Это необратимо.`);
+      if (!recursive && !window.confirm(`Удалить директорию ${entry.path}, только если она пустая?`)) return;
+    } else if (!window.confirm(`Удалить файл ${entry.path}?`)) {
+      return;
+    }
     try {
       await api('/api/files/delete', {
         method: 'POST',
@@ -163,6 +234,21 @@ export function FilesPage({ profile, showError }: Props) {
             hidden
             onChange={(e) => void upload(e.target.files)}
           />
+          <button
+            className="btn"
+            disabled={uploadingArchive}
+            onClick={() => archiveInputRef.current?.click()}
+            title="Загрузить архив .tar.gz и распаковать в текущую директорию"
+          >
+            {uploadingArchive ? 'Распаковка…' : 'Загрузить архив'}
+          </button>
+          <input
+            ref={archiveInputRef}
+            type="file"
+            accept=".tar.gz,.tgz,application/gzip"
+            hidden
+            onChange={(e) => void uploadArchive(e.target.files)}
+          />
           <button className="btn" onClick={() => setPromptState({ title: 'Новая директория', value: '', action: 'mkdir' })}>
             + Папка
           </button>
@@ -172,6 +258,58 @@ export function FilesPage({ profile, showError }: Props) {
           <button className="btn btn-ghost" onClick={() => void load()}>Обновить</button>
         </div>
       </div>
+
+      <div className="search-panel">
+        <input
+          className="search-input"
+          placeholder={searchMode === 'name' ? 'Шаблон имени, напр. *.log (без * — точное имя)' : 'Текст внутри файлов'}
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && void runSearch()}
+        />
+        <div className="search-mode">
+          <button
+            className={`btn${searchMode === 'name' ? ' active' : ''}`}
+            onClick={() => setSearchMode('name')}
+          >
+            Имена
+          </button>
+          <button
+            className={`btn${searchMode === 'content' ? ' active' : ''}`}
+            onClick={() => setSearchMode('content')}
+          >
+            Содержимое
+          </button>
+        </div>
+        <button className="btn" disabled={searching || !searchQuery.trim()} onClick={() => void runSearch()}>
+          {searching ? 'Поиск…' : 'Найти'}
+        </button>
+        {searchResults !== null && !searching && (
+          <button className="btn btn-ghost" onClick={() => setSearchResults(null)}>Скрыть</button>
+        )}
+      </div>
+
+      {(searching || searchResults !== null) && (
+        <div className="search-results">
+          {searching ? (
+            <p className="muted">Идёт поиск…</p>
+          ) : searchResults !== null && searchResults.length === 0 ? (
+            <p className="muted">Ничего не найдено</p>
+          ) : (
+            <ul>
+              {(searchResults ?? []).map((r, i) => (
+                <li key={`${r.path}:${r.line ?? i}`}>
+                  <button className="link-cell" onClick={() => void openSearchResult(r)}>
+                    <span className="search-result-path">{r.path}</span>
+                    {r.line !== undefined && <span className="mono search-result-line">:{r.line}</span>}
+                  </button>
+                  {r.preview && <div className="search-preview mono">{r.preview}</div>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <div className="table-wrap">
         <table className="data-table">
@@ -212,6 +350,15 @@ export function FilesPage({ profile, showError }: Props) {
                 <td className="col-narrow mono">{entry.mode}</td>
                 <td className="col-narrow">
                   <div className="row-actions">
+                    {entry.isDirectory && (
+                      <a
+                        className="btn btn-mini"
+                        href={downloadDirUrl(profile.id, entry.path)}
+                        title="Скачать директорию архивом (.tar.gz)"
+                      >
+                        ⬇
+                      </a>
+                    )}
                     {!entry.isDirectory && (
                       <>
                         <a className="btn btn-mini" href={downloadUrl(profile.id, entry.path)}>⬇</a>
@@ -249,12 +396,13 @@ export function FilesPage({ profile, showError }: Props) {
             <p className="muted">Загрузка файла…</p>
           ) : (
             <>
-              <textarea
-                className="editor"
-                value={editContent}
-                onChange={(e) => setEditContent(e.target.value)}
-                spellCheck={false}
-              />
+              <Suspense fallback={<p className="muted">Загрузка редактора…</p>}>
+                <CodeEditor
+                  value={editContent}
+                  fileName={editTarget.name}
+                  onChange={setEditContent}
+                />
+              </Suspense>
               <div className="modal-actions">
                 <button className="btn btn-primary" onClick={() => void saveEdit()}>Сохранить</button>
                 <button className="btn" onClick={() => setEditTarget(null)}>Отмена</button>

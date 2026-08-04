@@ -27,6 +27,12 @@ export interface FileListResponse {
   entries: FileEntry[];
 }
 
+export interface FileSearchResult {
+  path: string;
+  line?: number;
+  preview?: string;
+}
+
 export interface DockerEntity {
   [key: string]: string | number | boolean | null | undefined;
 }

@@ -59,15 +59,33 @@ export async function streamChatCompletion(opts: StreamOptions): Promise<ChatMes
     stream: true,
   });
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${config.ai.apiKey}`,
-    },
-    body,
-    signal: opts.signal,
-  });
+  // Таймаут только на установление соединения и получение заголовков
+  // (первый байт ответа): после начала SSE-стрима он снимается, так как
+  // сам стриминг ответа может идти долго. Остановка пользователем
+  // (opts.signal) продолжает работать на всём протяжении запроса.
+  const connectTimeout = new AbortController();
+  const timer = setTimeout(
+    () => connectTimeout.abort(new Error('AI API не ответил за 120 секунд (таймаут ожидания ответа)')),
+    120_000,
+  );
+  const signal = opts.signal
+    ? AbortSignal.any([opts.signal, connectTimeout.signal])
+    : connectTimeout.signal;
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${config.ai.apiKey}`,
+      },
+      body,
+      signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok || !res.body) {
     const detail = await res.text().catch(() => '');

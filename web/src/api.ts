@@ -1,3 +1,5 @@
+import type { FileSearchResult } from './types';
+
 export class ApiError extends Error {
   status: number;
 
@@ -5,6 +7,14 @@ export class ApiError extends Error {
     super(message);
     this.status = status;
   }
+}
+
+// Глобальный обработчик 401: App подписывается, чтобы при истёкшей сессии
+// вернуть пользователя на страницу логина с любой страницы.
+let unauthorizedHandler: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  unauthorizedHandler = handler;
 }
 
 export async function api<T>(path: string, opts: RequestInit = {}): Promise<T> {
@@ -17,6 +27,7 @@ export async function api<T>(path: string, opts: RequestInit = {}): Promise<T> {
     },
   });
   if (!res.ok) {
+    if (res.status === 401) unauthorizedHandler?.();
     let message = res.statusText;
     try {
       const body = await res.json();
@@ -26,7 +37,9 @@ export async function api<T>(path: string, opts: RequestInit = {}): Promise<T> {
     }
     throw new ApiError(res.status, message);
   }
-  return res.json() as Promise<T>;
+  // 204 или успешный ответ с пустым телом — res.json() бросил бы SyntaxError.
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 export async function uploadFile(
@@ -43,6 +56,7 @@ export async function uploadFile(
     body: file,
   });
   if (!res.ok) {
+    if (res.status === 401) unauthorizedHandler?.();
     let message = res.statusText;
     try {
       const body = await res.json();
@@ -57,6 +71,81 @@ export async function uploadFile(
 export function downloadUrl(profileId: string, path: string): string {
   const params = new URLSearchParams({ profileId, path });
   return `/api/files/download?${params}`;
+}
+
+export interface ServerMetrics {
+  timestamp: number;
+  cpu: { percent: number | null; cores: number | null };
+  memory: {
+    totalBytes: number | null;
+    availableBytes: number | null;
+    usedBytes: number | null;
+    usedPercent: number | null;
+  };
+  disks: Array<{
+    filesystem: string;
+    mount: string;
+    totalBytes: number;
+    usedBytes: number;
+    availableBytes: number;
+    usedPercent: number | null;
+  }>;
+  uptimeSeconds: number | null;
+  loadAverage: [number, number, number] | null;
+  processes: Array<{
+    user: string;
+    pid: number;
+    cpuPercent: number | null;
+    memPercent: number | null;
+    command: string;
+  }>;
+}
+
+export function fetchMetrics(profileId: string): Promise<ServerMetrics> {
+  return api<ServerMetrics>(`/api/metrics?profileId=${encodeURIComponent(profileId)}`);
+}
+
+export async function fetchTerminalHistory(profileId: string, limit = 100): Promise<string[]> {
+  const params = new URLSearchParams({ profileId, limit: String(limit) });
+  const data = await api<{ commands: string[] }>(`/api/terminal/history?${params}`);
+  return data.commands;
+}
+
+export function downloadDirUrl(profileId: string, path: string): string {
+  const params = new URLSearchParams({ profileId, path });
+  return `/api/files/download-dir?${params}`;
+}
+
+export async function uploadDirArchive(profileId: string, path: string, file: Blob): Promise<void> {
+  const params = new URLSearchParams({ profileId, path });
+  const res = await fetch(`/api/files/upload-dir?${params}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/gzip' },
+    body: file,
+  });
+  if (!res.ok) {
+    if (res.status === 401) unauthorizedHandler?.();
+    let message = res.statusText;
+    try {
+      const body = await res.json();
+      message = body.error ?? message;
+    } catch {
+      /* keep statusText */
+    }
+    throw new ApiError(res.status, message);
+  }
+}
+
+export async function searchFiles(
+  profileId: string,
+  path: string,
+  pattern: string,
+  mode: 'name' | 'content',
+): Promise<FileSearchResult[]> {
+  const params = new URLSearchParams({ profileId, path, pattern, mode });
+  const data = await api<{ results: FileSearchResult[] }>(`/api/files/search?${params}`);
+  return data.results;
 }
 
 export function formatSize(bytes: number): string {

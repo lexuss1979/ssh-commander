@@ -34,6 +34,43 @@ describe('checkReadOnlyCommand', () => {
       'python3 -c "print(1)"',
       'tar -xzf x.tar',
       'echo x | tee /etc/hosts',
+      'unlink /tmp/x',
+      'chattr +i /etc/hosts',
+      'setfacl -m u:nobody:r /etc/hosts',
+      'wipefs -a /dev/sda',
+      'dd if=/dev/zero of=/dev/sda',
+      'shred -u /var/log/auth.log',
+      'useradd test',
+      'userdel test',
+      'usermod -aG sudo test',
+      'passwd root',
+      'crontab -e',
+      'iptables -L',
+      'mount /dev/sda1 /mnt',
+      'umount /mnt',
+    ]) {
+      expect(checkReadOnlyCommand(cmd).ok, cmd).toBe(false);
+    }
+  });
+
+  it('blocks mkfs variants by prefix', () => {
+    for (const cmd of [
+      'mkfs /dev/sda1',
+      'mkfs.ext4 /dev/sda1',
+      'mkfs.btrfs -f /dev/sdb',
+      'xfs_repair /dev/sda1',
+    ]) {
+      expect(checkReadOnlyCommand(cmd).ok, cmd).toBe(false);
+    }
+  });
+
+  it('blocks find with mutating flags', () => {
+    for (const cmd of [
+      'find / -delete',
+      'find /tmp -name "*.log" -delete',
+      'find /var -exec rm -rf {} +',
+      'find /var -execdir rm {} +',
+      'find /opt -ok rm {} +',
     ]) {
       expect(checkReadOnlyCommand(cmd).ok, cmd).toBe(false);
     }
