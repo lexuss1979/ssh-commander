@@ -189,20 +189,27 @@ export default function App() {
       <aside className="sidebar">
         <div className="logo">ssh-commander</div>
 
-        <div className="sidebar-section">
-          <label className="sidebar-label">Сервер</label>
-          <select
-            value={activeProfileId}
-            onChange={(e) => setActiveProfileId(e.target.value)}
-            className="profile-select"
-          >
-            {profiles.length === 0 && <option value="">Нет серверов</option>}
+        <div className="sidebar-section sidebar-profiles">
+          <label className="sidebar-label">Серверы</label>
+          <div className="profile-list">
+            {profiles.length === 0 && (
+              <div className="profile-list-empty muted">Нет серверов</div>
+            )}
             {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} ({p.host})
-              </option>
+              <button
+                key={p.id}
+                type="button"
+                className={`profile-list-item${p.id === activeProfileId ? ' active' : ''}`}
+                onClick={() => setActiveProfileId(p.id)}
+                title={`${p.username}@${p.host}:${p.port}`}
+              >
+                <strong>{p.name}</strong>
+                <span className="muted">
+                  {p.username}@{p.host}
+                </span>
+              </button>
             ))}
-          </select>
+          </div>
           <button className="btn btn-ghost btn-block" onClick={() => setShowProfiles(true)}>
             Управление серверами
           </button>

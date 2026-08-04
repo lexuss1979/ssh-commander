@@ -81,6 +81,13 @@ function validate(input: unknown): Profile {
   return { ...data, id: crypto.randomUUID().slice(0, 8) };
 }
 
+/** Parses and validates profile fields without persisting (test connection). */
+export function parseProfileInput(input: unknown): Omit<Profile, 'id'> {
+  const data = profileInputSchema.parse(input);
+  assertSecret(data);
+  return data;
+}
+
 export function getProfile(id: string): Profile | undefined {
   return listProfiles().find((p) => p.id === id);
 }

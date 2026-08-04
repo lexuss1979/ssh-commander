@@ -44,6 +44,10 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
   const [keysError, setKeysError] = useState('');
   const [importBusy, setImportBusy] = useState(false);
   const keyFileRef = useRef<HTMLInputElement>(null);
+  // Результат «Проверить подключение»: ok/error с сообщением.
+  const [testResult, setTestResult] = useState<
+    { phase: 'idle' } | { phase: 'testing' } | { phase: 'ok'; banner: string } | { phase: 'error'; message: string }
+  >({ phase: 'idle' });
 
   const loadKeys = async () => {
     try {
@@ -82,6 +86,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
 
   const startEdit = (p: Profile) => {
     setEditingId(p.id);
+    setTestResult({ phase: 'idle' });
     setForm({
       name: p.name,
       host: p.host,
@@ -98,37 +103,15 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
 
   const startCreate = () => {
     setEditingId(null);
+    setTestResult({ phase: 'idle' });
     setForm(emptyForm);
   };
 
   const save = async () => {
-    if (!form.name || !form.host || !form.username) {
-      showError('Заполните имя, хост и пользователя');
-      return;
-    }
-    if (form.authType === 'key' && !form.keyPath) {
-      showError('Укажите путь к SSH-ключу внутри контейнера (например /keys/id_rsa)');
-      return;
-    }
-    if (form.authType === 'password' && !form.password) {
-      showError('Укажите пароль');
-      return;
-    }
+    const payload = buildPayload();
+    if (!payload) return;
     setBusy(true);
     try {
-      const payload = {
-        name: form.name,
-        host: form.host,
-        port: Number(form.port) || 22,
-        username: form.username,
-        authType: form.authType,
-        keyPath: form.authType === 'key' ? form.keyPath : undefined,
-        // Пустое поле passphrase = «не менять» при редактировании / «без passphrase» при создании.
-        keyPassphrase: form.authType === 'key' ? form.keyPassphrase || undefined : undefined,
-        password: form.authType === 'password' ? form.password : undefined,
-        dockerCommand: form.dockerCommand || 'docker',
-        note: form.note || undefined,
-      };
       if (editingId) {
         await api(`/api/profiles/${editingId}`, { method: 'PUT', body: JSON.stringify(payload) });
       } else {
@@ -141,6 +124,52 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
       showError((err as Error).message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Общая валидация формы и сборка payload (для сохранения и теста соединения).
+  function buildPayload(): Record<string, unknown> | null {
+    if (!form.name || !form.host || !form.username) {
+      showError('Заполните имя, хост и пользователя');
+      return null;
+    }
+    if (form.authType === 'key' && !form.keyPath) {
+      showError('Укажите путь к SSH-ключу внутри контейнера (например /keys/id_rsa)');
+      return null;
+    }
+    if (form.authType === 'password' && !form.password) {
+      showError('Укажите пароль');
+      return null;
+    }
+    return {
+      name: form.name,
+      host: form.host,
+      port: Number(form.port) || 22,
+      username: form.username,
+      authType: form.authType,
+      keyPath: form.authType === 'key' ? form.keyPath : undefined,
+      // Пустое поле passphrase = «не менять» при редактировании / «без passphrase» при создании.
+      keyPassphrase: form.authType === 'key' ? form.keyPassphrase || undefined : undefined,
+      password: form.authType === 'password' ? form.password : undefined,
+      dockerCommand: form.dockerCommand || 'docker',
+      note: form.note || undefined,
+    };
+  }
+
+  // «Проверить подключение»: разовое SSH-подключение по текущим полям формы,
+  // профиль сохранять не нужно.
+  const testConn = async () => {
+    const payload = buildPayload();
+    if (!payload) return;
+    setTestResult({ phase: 'testing' });
+    try {
+      const res = await api<{ ok: boolean; banner: string }>('/api/profiles/test-connection', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      setTestResult({ phase: 'ok', banner: res.banner ?? '' });
+    } catch (err) {
+      setTestResult({ phase: 'error', message: (err as Error).message });
     }
   };
 
@@ -294,12 +323,27 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
             <button className="btn btn-primary" onClick={save} disabled={busy}>
               {busy ? 'Сохранение…' : 'Сохранить'}
             </button>
+            <button
+              className="btn"
+              onClick={() => void testConn()}
+              disabled={busy || testResult.phase === 'testing'}
+            >
+              {testResult.phase === 'testing' ? 'Проверка…' : 'Проверить подключение'}
+            </button>
             {editingId && (
               <button className="btn" onClick={() => { setEditingId(null); setForm(emptyForm); }}>
                 Отмена
               </button>
             )}
           </div>
+          {testResult.phase === 'ok' && (
+            <p className="test-result test-result-ok">
+              Подключение успешно{testResult.banner ? ` — ${testResult.banner}` : ''}
+            </p>
+          )}
+          {testResult.phase === 'error' && (
+            <p className="test-result test-result-error">Ошибка подключения: {testResult.message}</p>
+          )}
           <p className="hint">
             Ключи можно импортировать кнопкой «Импортировать…» — файл сохраняется в папку{' '}
             <code>keys/</code> с правами <code>0600</code>. Либо положите ключ в <code>keys/</code>{' '}

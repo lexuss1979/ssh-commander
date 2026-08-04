@@ -262,6 +262,69 @@ button {
   margin-top: auto;
 }
 
+/* Список серверов в сайдбаре (вместо выпадающего списка) */
+.sidebar-profiles {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.profile-list-empty {
+  font-size: 12px;
+  padding: 6px 2px;
+}
+
+.profile-list-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.profile-list-item .muted {
+  font-size: 11px;
+}
+
+.profile-list-item:hover {
+  background: var(--bg-hover);
+}
+
+.profile-list-item.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft-border);
+}
+
+/* Результат «Проверить подключение» в форме сервера */
+.test-result {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.test-result-ok {
+  color: #3fb27f;
+}
+
+.test-result-error {
+  color: #e06c75;
+}
+
 .app-main {
   flex: 1;
   min-width: 0;
