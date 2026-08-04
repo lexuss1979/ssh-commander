@@ -53,6 +53,15 @@ export function DockerPage({ profile, showError }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile.id, section]);
 
+  const reconnect = async () => {
+    try {
+      await api(`/api/profiles/${encodeURIComponent(profile.id)}/reconnect`, { method: 'POST' });
+      void load();
+    } catch (err) {
+      showError((err as Error).message);
+    }
+  };
+
   const containerAction = async (id: string, action: ContainerAction, name: string) => {
     const labels: Record<ContainerAction, string> = {
       start: 'Запустить',
@@ -152,6 +161,13 @@ export function DockerPage({ profile, showError }: Props) {
             </label>
           )}
           <button className="btn btn-ghost" onClick={() => void load()}>Обновить</button>
+          <button
+            className="btn btn-ghost"
+            title="Переустановить SSH-подключение (применить новые группы и права)"
+            onClick={() => void reconnect()}
+          >
+            Переподключить
+          </button>
         </div>
       </div>
 
@@ -462,4 +478,3 @@ function LogsModal({ profile, target, onClose, showError }: {
     </Modal>
   );
 }
-

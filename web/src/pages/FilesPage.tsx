@@ -39,6 +39,15 @@ export function FilesPage({ profile, showError }: Props) {
     void load();
   }, [load]);
 
+  const reconnect = async () => {
+    try {
+      await api(`/api/profiles/${encodeURIComponent(profile.id)}/reconnect`, { method: 'POST' });
+      void load();
+    } catch (err) {
+      showError((err as Error).message);
+    }
+  };
+
   const navigate = (p: string) => setPath(p);
 
   const upload = async (files: FileList | null) => {
@@ -170,6 +179,13 @@ export function FilesPage({ profile, showError }: Props) {
             + Файл
           </button>
           <button className="btn btn-ghost" onClick={() => void load()}>Обновить</button>
+          <button
+            className="btn btn-ghost"
+            title="Переустановить SSH-подключение (применить новые группы и права)"
+            onClick={() => void reconnect()}
+          >
+            Переподключить
+          </button>
         </div>
       </div>
 
@@ -284,4 +300,3 @@ export function FilesPage({ profile, showError }: Props) {
     </div>
   );
 }
-

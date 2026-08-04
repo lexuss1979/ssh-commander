@@ -18,8 +18,8 @@ interface WsMessage {
 
 export function TerminalPage({ profile, showError }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
   const [status, setStatus] = useState('connecting');
-  const [sessionKey, setSessionKey] = useState(0);
   const statusRef = useRef(status);
   statusRef.current = status;
 
@@ -47,6 +47,7 @@ export function TerminalPage({ profile, showError }: Props) {
     const ws = new WebSocket(
       `/ws/terminal?profileId=${encodeURIComponent(profile.id)}&cols=${term.cols}&rows=${term.rows}`,
     );
+    wsRef.current = ws;
 
     const send = (msg: WsMessage) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
@@ -66,6 +67,7 @@ export function TerminalPage({ profile, showError }: Props) {
       try {
         const msg = JSON.parse(e.data) as WsMessage;
         if (msg.type === 'output' && msg.data) term.write(msg.data);
+        if (msg.type === 'connected') setStatus('connected');
         if (msg.type === 'close') {
           setStatus('closed');
           term.write('\r\n\x1b[31m[сессия завершена]\x1b[0m\r\n');
@@ -94,11 +96,12 @@ export function TerminalPage({ profile, showError }: Props) {
 
     return () => {
       closed = true;
+      wsRef.current = null;
       ro.disconnect();
       ws.close();
       term.dispose();
     };
-  }, [profile.id, sessionKey, showError]);
+  }, [profile.id, showError]);
 
   return (
     <div className="page terminal-page">
@@ -116,12 +119,16 @@ export function TerminalPage({ profile, showError }: Props) {
         </span>
         <button
           className="btn btn-ghost"
+          title="Переустановить SSH-подключение (применить новые группы и права)"
           onClick={() => {
-            setSessionKey((k) => k + 1);
             setStatus('connecting');
+            const ws = wsRef.current;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'restart' }));
+            }
           }}
         >
-          Перезапустить
+          Обновить сессию
         </button>
       </div>
       <div className="terminal-container" ref={containerRef} />
