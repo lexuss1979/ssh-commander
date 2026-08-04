@@ -17,6 +17,7 @@ interface FormState {
   username: string;
   authType: 'key' | 'password';
   keyPath: string;
+  keyPassphrase: string;
   password: string;
   dockerCommand: string;
   note: string;
@@ -29,6 +30,7 @@ const emptyForm: FormState = {
   username: 'root',
   authType: 'password',
   keyPath: '',
+  keyPassphrase: '',
   password: '',
   dockerCommand: 'docker',
   note: '',
@@ -87,6 +89,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
       username: p.username,
       authType: p.authType,
       keyPath: p.keyPath ?? '',
+      keyPassphrase: p.keyPassphrase ?? '',
       password: p.password ?? '',
       dockerCommand: p.dockerCommand ?? 'docker',
       note: p.note ?? '',
@@ -120,6 +123,8 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
         username: form.username,
         authType: form.authType,
         keyPath: form.authType === 'key' ? form.keyPath : undefined,
+        // Пустое поле passphrase = «не менять» при редактировании / «без passphrase» при создании.
+        keyPassphrase: form.authType === 'key' ? form.keyPassphrase || undefined : undefined,
         password: form.authType === 'password' ? form.password : undefined,
         dockerCommand: form.dockerCommand || 'docker',
         note: form.note || undefined,
@@ -254,6 +259,15 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
                       }}
                     />
                   </div>
+                </label>
+                <label>
+                  Passphrase ключа (если задана)
+                  <input
+                    type="password"
+                    value={form.keyPassphrase}
+                    onChange={(e) => set('keyPassphrase', e.target.value)}
+                    placeholder="••••••••"
+                  />
                 </label>
               </>
             ) : (

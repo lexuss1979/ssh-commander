@@ -6,6 +6,7 @@ export interface Profile {
   username: string;
   authType: 'key' | 'password';
   keyPath?: string;
+  keyPassphrase?: string;
   password?: string;
   dockerCommand?: string;
   note?: string;

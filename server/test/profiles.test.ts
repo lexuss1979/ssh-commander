@@ -77,4 +77,28 @@ describe('profiles store', () => {
       profiles.createProfile(baseInput({ authType: 'key', keyPath: undefined })),
     ).toThrow(/keyPath is required/);
   });
+
+  it('stores key passphrase and keeps it on partial update', () => {
+    const p = profiles.createProfile(
+      baseInput({ authType: 'key', keyPath: '/keys/id_rsa', keyPassphrase: 'phrase-1' }),
+    );
+    expect(p.keyPassphrase).toBe('phrase-1');
+
+    // Update without the passphrase keeps the stored one.
+    const input = baseInput({ authType: 'key', keyPath: '/keys/id_rsa', note: 'n' }) as Record<
+      string,
+      unknown
+    >;
+    delete input.keyPassphrase;
+    const kept = profiles.updateProfile(p.id, input);
+    expect(kept.keyPassphrase).toBe('phrase-1');
+
+    // Passing a new passphrase replaces it.
+    const replaced = profiles.updateProfile(
+      p.id,
+      baseInput({ authType: 'key', keyPath: '/keys/id_rsa', keyPassphrase: 'phrase-2' }),
+    );
+    expect(replaced.keyPassphrase).toBe('phrase-2');
+    profiles.deleteProfile(p.id);
+  });
 });

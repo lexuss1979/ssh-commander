@@ -28,6 +28,9 @@ function connectOptions(profile: Profile) {
   };
   if (profile.authType === 'key' && profile.keyPath) {
     opts.privateKey = fs.readFileSync(profile.keyPath);
+    if (profile.keyPassphrase) {
+      opts.passphrase = profile.keyPassphrase;
+    }
   } else {
     opts.password = profile.password ?? '';
   }
