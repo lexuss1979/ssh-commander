@@ -304,3 +304,40 @@ export function closeProfileConnection(profileId: string): void {
     }
   }
 }
+
+/**
+ * One-shot connectivity check for the profile form ("Test connection").
+ * Opens a fresh connection — never cached, never registered in `connections` —
+ * and closes it right away. Resolves with the server banner (may be empty),
+ * rejects with the ssh2 error (auth failure, timeout, unreadable key, ...).
+ */
+export function testConnection(profile: Profile): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const client = new Client();
+    let banner = '';
+    let settled = false;
+    const done = (err?: Error): void => {
+      if (settled) return;
+      settled = true;
+      try {
+        client.end();
+      } catch {
+        /* already closed */
+      }
+      if (err) reject(err);
+      else resolve(banner);
+    };
+    client.on('banner', (msg: string) => {
+      banner = msg;
+    });
+    client.once('ready', () => done());
+    client.once('error', (err) => done(err));
+    try {
+      // Shorter timeout than for cached connections: the user is waiting.
+      client.connect({ ...connectOptions(profile), readyTimeout: 10000 });
+    } catch (err) {
+      // connectOptions throws synchronously, e.g. unreadable key file.
+      done(err as Error);
+    }
+  });
+}

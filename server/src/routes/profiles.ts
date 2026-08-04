@@ -1,11 +1,32 @@
 import { Router } from 'express';
-import { createProfile, deleteProfile, listProfiles, updateProfile } from '../profiles.js';
-import { closeProfileConnection } from '../ssh/manager.js';
+import { z } from 'zod';
+import { createProfile, deleteProfile, listProfiles, parseProfileInput, updateProfile } from '../profiles.js';
+import { closeProfileConnection, testConnection } from '../ssh/manager.js';
 
 export const profilesRouter = Router();
 
 profilesRouter.get('/', (_req, res) => {
   res.json(listProfiles());
+});
+
+/**
+ * Checks connectivity with the given (possibly unsaved) profile fields:
+ * opens a throwaway SSH connection and closes it. Never touches the
+ * connection cache. 200 {ok, banner} on success, 400 with a readable
+ * error otherwise.
+ */
+profilesRouter.post('/test-connection', async (req, res) => {
+  try {
+    const data = parseProfileInput(req.body);
+    const banner = await testConnection({ ...data, id: 'probe' });
+    res.json({ ok: true, banner });
+  } catch (err) {
+    const message =
+      err instanceof z.ZodError
+        ? err.issues.map((issue) => issue.message).join('; ')
+        : (err as Error).message;
+    res.status(400).json({ error: message });
+  }
 });
 
 /**
