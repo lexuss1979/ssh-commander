@@ -5,6 +5,7 @@ import { sanitizeMessages } from './messages.js';
 import { buildPlanRequestMessages, toolsForRequest } from './plan.js';
 import { toolDefs, READ_ONLY_TOOLS } from './tools.js';
 import { checkReadOnlyCommand } from './guard.js';
+import { readMemory, writeMemory, memoryPromptBlock } from './memory.js';
 import { exec, withSftp } from '../ssh/manager.js';
 import {
   readFile as sftpReadFile,
@@ -58,17 +59,31 @@ export class AgentSession {
     dialogue?: Dialogue,
   ) {
     this.dialogueId = dialogue?.id ?? createDialogue(profile.id).id;
+    let systemPrompt =
+      'Ты — AI-ассистент для администрирования удалённого Linux-сервера ' +
+      `${profile.username}@${profile.host}. ` +
+      'Ты работаешь только через предоставленные инструменты, не выдумывай результаты. ' +
+      'Инструменты чтения (exec_readonly, read_file, list_dir, docker_ps, docker_logs, docker_inspect, read_memory) выполняются автоматически. ' +
+      'Инструменты записи (exec, write_file, docker_action, write_memory) требуют подтверждения пользователя — не пытайся обойти это ограничение, ' +
+      'запрашивай подтверждение обычным вызовом инструмента. ' +
+      'Отвечай кратко и по делу на русском. Сначала собери факты (проверь состояние), затем предлагай действия. ' +
+      'Перед разрушительными действиями предупреждай о последствиях. ' +
+      'У профиля есть MEMORY.md — файл заметок для будущих сессий (хранится в каталоге данных приложения, не на сервере). ' +
+      'Его содержимое автоматически загружается в контекст в начале каждой сессии — см. блок «Память профиля» ниже. ' +
+      'Прежде чем заново исследовать сервер, сверься с памятью: если ответ там уже есть, не ищи его заново; ' +
+      'в длинной сессии используй read_memory, чтобы вернуть полный текст памяти в контекст. ' +
+      'Записывай в память только важное и долговечное: неочевидные команды и конфиги, пути, порты, архитектуру сервисов, ' +
+      'решённые проблемы и их причины, грабли и ограничения. Не сохраняй секреты (пароли, ключи, токены), временные данные и шум логов. ' +
+      'Предлагай запись через write_memory после того, как нашёл такое знание; пиши кратко и структурированно (markdown: заголовки, короткие пункты). ' +
+      'write_memory принимает полный новый текст файла: обязательно сохраняй все прежние записи и только добавляй/правь нужное, без дублей. ' +
+      'Не записывай память через exec/write_file — только через write_memory.';
+    const memoryBlock = memoryPromptBlock(profile.id);
+    if (memoryBlock) {
+      systemPrompt += `\n\n${memoryBlock}`;
+    }
     this.messages.push({
       role: 'system',
-      content:
-        'Ты — AI-ассистент для администрирования удалённого Linux-сервера ' +
-        `${profile.username}@${profile.host}. ` +
-        'Ты работаешь только через предоставленные инструменты, не выдумывай результаты. ' +
-        'Инструменты чтения (exec_readonly, read_file, list_dir, docker_ps, docker_logs, docker_inspect) выполняются автоматически. ' +
-        'Инструменты записи (exec, write_file, docker_action) требуют подтверждения пользователя — не пытайся обойти это ограничение, ' +
-        'запрашивай подтверждение обычным вызовом инструмента. ' +
-        'Отвечай кратко и по делу на русском. Сначала собери факты (проверь состояние), затем предлагай действия. ' +
-        'Перед разрушительными действиями предупреждай о последствиях.',
+      content: systemPrompt,
     });
     for (const message of dialogue?.messages ?? []) {
       if (message.role !== 'system') {
@@ -415,6 +430,21 @@ export class AgentSession {
           }
           const content = await withSftp(this.profile, (sftp) => sftpReadFile(sftp, path, 'utf8'));
           return { status: 'ok', ...this.truncate(content) };
+        }
+        case 'read_memory': {
+          const content = readMemory(this.profile.id);
+          return {
+            status: 'ok',
+            ...this.truncate(content ?? '(MEMORY.md пока нет — записей из прошлых сессий нет)'),
+          };
+        }
+        case 'write_memory': {
+          const content = String(args.content ?? '');
+          if (!content.trim()) {
+            return { status: 'error', output: 'Пустое содержимое MEMORY.md — запись отменена.', truncated: false };
+          }
+          const { bytes } = writeMemory(this.profile.id, content);
+          return { status: 'ok', output: `MEMORY.md обновлён (${bytes} байт).`, truncated: false };
         }
         case 'list_dir': {
           const path = String(args.path ?? '/');

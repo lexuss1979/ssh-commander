@@ -49,6 +49,33 @@ export const toolDefs: ToolDef[] = [
   {
     type: 'function',
     function: {
+      name: 'read_memory',
+      description:
+        'Прочитать MEMORY.md профиля — заметки, накопленные в прошлых сессиях. Это память приложения, а не файл на удалённом сервере. ' +
+        'В начале сессии её содержимое уже загружено в контекст; вызывай, когда нужно освежить полный текст (например, в длинной сессии).',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'write_memory',
+      description:
+        'Обновить MEMORY.md профиля — записать важные находки для будущих сессий. Требует подтверждения пользователя. ' +
+        'content — это полный новый текст файла: обязательно сохраняй все существующие записи и только добавляй/правь нужное, без дублей.',
+      parameters: {
+        type: 'object',
+        properties: {
+          content: str('Полный новый текст MEMORY.md (существующие записи + изменения)'),
+          reason: str('Короткое пояснение для пользователя, что и зачем записывается'),
+        },
+        required: ['content'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'list_dir',
       description: 'Показать содержимое директории на сервере.',
       parameters: required('path', 'Абсолютный путь к директории'),
@@ -134,9 +161,9 @@ export const toolDefs: ToolDef[] = [
 export const READ_ONLY_TOOLS = new Set([
   'exec_readonly',
   'read_file',
+  'read_memory',
   'list_dir',
   'docker_ps',
   'docker_logs',
   'docker_inspect',
 ]);
-

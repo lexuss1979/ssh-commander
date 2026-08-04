@@ -149,6 +149,7 @@ export function TerminalPage({ profile, showError, visible, container, onExitCon
   const fitRef = useRef<FitAddon | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const sendInputRef = useRef<(data: string) => void>(() => {});
+  const wsRef = useRef<WebSocket | null>(null);
   const [status, setStatus] = useState('connecting');
   const [sessionKey, setSessionKey] = useState(0);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -237,6 +238,7 @@ export function TerminalPage({ profile, showError, visible, container, onExitCon
     });
     if (containerId) wsParams.set('container', containerId);
     const ws = new WebSocket(`/ws/terminal?${wsParams}`);
+    wsRef.current = ws;
 
     const send = (msg: WsMessage) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
@@ -256,6 +258,7 @@ export function TerminalPage({ profile, showError, visible, container, onExitCon
       try {
         const msg = JSON.parse(e.data) as WsMessage;
         if (msg.type === 'output' && msg.data) term.write(msg.data);
+        if (msg.type === 'connected') setStatus('connected');
         if (msg.type === 'close') {
           setStatus('closed');
           term.write('\r\n\x1b[31m[сессия завершена]\x1b[0m\r\n');
@@ -284,6 +287,7 @@ export function TerminalPage({ profile, showError, visible, container, onExitCon
 
     return () => {
       closed = true;
+      wsRef.current = null;
       ro.disconnect();
       ws.close();
       term.dispose();
@@ -341,12 +345,22 @@ export function TerminalPage({ profile, showError, visible, container, onExitCon
         )}
         <button
           className="btn btn-ghost"
+          title="Переустановить SSH-подключение (применить новые группы и права)"
           onClick={() => {
-            setSessionKey((k) => k + 1);
-            setStatus('connecting');
+            const ws = wsRef.current;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              // Мягкий перезапуск: сервер закроет SSH и откроет новый shell,
+              // буфер терминала сохраняется.
+              setStatus('connecting');
+              ws.send(JSON.stringify({ type: 'restart' }));
+            } else {
+              // WS мёртв (сессия завершена/ошибка) — полный ремаунт терминала.
+              setSessionKey((k) => k + 1);
+              setStatus('connecting');
+            }
           }}
         >
-          Перезапустить
+          Обновить сессию
         </button>
       </div>
       <div className="terminal-container" ref={containerRef} />

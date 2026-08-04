@@ -175,6 +175,15 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
     }
   };
 
+  const reconnect = async () => {
+    try {
+      await api(`/api/profiles/${encodeURIComponent(profile.id)}/reconnect`, { method: 'POST' });
+      void load();
+    } catch (err) {
+      showError((err as Error).message);
+    }
+  };
+
   const composeAction = async (action: 'up' | 'down') => {
     const path = composePath.trim();
     if (!path) {
@@ -309,6 +318,13 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
             </label>
           )}
           <button className="btn btn-ghost" onClick={() => void load()}>Обновить</button>
+          <button
+            className="btn btn-ghost"
+            title="Переустановить SSH-подключение (применить новые группы и права)"
+            onClick={() => void reconnect()}
+          >
+            Переподключить
+          </button>
         </div>
       </div>
 
@@ -718,4 +734,3 @@ function LogsModal({ profile, target, visible, onClose, showError }: {
     </Modal>
   );
 }
-

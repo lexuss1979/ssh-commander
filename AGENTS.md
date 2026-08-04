@@ -35,7 +35,7 @@ cd web && npm run build                   # tsc && vite build → web/dist
 - `docker-compose.dev.yml` — dev-сервис `ssh-commander-dev` (`target: dev` из Dockerfile): Vite + tsx watch в одном контейнере, исходники смонтированы bind-mount'ами, горячая перезагрузка при изменении `server/src` и `web/src` без пересборки образа. Изменение зависимостей (package.json/lock) требует `scripts/docker-dev.sh up` (пересборка dev-стадии).
 - `scripts/docker-dev.sh` — обёртка над dev-compose: `up|down|restart|logs|build`.
 - `docs/roadmap.md` — план развития (эпики нового функционала); реализация идёт последовательно, перед каждым эпиком — детальное планирование.
-- `data/` — volume: `profiles.json` (профили серверов, пароли открытым текстом) и `ai-dialogues.json` (история диалогов AI-агента).
+- `data/` — volume: `profiles.json` (профили серверов, пароли открытым текстом), `ai-dialogues.json` (история диалогов AI-агента) и `memory/<profileId>/MEMORY.md` (память агента по профилям).
 - `keys/` — SSH-ключи, монтируются в контейнер в `/keys` (не копируются в образ).
 - `server/test/` — unit-тесты (vitest) и ручные интеграционные сценарии (`*.manual.mjs`).
 
@@ -47,7 +47,7 @@ cd web && npm run build                   # tsc && vite build → web/dist
 |---|---|---|
 | `APP_PORT` / `APP_HOST` | `8080` / `0.0.0.0` | Порт и адрес HTTP/WS сервера |
 | `APP_PASSWORD` | `admin` | Пароль входа в веб-интерфейс |
-| `DATA_DIR` | `/data` (docker) | Каталог с `profiles.json` |
+| `DATA_DIR` | `/data` (docker) | Каталог с `profiles.json`, `ai-dialogues.json` и `memory/` |
 | `KEYS_DIR` | `/keys` (docker) | Каталог с SSH-ключами |
 | `WEB_DIST` | авто-определение | Путь к собранному фронтенду |
 | `AI_API_BASE` | `https://api.openai.com/v1` | Базовый URL OpenAI-совместимого API |
@@ -70,8 +70,8 @@ cd web && npm run build                   # tsc && vite build → web/dist
 - `src/services/transfer.ts` — сборка tar-команд для скачивания/загрузки каталогов (`download-dir`/`upload-dir`), детект отсутствия `tar` с понятной ошибкой.
 - `src/services/history.ts` + `src/routes/terminal.ts` — история shell-команд (`GET /api/terminal/history?profileId=&limit=`): форматы bash/zsh, дедуп, по умолчанию 100 / максимум 200.
 - `src/routes/keys.ts` — `GET /api/keys`: список файлов в `KEYS_DIR` (для выпадающего списка ключей в форме).
-- `src/ws/terminal.ts` — терминальные сессии на профиль: буфер ввода до готовности shell, переживают перезагрузку вкладки (60 c после последнего отсоединения), удаляются по завершении процесса. Опциональный `container` в query — PTY-сессия `docker exec -it` в контейнер, ключ сессии `profileId::container` (системный shell и shell контейнера — разные сессии).
-- `src/ai/` — агент: `client.ts` (Chat Completions, streaming SSE, аккумуляция tool_calls, таймаут соединения 120 c), `tools.ts` (определения инструментов + `READ_ONLY_TOOLS`), `guard.ts` (deny-лист read-only команд), `agent.ts` (цикл, подтверждения, лимит шагов), `plan.ts` (режим планирования: `PLAN_MODE_INSTRUCTION`, `toolsForRequest`, `buildPlanRequestMessages`), `messages.ts` (санитизация истории сообщений).
+- `src/ws/terminal.ts` — терминальные сессии на профиль: буфер ввода до готовности shell, переживают перезагрузку вкладки (60 c после последнего отсоединения), удаляются по завершении процесса. Опциональный `container` в query — PTY-сессия `docker exec -it` в контейнер, ключ сессии `profileId::container` (системный shell и shell контейнера — разные сессии). WS-сообщение `restart` закрывает shell и SSH-подключение и открывает новый shell (применяются новые группы/права).
+- `src/ai/` — агент: `client.ts` (Chat Completions, streaming SSE, аккумуляция tool_calls, таймаут соединения 120 c), `tools.ts` (определения инструментов + `READ_ONLY_TOOLS`), `guard.ts` (deny-лист read-only команд), `agent.ts` (цикл, подтверждения, лимит шагов, системный промпт), `plan.ts` (режим планирования: `PLAN_MODE_INSTRUCTION`, `toolsForRequest`, `buildPlanRequestMessages`), `messages.ts` (санитизация истории сообщений), `memory.ts` (пер-профильная память MEMORY.md).
 - `src/ai/dialogues.ts` — хранение диалогов агента в `DATA_DIR/ai-dialogues.json` (zod-валидация, атомарная запись tmp+rename, кэш в памяти).
 - `src/routes/ai.ts` — REST для диалогов: `GET/POST /api/ai/dialogues`, `GET/DELETE /api/ai/dialogues/:id`.
 
@@ -80,20 +80,20 @@ cd web && npm run build                   # tsc && vite build → web/dist
 Все маршруты кроме `/api/auth/*` и `/api/health` требуют cookie-сессии.
 
 - `POST /api/auth/login|logout`
-- CRUD `/api/profiles`, `GET /api/keys`
+- CRUD `/api/profiles`, `POST /api/profiles/:id/reconnect` (закрывает SSH-подключение профиля; следующее обращение откроет свежее — применяются новые группы/права), `GET /api/keys`
 - Диалоги агента: `GET /api/ai/dialogues?profileId=` (список-сводки), `POST /api/ai/dialogues` `{profileId}` (создать), `GET /api/ai/dialogues/:id` (полный диалог), `DELETE /api/ai/dialogues/:id`
 - `GET /api/metrics?profileId=` — снимок метрик сервера (вкладка «Обзор»).
 - `GET /api/terminal/history?profileId=&limit=` — история shell-команд (палитра Ctrl+R в терминале).
 - `/api/files/list|read|write|mkdir|rename|chmod|delete|download|upload|search|download-dir|upload-dir` — `profileId` и `path` в query/body; upload — raw body (`express.raw`, лимит 200 МБ); download — стрим; search — `mode=name|content`; download-dir — tar.gz стрим; upload-dir — raw tar.gz → `tar -xzf`.
 - `/api/docker/containers|images|volumes|networks`, действия контейнеров (`start|stop|restart|rm`), `pull`, `rmi`, `run`, `logs` (tail и follow-стрим), `GET /stats`, `POST /prune` `{target: containers|images|volumes|system}`, `GET /compose/status`, `GET /compose/ps`, `POST /compose/up|down`.
-- WS `/ws/terminal?profileId=&cols=&rows=[&container=<id>]` — сообщения: клиент `input|resize|close`, сервер `output|connected|close|error`.
+- WS `/ws/terminal?profileId=&cols=&rows=[&container=<id>]` — сообщения: клиент `input|resize|close|restart` (restart закрывает shell и SSH-подключение и открывает новый shell), сервер `output|connected|close|error`.
 - WS `/ws/agent?profileId=&dialogueId=` — клиент `message {content, planMode?}|approve|reject|approve_plan|stop`, сервер `dialogue|token|message|tool_pending|tool_result|plan_ready|running|done|error`. Диалог загружается в сессию при подключении и сохраняется по ходу каждого шага; если `dialogueId` не передан, сервер создаёт новый диалог и сообщает его id событием `dialogue`.
 
 ## AI-агент: правила подтверждений
 
 Два класса инструментов:
-- Read-only (выполняются автоматически): `exec_readonly, read_file, list_dir, docker_ps, docker_logs, docker_inspect`.
-- Мутирующие (ждут approve/reject в UI): `exec, write_file, docker_action`.
+- Read-only (выполняются автоматически): `exec_readonly, read_file, read_memory, list_dir, docker_ps, docker_logs, docker_inspect`.
+- Мутирующие (ждут approve/reject в UI): `exec, write_file, write_memory, docker_action`.
 
 `exec_readonly` дополнительно фильтруется deny-листом в `guard.ts`: запрещены конвейеры/редиректы/подстановки, мутирующие команды (`rm, mv, cp, chmod, chattr, setfacl, dd, wipefs, tee, unlink, mkfs* и xfs_* по префиксу, systemctl, apt, docker ...`), мутирующие флаги `find` (`-delete, -exec, -execdir, -ok, -okdir`), интерпретаторы и прочее. Результат `exec`/`exec_readonly` всегда содержит exit code; ненулевой код возвращается модели как ошибка. Если расширяешь набор инструментов — обязательно:
 1. добавь определение в `tools.ts`,
@@ -101,6 +101,13 @@ cd web && npm run build                   # tsc && vite build → web/dist
 3. если инструмент исполняет произвольный shell — проверь, что он не попал в read-only класс без проверок guard.
 
 Режим планирования (`planMode`, `src/ai/plan.ts`): клиент шлёт `message` с `planMode: true` — запрос к API идёт БЕЗ tools, модель возвращает текст плана, сервер отвечает `plan_ready` и ждёт. `approve_plan` запускает обычный цикл с инструментами (per-tool approve/reject сохраняется); правки плана — повторным `message` с `planMode: true`. Шаги планирования не расходуют `AI_MAX_STEPS`. В UI — переключатель «План» и PlanCard в AgentPage.
+
+### Память агента (MEMORY.md)
+
+- Для каждого профиля память хранится в `DATA_DIR/memory/<profileId>/MEMORY.md` (`src/ai/memory.ts`). Это локальная память приложения, к удалённому серверу отношения не имеет; имя файла формируется из `profileId` санитизацией (только `[A-Za-z0-9_-]`, fallback `default`) — выход за `memory/` невозможен.
+- Содержимое MEMORY.md автоматически подгружается в системный промпт в начале каждой сессии; правила «когда читать, что и как записывать» заданы в промпте в `agent.ts` и дублируют контракт инструментов.
+- `read_memory` — read-only, выполняется автоматически; `write_memory` — мутирующий, требует подтверждения и принимает полный новый текст файла (агент обязан сохранять прежние записи). Инструменты памяти нельзя заменять на `exec`/`write_file`.
+- Запись атомарная (tmp+rename), чтение для контекста ограничено 64 КБ.
 
 ## Правила работы с кодом
 
@@ -113,7 +120,7 @@ cd web && npm run build                   # tsc && vite build → web/dist
 
 ## Тестирование
 
-- `cd server && npm test` — unit-тесты (14 файлов, 105 тестов): `guard.test.ts` (deny-лист), `path.test.ts` (безопасность путей), `docker-json.test.ts` (парсер вывода docker), `docker-run.test.ts` (сборка `docker run` с `sh -c`), `docker-ops.test.ts` (prune/compose-аргументы, парсинг `stats`), `dialogues.test.ts` и `profiles.test.ts` (хранилища, частичный update секретов), `corrupt-store.test.ts` (битый JSON: `*.corrupt-*` и отказ persist), `metrics.test.ts` (парсинг метрик), `file-search.test.ts` (команды и парсинг поиска), `transfer.test.ts` (tar-команды, детект отсутствия tar), `history.test.ts` (парсинг истории bash/zsh, дедуп), `plan.test.ts` (режим планирования), `messages.test.ts` (санитизация истории сообщений агента).
+- `cd server && npm test` — unit-тесты: `guard.test.ts` (deny-лист), `path.test.ts` (безопасность путей), `docker-json.test.ts` (парсер вывода docker), `docker-run.test.ts` (сборка `docker run` с `sh -c`), `docker-ops.test.ts` (prune/compose-аргументы, парсинг `stats`), `dialogues.test.ts` и `profiles.test.ts` (хранилища, частичный update секретов), `corrupt-store.test.ts` (битый JSON: `*.corrupt-*` и отказ persist), `metrics.test.ts` (парсинг метрик), `file-search.test.ts` (команды и парсинг поиска), `transfer.test.ts` (tar-команды, детект отсутствия tar), `history.test.ts` (парсинг истории bash/zsh, дедуп), `plan.test.ts` (режим планирования), `messages.test.ts` (санитизация истории сообщений агента), `memory.test.ts` (память агента: чтение/запись и безопасность путей MEMORY.md).
 - `server/test/integration.manual.mjs` — ручной интеграционный сценарий: требует запущенный сервер (`APP_PASSWORD=test123`) и тестовый sshd (linuxserver/openssh-server на `127.0.0.1:2222`, user `test`); покрывает auth, WS-guard, SFTP CRUD, терминал, docker CLI.
 - `server/test/agent.manual.mjs` — цикл агента против мокового OpenAI-совместимого endpoint'а (read-only авто, мутация через approve).
 - Перед сдачей изменений: `npm run build` в обоих каталогах и `npm test` — зелёные, `npm audit` без уязвимостей.
