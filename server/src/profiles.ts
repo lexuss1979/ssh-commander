@@ -12,6 +12,7 @@ const profileInputSchema = z.object({
   username: z.string().min(1, 'Username is required'),
   authType: z.enum(['key', 'password']).default('password'),
   keyPath: z.string().optional(),
+  keyPassphrase: z.string().optional(),
   password: z.string().optional(),
   dockerCommand: z.string().min(1).default('docker'),
   note: z.string().optional(),
@@ -118,6 +119,7 @@ export function updateProfile(id: string, input: unknown): Profile {
     ...data,
     id,
     keyPath: data.keyPath ?? existing.keyPath,
+    keyPassphrase: data.keyPassphrase ?? existing.keyPassphrase,
     password: data.password ?? existing.password,
   };
   assertSecret(updated);

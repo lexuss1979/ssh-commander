@@ -73,6 +73,36 @@ export function downloadUrl(profileId: string, path: string): string {
   return `/api/files/download?${params}`;
 }
 
+export interface KeyEntry {
+  name: string;
+  path: string;
+}
+
+/** Импорт приватного ключа в хранилище keys/ (сохраняется с правами 0600). */
+export async function importKey(name: string, content: string, overwrite = false): Promise<KeyEntry> {
+  const params = new URLSearchParams({ name });
+  if (overwrite) params.set('overwrite', '1');
+  const res = await fetch(`/api/keys?${params}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/octet-stream' },
+    body: content,
+  });
+  if (!res.ok) {
+    if (res.status === 401) unauthorizedHandler?.();
+    let message = res.statusText;
+    try {
+      const body = await res.json();
+      message = body.error ?? message;
+    } catch {
+      /* keep statusText */
+    }
+    throw new ApiError(res.status, message);
+  }
+  const data = (await res.json()) as { key: KeyEntry };
+  return data.key;
+}
+
 export interface ServerMetrics {
   timestamp: number;
   cpu: { percent: number | null; cores: number | null };
