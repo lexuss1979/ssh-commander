@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { config } from './config.js';
 import type { Profile } from './types.js';
 
-const profileInputSchema = z.object({
+export const profileInputSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   host: z.string().min(1, 'Host is required'),
   port: z.number().int().min(1).max(65535).default(22),
@@ -133,6 +133,20 @@ export function updateProfile(id: string, input: unknown): Profile {
   list[idx] = updated;
   persist(list);
   return { ...updated };
+}
+
+/**
+ * Creates a profile from an imported backup: validates the shape but does
+ * not require the auth secret — backups exported without secrets are
+ * imported as-is and the secret is filled in later via the UI.
+ */
+export function importProfile(input: unknown): Profile {
+  const data = profileInputSchema.parse(input);
+  const profile: Profile = { ...data, id: crypto.randomUUID().slice(0, 8) };
+  const list = listProfiles();
+  list.push(profile);
+  persist(list);
+  return { ...profile };
 }
 
 export function deleteProfile(id: string): void {

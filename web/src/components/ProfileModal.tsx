@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, importKey, type KeyEntry } from '../api';
+import { api, exportProfilesBackup, importKey, importProfilesBackup, type KeyEntry } from '../api';
 import type { Profile } from '../types';
 import { Modal } from './Modal';
 
@@ -44,6 +44,12 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
   const [keysError, setKeysError] = useState('');
   const [importBusy, setImportBusy] = useState(false);
   const keyFileRef = useRef<HTMLInputElement>(null);
+  // Перенос профилей: общий пароль шифрования для экспорта/импорта.
+  const [transferPassword, setTransferPassword] = useState('');
+  const [transferNoSecrets, setTransferNoSecrets] = useState(false);
+  const [transferBusy, setTransferBusy] = useState(false);
+  const [transferMsg, setTransferMsg] = useState('');
+  const backupFileRef = useRef<HTMLInputElement>(null);
   // Результат «Проверить подключение»: ok/error с сообщением.
   const [testResult, setTestResult] = useState<
     { phase: 'idle' } | { phase: 'testing' } | { phase: 'ok'; banner: string } | { phase: 'error'; message: string }
@@ -183,6 +189,67 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
     }
   };
 
+  // Экспорт бэкапа: без пароля и с секретами — спрашиваем подтверждение,
+  // файл окажется открытым текстом.
+  const exportBackup = async () => {
+    if (!transferNoSecrets && !transferPassword) {
+      const ok = window.confirm(
+        'Бэкап с секретами без пароля шифрования сохранит пароли открытым текстом. Продолжить?',
+      );
+      if (!ok) return;
+    }
+    setTransferBusy(true);
+    setTransferMsg('');
+    try {
+      const blob = await exportProfilesBackup({
+        passphrase: transferPassword || undefined,
+        includeSecrets: !transferNoSecrets,
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'ssh-commander-profiles.json';
+      a.click();
+      URL.revokeObjectURL(url);
+      setTransferMsg('Бэкап сохранён.');
+    } catch (err) {
+      showError((err as Error).message);
+    } finally {
+      setTransferBusy(false);
+    }
+  };
+
+  // Импорт бэкапа: файл читается локально и уходит на сервер текстом.
+  const importBackup = async (file: File) => {
+    setTransferBusy(true);
+    setTransferMsg('');
+    try {
+      const text = await file.text();
+      const summary = await importProfilesBackup(text, transferPassword || undefined);
+      await onSaved();
+      const parts = [`Импортировано профилей: ${summary.imported}`];
+      if (summary.keysSaved) parts.push(`ключей сохранено: ${summary.keysSaved}`);
+      if (summary.keysSkipped.length) {
+        parts.push(`ключей пропущено (уже есть): ${summary.keysSkipped.length}`);
+      }
+      if (summary.renamed.length) {
+        parts.push(
+          `переименованы: ${summary.renamed.map((r) => `${r.from} → ${r.to}`).join(', ')}`,
+        );
+      }
+      if (summary.needSecrets.length) {
+        parts.push(
+          `задайте секреты вручную: ${summary.needSecrets.join(', ')}`,
+        );
+      }
+      setTransferMsg(parts.join('; '));
+    } catch (err) {
+      showError((err as Error).message);
+    } finally {
+      setTransferBusy(false);
+    }
+  };
+
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
 
@@ -204,6 +271,48 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
               </button>
             </div>
           ))}
+
+          <div className="transfer-block">
+            <label className="sidebar-label">Перенос на другую машину</label>
+            <input
+              type="password"
+              value={transferPassword}
+              onChange={(e) => setTransferPassword(e.target.value)}
+              placeholder="Пароль шифрования (опционально)"
+            />
+            <label className="transfer-check">
+              <input
+                type="checkbox"
+                checked={transferNoSecrets}
+                onChange={(e) => setTransferNoSecrets(e.target.checked)}
+              />
+              Без секретов (пароли и ключи не включать)
+            </label>
+            <div className="transfer-actions">
+              <button className="btn" onClick={() => void exportBackup()} disabled={transferBusy}>
+                Экспорт
+              </button>
+              <button
+                className="btn"
+                onClick={() => backupFileRef.current?.click()}
+                disabled={transferBusy}
+              >
+                Импорт…
+              </button>
+              <input
+                ref={backupFileRef}
+                type="file"
+                accept=".json,application/json"
+                hidden
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  if (file) void importBackup(file);
+                }}
+              />
+            </div>
+            {transferMsg && <p className="field-hint">{transferMsg}</p>}
+          </div>
         </div>
 
         <div className="profile-form">
