@@ -134,7 +134,10 @@ export async function createTunnel(profile: Profile, params: TunnelParams): Prom
 
   try {
     await new Promise<void>((resolve, reject) => {
-      server.listen(localPort, '127.0.0.1', () => resolve());
+      // Слушаем на 0.0.0.0 внутри контейнера, чтобы Docker мог пробросить
+      // соединение на этот порт. На хосте Docker ограничивает доступ через
+      // 127.0.0.1:10000-10049 в compose.yml — наружу порт не торчит.
+      server.listen(localPort, '0.0.0.0', () => resolve());
       server.once('error', (err) => reject(err));
     });
   } catch (err) {
@@ -197,8 +200,6 @@ async function handleConnection(tunnel: TunnelInternal, socket: net.Socket): Pro
     } catch {
       /* noop */
     }
-    // Логируем в консоль, но не закрываем туннель — это ошибка конкретного соединения.
-    console.error(`Tunnel ${tunnel.id} connection error:`, (err as Error).message);
   }
 }
 
@@ -217,7 +218,8 @@ function isPortAvailable(port: number): Promise<boolean> {
     server.once('listening', () => {
       server.close(() => resolve(true));
     });
-    server.listen(port, '127.0.0.1');
+    // Проверяем на 0.0.0.0 — там же будет слушать туннель.
+    server.listen(port, '0.0.0.0');
   });
 }
 
