@@ -743,6 +743,55 @@ body.resizing-agent {
   font-size: 12px;
 }
 
+/* Tunnels section */
+.tunnels-section {
+  border-top: 1px solid var(--border);
+  padding: 12px 16px 0;
+}
+
+.tunnels-section .section-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--text);
+}
+
+.tunnels-section .ports-scroll {
+  padding: 0;
+  max-height: 200px;
+}
+
+.tunnel-local a {
+  color: var(--accent);
+  text-decoration: none;
+  font-family: Menlo, Consolas, "JetBrains Mono", "Fira Code", monospace;
+  font-size: 12px;
+}
+
+.tunnel-local a:hover {
+  text-decoration: underline;
+}
+
+.tunnel-arrow {
+  color: var(--muted);
+  text-align: center;
+  width: 20px;
+}
+
+.tunnel-target {
+  font-family: Menlo, Consolas, "JetBrains Mono", "Fira Code", monospace;
+  font-size: 12px;
+}
+
+.tunnel-closed {
+  opacity: 0.6;
+}
+
+.btn-small {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
 .link-cell {
   background: none;
   border: none;

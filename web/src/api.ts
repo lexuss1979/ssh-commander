@@ -240,6 +240,42 @@ export function fetchPorts(profileId: string): Promise<PortsSnapshot> {
   return api<PortsSnapshot>(`/api/ports?profileId=${encodeURIComponent(profileId)}`);
 }
 
+// SSH-туннели
+export interface Tunnel {
+  id: string;
+  profileId: string;
+  localHost: '127.0.0.1';
+  localPort: number;
+  targetHost: string;
+  targetPort: number;
+  status: 'active' | 'closed';
+  error?: string;
+  createdAt: number;
+}
+
+export interface TunnelsResponse {
+  tunnels: Tunnel[];
+  portRange: { min: number; max: number };
+}
+
+export function fetchTunnels(profileId: string): Promise<TunnelsResponse> {
+  return api<TunnelsResponse>(`/api/tunnels?profileId=${encodeURIComponent(profileId)}`);
+}
+
+export function createTunnel(
+  profileId: string,
+  params: { localPort: number; targetHost: string; targetPort: number },
+): Promise<Tunnel> {
+  return api<Tunnel>(`/api/tunnels?profileId=${encodeURIComponent(profileId)}`, {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export function deleteTunnel(id: string): Promise<void> {
+  return api<void>(`/api/tunnels/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
 export async function fetchTerminalHistory(profileId: string, limit = 100): Promise<string[]> {
   const params = new URLSearchParams({ profileId, limit: String(limit) });
   const data = await api<{ commands: string[] }>(`/api/terminal/history?${params}`);
