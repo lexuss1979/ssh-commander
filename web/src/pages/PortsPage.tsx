@@ -37,7 +37,11 @@ function matchesContainerFilter(c: ContainerPortEntry, filter: string): boolean 
     c.name.toLowerCase().includes(q) ||
     c.containerId.toLowerCase().includes(q) ||
     (c.ip ?? '').toLowerCase().includes(q) ||
-    c.ports.some((b) => String(b.containerPort).includes(q) || b.proto.includes(q))
+    c.ports.some((b) =>
+      String(b.containerPort).includes(q) ||
+      String(b.hostPort ?? '').includes(q) ||
+      b.proto.includes(q),
+    )
   );
 }
 
@@ -149,6 +153,7 @@ export function PortsPage({ profile, visible }: Props) {
   const ports = (snapshot?.ports ?? []).filter((p) => matchesHostFilter(p, filter));
   const publicCount = (snapshot?.ports ?? []).filter((p) => p.scope === 'public').length;
   const containers = snapshot?.containers;
+  const containersWithPorts = containers?.filter((c) => c.ports.length > 0);
 
   return (
     <div className="page ports-page">
@@ -172,7 +177,7 @@ export function PortsPage({ profile, visible }: Props) {
             <span className="muted">
               {snapshot.ports.length} слушателей
               {publicCount > 0 ? ` · ${publicCount} наружу` : ''}
-              {containers ? ` · ${containers.length} контейнеров` : ''}
+              {containersWithPorts ? ` · ${containersWithPorts.length} контейнеров` : ''}
             </span>
           )}
           <button className="btn btn-ghost" onClick={() => setReloadKey((k) => k + 1)}>
@@ -242,8 +247,8 @@ export function PortsPage({ profile, visible }: Props) {
             </p>
           </div>
 
-          {containers && (
-            <ContainerPortsSection containers={containers} filter={filter} />
+          {containersWithPorts && containersWithPorts.length > 0 && (
+            <ContainerPortsSection containers={containersWithPorts} filter={filter} />
           )}
         </>
       )}

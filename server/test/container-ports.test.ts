@@ -246,6 +246,50 @@ describe('annotateHostListeners', () => {
     expect(listeners[1].container).toEqual({ id: 'u', name: 'udp-svc' });
   });
 
+  it('matches by hostIp with wildcard for 0.0.0.0', () => {
+    const listeners: PortListener[] = [
+      makeListener({ host: '127.0.0.1', port: 3000 }),
+      makeListener({ host: '192.168.1.5', port: 3000 }),
+    ];
+    const containers: ContainerPortEntry[] = [
+      {
+        containerId: 'c1',
+        name: 'iface-app',
+        networkMode: 'bridge',
+        ip: '172.17.0.5',
+        ports: [
+          { containerPort: 3000, proto: 'tcp', hostIp: '192.168.1.5', hostPort: 3000 },
+        ],
+      },
+    ];
+
+    annotateHostListeners(listeners, containers);
+    expect(listeners[0].container).toBeUndefined(); // 127.0.0.1 не матчится с 192.168.1.5
+    expect(listeners[1].container).toEqual({ id: 'c1', name: 'iface-app' });
+  });
+
+  it('wildcard 0.0.0.0 matches any host address', () => {
+    const listeners: PortListener[] = [
+      makeListener({ host: '127.0.0.1', port: 8080 }),
+      makeListener({ host: '192.168.1.10', port: 8080 }),
+    ];
+    const containers: ContainerPortEntry[] = [
+      {
+        containerId: 'wild',
+        name: 'wildcard-app',
+        networkMode: 'bridge',
+        ip: '172.17.0.6',
+        ports: [
+          { containerPort: 80, proto: 'tcp', hostIp: '0.0.0.0', hostPort: 8080 },
+        ],
+      },
+    ];
+
+    annotateHostListeners(listeners, containers);
+    expect(listeners[0].container).toEqual({ id: 'wild', name: 'wildcard-app' });
+    expect(listeners[1].container).toEqual({ id: 'wild', name: 'wildcard-app' });
+  });
+
   it('handles empty containers list', () => {
     const listeners: PortListener[] = [makeListener({ port: 80 })];
     annotateHostListeners(listeners, []);
