@@ -310,6 +310,19 @@ button {
   border-color: var(--accent-soft-border);
 }
 
+.profile-item-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.profile-item-head strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sidebar-divider {
   border-top: 1px solid var(--border);
   margin: 4px 0;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ApiError, api, setUnauthorizedHandler } from './api';
+import { ApiError, api, fetchOverview, setUnauthorizedHandler } from './api';
 import type { Profile } from './types';
 import { LoginPage } from './pages/LoginPage';
 import { ServersPage } from './pages/ServersPage';
@@ -24,6 +24,7 @@ const TABS: Array<{ id: Tab; label: string }> = [
 const AGENT_MIN_WIDTH = 360;
 const AGENT_MAX_WIDTH = 720;
 const AGENT_DEFAULT_WIDTH = 420;
+const SERVER_STATUS_POLL_MS = 10000;
 
 function loadAgentWidth(): number {
   try {
@@ -122,6 +123,42 @@ export default function App() {
       });
   }, [applyProfiles, showError]);
 
+  // Точки доступности серверов в сайдбаре: периодический опрос /api/overview
+  // (кэш снимка на сервере 4 с), на паузе при скрытой вкладке браузера.
+  const [pageVisible, setPageVisible] = useState(() => !document.hidden);
+  const [serverStatus, setServerStatus] = useState<Record<string, { ok: boolean; error?: string }>>({});
+
+  useEffect(() => {
+    const onChange = () => setPageVisible(!document.hidden);
+    document.addEventListener('visibilitychange', onChange);
+    return () => document.removeEventListener('visibilitychange', onChange);
+  }, []);
+
+  useEffect(() => {
+    if (!authed || !pageVisible) return;
+    let cancelled = false;
+    let timer = 0;
+    const tick = async () => {
+      try {
+        const res = await fetchOverview();
+        if (cancelled) return;
+        const next: Record<string, { ok: boolean; error?: string }> = {};
+        for (const s of res.servers) next[s.id] = { ok: s.ok, error: s.error };
+        setServerStatus(next);
+      } catch {
+        // Оставляем последний снимок; 401 уводит на логин глобальным обработчиком.
+      }
+      if (!cancelled) {
+        timer = window.setTimeout(tick, SERVER_STATUS_POLL_MS);
+      }
+    };
+    tick();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [authed, pageVisible]);
+
   const handleLogin = useCallback(
     async (password: string) => {
       await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ password }) });
@@ -209,23 +246,35 @@ export default function App() {
             {profiles.length === 0 && (
               <div className="profile-list-empty muted">Нет серверов</div>
             )}
-            {profiles.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                className={`profile-list-item${p.id === activeProfileId ? ' active' : ''}`}
-                onClick={() => {
-                  setActiveProfileId(p.id);
-                  if (tab === 'servers') setTab('overview');
-                }}
-                title={`${p.username}@${p.host}:${p.port}`}
-              >
-                <strong>{p.name}</strong>
-                <span className="muted">
-                  {p.username}@{p.host}
-                </span>
-              </button>
-            ))}
+            {profiles.map((p) => {
+              const st = serverStatus[p.id];
+              const dotClass = st ? (st.ok ? 'connected' : 'error') : '';
+              const statusText = st
+                ? st.ok
+                  ? 'доступен'
+                  : `недоступен: ${st.error ?? 'нет данных'}`
+                : 'статус проверяется';
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`profile-list-item${p.id === activeProfileId ? ' active' : ''}`}
+                  onClick={() => {
+                    setActiveProfileId(p.id);
+                    if (tab === 'servers') setTab('overview');
+                  }}
+                  title={`${p.username}@${p.host}:${p.port} — ${statusText}`}
+                >
+                  <span className="profile-item-head">
+                    <span className={`status-dot${dotClass ? ` ${dotClass}` : ''}`} />
+                    <strong>{p.name}</strong>
+                  </span>
+                  <span className="muted">
+                    {p.username}@{p.host}
+                  </span>
+                </button>
+              );
+            })}
           </div>
           <button className="btn btn-ghost btn-block" onClick={() => setShowProfiles(true)}>
             Управление серверами
