@@ -26,6 +26,7 @@ import {
   runContainer,
   dockerExec,
 } from '../services/docker.js';
+import { runSecurityAudit } from '../services/security-audit.js';
 import {
   createDialogue,
   getDialogue,
@@ -52,6 +53,10 @@ export class AgentSession {
   private loopAbort: AbortController | null = null;
   // План составлен и ждёт approve_plan (или правок обычным message с planMode=true).
   private planPending = false;
+  // sudo-пароль для привилегированного security_audit. Только в памяти сессии:
+  // не логируется, не попадает в сообщения диалога/на диск, не передаётся модели.
+  // Очищается в stop()/onWsClose().
+  private sudoPassword: string | null = null;
 
   constructor(
     private profile: Profile,
@@ -63,10 +68,13 @@ export class AgentSession {
       'Ты — AI-ассистент для администрирования удалённого Linux-сервера ' +
       `${profile.username}@${profile.host}. ` +
       'Ты работаешь только через предоставленные инструменты, не выдумывай результаты. ' +
-      'Инструменты чтения (exec_readonly, read_file, list_dir, docker_ps, docker_logs, docker_inspect, read_memory) выполняются автоматически. ' +
+      'Инструменты чтения (exec_readonly, read_file, list_dir, docker_ps, docker_logs, docker_inspect, read_memory, security_audit) выполняются автоматически. ' +
       'Инструменты записи (exec, write_file, docker_action, write_memory) требуют подтверждения пользователя — не пытайся обойти это ограничение, ' +
       'запрашивай подтверждение обычным вызовом инструмента. ' +
       'Отвечай кратко и по делу на русском. Сначала собери факты (проверь состояние), затем предлагай действия. ' +
+      'Инструмент security_audit — детерминированный аудит безопасности сервера (фиксированные read-only проверки по секциям). ' +
+      'Проанализируй его сырые данные и оформи отчёт с severity (критично / предупреждение / ок) и рекомендациями; ' +
+      'после отчёта предложи записать ключевые находки в память через write_memory. ' +
       'Перед разрушительными действиями предупреждай о последствиях. ' +
       'У профиля есть MEMORY.md — файл заметок для будущих сессий (хранится в каталоге данных приложения, не на сервере). ' +
       'Его содержимое автоматически загружается в контекст в начале каждой сессии — см. блок «Память профиля» ниже. ' +
@@ -149,6 +157,13 @@ export class AgentSession {
         }
         break;
       }
+      case 'sudo_credentials': {
+        // sudo-пароль для привилегированного security_audit: только поле сессии
+        // в памяти. НЕ логировать, НЕ сохранять в диалог, НЕ передавать модели.
+        const password = typeof data.password === 'string' ? data.password : '';
+        this.sudoPassword = password || null;
+        break;
+      }
       case 'stop': {
         this.stop();
         break;
@@ -159,6 +174,8 @@ export class AgentSession {
   stop(): void {
     this.stopRequested = true;
     this.planPending = false;
+    // Пароль sudo не должен жить дольше текущего запуска.
+    this.sudoPassword = null;
     this.loopAbort?.abort();
     for (const pending of this.pending.values()) {
       pending.resolve('aborted');
@@ -481,6 +498,20 @@ export class AgentSession {
           const target = String(args.target ?? '');
           const data = await inspect(this.profile, target);
           return { status: 'ok', ...this.truncate(JSON.stringify(data, null, 2)) };
+        }
+        case 'security_audit': {
+          const sections = Array.isArray(args.sections)
+            ? args.sections.map(String)
+            : undefined;
+          // privileged подставляется сервером, а не доверяется модели: root-проверки
+          // выполняются, только когда пользователь ввёл sudo-пароль в UI (он хранится
+          // в сессии и модели недоступен).
+          const output = await runSecurityAudit(this.profile, {
+            sections,
+            privileged: this.sudoPassword != null,
+            sudoPassword: this.sudoPassword ?? undefined,
+          });
+          return { status: 'ok', ...this.truncate(output) };
         }
         case 'docker_action': {
           const action = String(args.action ?? '');

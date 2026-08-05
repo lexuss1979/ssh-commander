@@ -92,7 +92,7 @@ function connect(key: string, profile: Profile): Promise<Connection> {
 export async function exec(
   profile: Profile,
   command: string,
-  opts: { timeoutMs?: number; maxOutput?: number } = {},
+  opts: { timeoutMs?: number; maxOutput?: number; stdin?: string } = {},
 ): Promise<ExecResult> {
   const timeoutMs = opts.timeoutMs ?? 60000;
   const maxOutput = opts.maxOutput ?? 2 * 1024 * 1024;
@@ -103,6 +103,12 @@ export async function exec(
       if (err) {
         reject(new Error(`SSH exec error: ${err.message}`));
         return;
+      }
+      // stdin (например пароль для `sudo -S`): пишем в канал и шлём EOF.
+      // Пароль в строку команды не попадает — не виден в ps и логах.
+      if (opts.stdin !== undefined) {
+        channel.write(opts.stdin);
+        channel.end();
       }
       let stdout = '';
       let stderr = '';

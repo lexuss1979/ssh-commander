@@ -130,6 +130,32 @@ export const toolDefs: ToolDef[] = [
   {
     type: 'function',
     function: {
+      name: 'security_audit',
+      description:
+        'Проверка безопасности сервера: фиксированный набор read-only команд по секциям ' +
+        '(auth, network, updates, activity, docker, filesystem). Произвольные команды не принимает. ' +
+        'Возвращает сырые данные — проанализируй их и оформи отчёт с severity (критично/предупреждение/ок) и рекомендациями.',
+      parameters: {
+        type: 'object',
+        properties: {
+          sections: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Секции аудита: auth, network, updates, activity, docker, filesystem (по умолчанию все)',
+          },
+          privileged: {
+            type: 'boolean',
+            description:
+              'Выполнить root-проверки через sudo (работает, только если пользователь ввёл sudo-пароль в интерфейсе; пароль модели недоступен)',
+          },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'docker_action',
       description:
         'Управляющее действие с Docker: start/stop/restart/rm для контейнера, pull/rmi для образа, run для запуска контейнера. Требует подтверждения пользователя.',
@@ -166,4 +192,5 @@ export const READ_ONLY_TOOLS = new Set([
   'docker_ps',
   'docker_logs',
   'docker_inspect',
+  'security_audit',
 ]);

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, formatDate } from '../api';
 import type { Dialogue, DialogueMessage, DialogueSummary, Profile } from '../types';
 import { Markdown } from '../components/Markdown';
+import { Modal } from '../components/Modal';
 
 interface Props {
   profile: Profile;
@@ -42,6 +43,9 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   // составляет план без инструментов и ждёт approve_plan.
   const [planMode, setPlanMode] = useState(false);
   const [planReady, setPlanReady] = useState(false);
+  // Модалка «Проверка безопасности»: необязательный sudo-пароль для root-секций аудита.
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [auditPassword, setAuditPassword] = useState('');
   const wsRef = useRef<WebSocket | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   // Актуальные значения для эффекта «Спросить агента» — без добавления в deps,
@@ -316,6 +320,35 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     sendWs({ type: 'message', content, planMode });
   };
 
+  // Запуск «Проверки безопасности»: пароль (если введён) уходит отдельным
+  // WS-сообщением sudo_credentials и хранится только в памяти сессии агента —
+  // в текст запроса и историю диалога он не попадает. Если агент занят или
+  // соединения нет — не запускаем (модалка остаётся открытой).
+  const startAudit = () => {
+    if (!connected || !activeDialogueId) {
+      showError('Нет соединения с агентом');
+      return;
+    }
+    if (running) {
+      showError('Агент сейчас выполняет задачу — дождитесь завершения');
+      return;
+    }
+    const password = auditPassword;
+    if (password) {
+      sendWs({ type: 'sudo_credentials', password });
+    }
+    const content =
+      'Выполни проверку безопасности сервера с помощью инструмента security_audit' +
+      (password ? ' с параметром privileged: true' : '') +
+      '. Проанализируй результаты и дай отчёт: критичные проблемы, предупреждения, рекомендации.';
+    setMessages((prev) => [...prev, { id: nextId++, role: 'user', content }]);
+    setPlanReady(false);
+    // planMode: false — аудит запускается сразу, минуя режим планирования.
+    sendWs({ type: 'message', content, planMode: false });
+    setAuditPassword('');
+    setAuditOpen(false);
+  };
+
   return (
     <div className="page agent-page">
       <aside className="agent-sidebar">
@@ -375,6 +408,13 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
             />
             План
           </label>
+          <button
+            className="btn btn-ghost"
+            title="Детерминированная проверка безопасности сервера (инструмент security_audit)"
+            onClick={() => setAuditOpen(true)}
+          >
+            Проверка безопасности
+          </button>
           {running && (
             <button className="btn btn-danger" onClick={() => sendWs({ type: 'stop' })}>
               Стоп
@@ -444,6 +484,46 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           </button>
         </div>
       </div>
+
+      {auditOpen && (
+        <Modal title="Проверка безопасности" onClose={() => setAuditOpen(false)}>
+          <p className="muted">
+            Агент выполнит детерминированный аудит сервера (ssh, сеть, обновления, активность,
+            docker, файловая система) и составит отчёт. Для root-проверок (/etc/shadow, sudoers,
+            неудачные логины и т.п.) можно указать sudo-пароль.
+          </p>
+          <div className="form-grid">
+            <label>
+              sudo-пароль (необязательно)
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={auditPassword}
+                onChange={(e) => setAuditPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    startAudit();
+                  }
+                }}
+                placeholder="Без пароля root-проверки будут пропущены"
+              />
+            </label>
+          </div>
+          <p className="muted">
+            Пароль не сохраняется, не передаётся модели и не попадает в историю диалога — он живёт
+            только в памяти текущей сессии агента.
+          </p>
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={() => setAuditOpen(false)}>
+              Отмена
+            </button>
+            <button className="btn btn-primary" onClick={startAudit}>
+              Запустить проверку
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -528,6 +608,7 @@ function ToolCard({ tool, onApprove, onReject }: {
     docker_logs: 'Логи контейнера',
     docker_inspect: 'Inspect Docker',
     docker_action: 'Действие Docker',
+    security_audit: 'Аудит безопасности',
   };
   const name = labels[tool.name] ?? tool.name;
   const preview = (tool.output ?? '').replace(/\s+/g, ' ').trim();
