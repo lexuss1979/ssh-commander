@@ -11,6 +11,8 @@ export interface PortListener {
   process: string | null;
   /** public — 0.0.0.0/::/* (торчит наружу), loopback — 127.x/::1, interface — конкретный IP. */
   scope: 'public' | 'loopback' | 'interface';
+  /** Аннотация: слушатель принадлежит docker-контейнеру (опубликованный порт). */
+  container?: { id: string; name: string };
 }
 
 export interface PortsSnapshot {

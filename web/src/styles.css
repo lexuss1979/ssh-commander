@@ -701,6 +701,48 @@ body.resizing-agent {
   border-color: var(--ok-soft-border);
 }
 
+/* Container ports section */
+.container-ports-section {
+  border-top: 1px solid var(--border);
+  padding: 12px 16px 0;
+}
+
+.container-ports-section .section-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--text);
+}
+
+.container-ports-section .ports-scroll {
+  padding: 0;
+  max-height: 280px;
+}
+
+.container-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.container-host-badge {
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.container-access {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.docker-process {
+  color: var(--accent);
+  font-family: Menlo, Consolas, "JetBrains Mono", "Fira Code", monospace;
+  font-size: 12px;
+}
+
 .link-cell {
   background: none;
   border: none;

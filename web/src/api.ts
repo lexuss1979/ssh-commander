@@ -209,11 +209,30 @@ export interface PortListener {
   process: string | null;
   /** public — слушает наружу, loopback — только 127.x/::1, interface — конкретный IP. */
   scope: 'public' | 'loopback' | 'interface';
+  /** Аннотация: слушатель принадлежит docker-контейнеру (опубликованный порт). */
+  container?: { id: string; name: string };
+}
+
+export interface ContainerPortBinding {
+  containerPort: number;
+  proto: 'tcp' | 'udp';
+  hostIp: string | null;
+  hostPort: number | null;
+}
+
+export interface ContainerPortEntry {
+  containerId: string;
+  name: string;
+  networkMode: string;
+  ip: string | null;
+  ports: ContainerPortBinding[];
 }
 
 export interface PortsSnapshot {
   timestamp: number;
   ports: PortListener[];
+  /** Порты контейнеров (null/undefined — docker недоступен, деградация). */
+  containers?: ContainerPortEntry[];
 }
 
 /** Прослушиваемые порты сервера (вкладка «Порты»). */

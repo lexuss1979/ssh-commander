@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { fetchPorts } from '../api';
-import type { PortListener, PortsSnapshot } from '../api';
+import type { PortListener, PortsSnapshot, ContainerPortEntry, ContainerPortBinding } from '../api';
 import type { Profile } from '../types';
 
 interface Props {
@@ -17,7 +17,7 @@ const SCOPE_LABEL: Record<PortListener['scope'], string> = {
   interface: 'интерфейс',
 };
 
-function matchesFilter(p: PortListener, filter: string): boolean {
+function matchesHostFilter(p: PortListener, filter: string): boolean {
   const q = filter.trim().toLowerCase();
   if (!q) return true;
   return (
@@ -25,7 +25,91 @@ function matchesFilter(p: PortListener, filter: string): boolean {
     p.host.toLowerCase().includes(q) ||
     String(p.port).includes(q) ||
     (p.process ?? '').toLowerCase().includes(q) ||
-    (p.pid !== null && String(p.pid).includes(q))
+    (p.pid !== null && String(p.pid).includes(q)) ||
+    (p.container?.name ?? '').toLowerCase().includes(q)
+  );
+}
+
+function matchesContainerFilter(c: ContainerPortEntry, filter: string): boolean {
+  const q = filter.trim().toLowerCase();
+  if (!q) return true;
+  return (
+    c.name.toLowerCase().includes(q) ||
+    c.containerId.toLowerCase().includes(q) ||
+    (c.ip ?? '').toLowerCase().includes(q) ||
+    c.ports.some((b) => String(b.containerPort).includes(q) || b.proto.includes(q))
+  );
+}
+
+function containerAccessLabel(b: ContainerPortBinding, networkMode: string): string {
+  if (networkMode === 'host') return 'сеть хоста';
+  if (b.hostPort !== null) {
+    const ip = b.hostIp && b.hostIp !== '0.0.0.0' ? `${b.hostIp}:` : '';
+    return `опубликован на ${ip}${b.hostPort}`;
+  }
+  return 'только сеть контейнера';
+}
+
+function ContainerPortsSection({
+  containers,
+  filter,
+}: {
+  containers: ContainerPortEntry[];
+  filter: string;
+}) {
+  const filtered = containers.filter((c) => matchesContainerFilter(c, filter));
+
+  if (containers.length === 0) return null;
+
+  return (
+    <div className="container-ports-section">
+      <h3 className="section-title">Порты контейнеров</h3>
+      <div className="ports-scroll">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Контейнер</th>
+              <th className="col-narrow">IP</th>
+              <th className="col-narrow">Порт</th>
+              <th className="col-narrow">Протокол</th>
+              <th>Доступ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.flatMap((c) =>
+              c.ports.map((b, i) => (
+                <tr key={`${c.containerId}-${b.containerPort}-${b.proto}-${i}`}>
+                  <td className="container-name" title={c.containerId}>
+                    {i === 0 ? c.name : ''}
+                    {i === 0 && c.networkMode === 'host' && (
+                      <span className="muted container-host-badge"> host</span>
+                    )}
+                  </td>
+                  <td>{i === 0 ? (c.ip ?? '—') : ''}</td>
+                  <td className="port-num">{b.containerPort}</td>
+                  <td className="port-proto">{b.proto}</td>
+                  <td>
+                    <span className="container-access">
+                      {containerAccessLabel(b, c.networkMode)}
+                    </span>
+                  </td>
+                </tr>
+              )),
+            )}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={5} className="muted">
+                  Ничего не найдено по фильтру
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <p className="muted ports-hint">
+        Контейнеры с host-сетью видны в основной таблице слушателей.
+      </p>
+    </div>
   );
 }
 
@@ -62,8 +146,9 @@ export function PortsPage({ profile, visible }: Props) {
     };
   }, [profile.id, visible, reloadKey]);
 
-  const ports = (snapshot?.ports ?? []).filter((p) => matchesFilter(p, filter));
+  const ports = (snapshot?.ports ?? []).filter((p) => matchesHostFilter(p, filter));
   const publicCount = (snapshot?.ports ?? []).filter((p) => p.scope === 'public').length;
+  const containers = snapshot?.containers;
 
   return (
     <div className="page ports-page">
@@ -80,13 +165,14 @@ export function PortsPage({ profile, visible }: Props) {
           className="search-input ports-filter"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="Фильтр: порт, адрес, процесс…"
+          placeholder="Фильтр: порт, адрес, процесс, контейнер…"
         />
         <div className="toolbar-actions">
           {snapshot && (
             <span className="muted">
               {snapshot.ports.length} слушателей
               {publicCount > 0 ? ` · ${publicCount} наружу` : ''}
+              {containers ? ` · ${containers.length} контейнеров` : ''}
             </span>
           )}
           <button className="btn btn-ghost" onClick={() => setReloadKey((k) => k + 1)}>
@@ -103,54 +189,63 @@ export function PortsPage({ profile, visible }: Props) {
           </button>
         </div>
       ) : (
-        <div className="ports-scroll">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th className="col-narrow">Протокол</th>
-                <th className="col-narrow">Порт</th>
-                <th>Адрес</th>
-                <th>Процесс</th>
-                <th className="col-narrow">PID</th>
-                <th className="col-narrow">Доступ</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ports.map((p) => (
-                <tr key={`${p.proto}-${p.host}-${p.port}`} className={p.scope === 'public' ? 'port-public' : ''}>
-                  <td className="port-proto">{p.proto}</td>
-                  <td className="port-num">{p.port}</td>
-                  <td className="port-host" title={p.host}>{p.host}</td>
-                  <td className="port-process" title={p.process ?? undefined}>
-                    {p.process ?? <span className="muted">—</span>}
-                  </td>
-                  <td>{p.pid ?? '—'}</td>
-                  <td>
-                    <span className={`scope-badge ${p.scope}`}>{SCOPE_LABEL[p.scope]}</span>
-                  </td>
-                </tr>
-              ))}
-              {snapshot && ports.length === 0 && (
+        <>
+          <div className="ports-scroll">
+            <table className="data-table">
+              <thead>
                 <tr>
-                  <td colSpan={6} className="muted">
-                    {filter.trim() ? 'Ничего не найдено по фильтру' : 'Прослушиваемых портов не найдено'}
-                  </td>
+                  <th className="col-narrow">Протокол</th>
+                  <th className="col-narrow">Порт</th>
+                  <th>Адрес</th>
+                  <th>Процесс</th>
+                  <th className="col-narrow">PID</th>
+                  <th className="col-narrow">Доступ</th>
                 </tr>
-              )}
-              {!snapshot && (
-                <tr>
-                  <td colSpan={6} className="muted">
-                    Загрузка…
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-          <p className="muted ports-hint">
-            Имена процессов других пользователей видны только при подключении под root — без прав
-            колонка «Процесс» остаётся пустой.
-          </p>
-        </div>
+              </thead>
+              <tbody>
+                {ports.map((p) => (
+                  <tr key={`${p.proto}-${p.host}-${p.port}`} className={p.scope === 'public' ? 'port-public' : ''}>
+                    <td className="port-proto">{p.proto}</td>
+                    <td className="port-num">{p.port}</td>
+                    <td className="port-host" title={p.host}>{p.host}</td>
+                    <td className="port-process" title={p.process ?? undefined}>
+                      {p.container
+                        ? <span className="docker-process" title={`Контейнер ${p.container.name}`}>docker: {p.container.name}</span>
+                        : (p.process ?? <span className="muted">—</span>)}
+                    </td>
+                    <td>{p.pid ?? '—'}</td>
+                    <td>
+                      <span className={`scope-badge ${p.scope}`}>{SCOPE_LABEL[p.scope]}</span>
+                    </td>
+                  </tr>
+                ))}
+                {snapshot && ports.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="muted">
+                      {filter.trim() ? 'Ничего не найдено по фильтру' : 'Прослушиваемых портов не найдено'}
+                    </td>
+                  </tr>
+                )}
+                {!snapshot && (
+                  <tr>
+                    <td colSpan={6} className="muted">
+                      Загрузка…
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            <p className="muted ports-hint">
+              Имена процессов других пользователей видны только при подключении под root — без прав
+              колонка «Процесс» остаётся пустой. Опубликованные порты контейнеров видны как
+              безымянный docker-proxy — аннотация «docker: …» закрывает эту дыру.
+            </p>
+          </div>
+
+          {containers && (
+            <ContainerPortsSection containers={containers} filter={filter} />
+          )}
+        </>
       )}
     </div>
   );
