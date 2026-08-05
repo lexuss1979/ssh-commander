@@ -629,6 +629,65 @@ body.resizing-agent {
   white-space: nowrap;
 }
 
+/* Ports */
+.ports-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  scrollbar-gutter: stable;
+}
+
+.ports-filter {
+  flex: 0 1 260px;
+}
+
+.ports-hint {
+  margin: 12px 4px 0;
+  font-size: 12px;
+}
+
+.port-proto,
+.port-num,
+.port-host,
+.port-process {
+  font-family: Menlo, Consolas, "JetBrains Mono", "Fira Code", monospace;
+  font-size: 12px;
+}
+
+/* Порт, слушающий наружу, подсвечиваем в самой колонке */
+.port-public .port-num {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.port-host,
+.port-process {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}
+
+.scope-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.scope-badge.public {
+  color: var(--warn);
+  border-color: var(--warn-soft-border);
+}
+
+.scope-badge.loopback {
+  color: var(--ok);
+  border-color: var(--ok-soft-border);
+}
+
 .link-cell {
   background: none;
   border: none;

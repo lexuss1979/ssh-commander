@@ -4,19 +4,21 @@ import type { Profile } from './types';
 import { LoginPage } from './pages/LoginPage';
 import { ServersPage } from './pages/ServersPage';
 import { OverviewPage } from './pages/OverviewPage';
+import { PortsPage } from './pages/PortsPage';
 import { TerminalPage } from './pages/TerminalPage';
 import { FilesPage } from './pages/FilesPage';
 import { DockerPage } from './pages/DockerPage';
 import { AgentPage } from './pages/AgentPage';
 import { ProfileModal } from './components/ProfileModal';
 
-type Tab = 'servers' | 'overview' | 'terminal' | 'files' | 'docker';
+type Tab = 'servers' | 'overview' | 'terminal' | 'files' | 'docker' | 'ports';
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'overview', label: 'Обзор' },
   { id: 'terminal', label: 'Терминал' },
   { id: 'files', label: 'Файлы' },
   { id: 'docker', label: 'Docker' },
+  { id: 'ports', label: 'Порты' },
 ];
 
 const AGENT_MIN_WIDTH = 360;
@@ -321,6 +323,14 @@ export default function App() {
                       setTerminalContainer({ id, name });
                       setTab('terminal');
                     }}
+                  />
+                </div>
+                <div className={`tab-page ${tab === 'ports' ? '' : 'hidden'}`}>
+                  <PortsPage
+                    key={activeProfile.id}
+                    profile={activeProfile}
+                    showError={showError}
+                    visible={tab === 'ports'}
                   />
                 </div>
               </>

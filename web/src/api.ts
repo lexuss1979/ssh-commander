@@ -201,6 +201,26 @@ export function fetchOverview(): Promise<OverviewResponse> {
   return api<OverviewResponse>('/api/overview');
 }
 
+export interface PortListener {
+  proto: 'tcp' | 'udp';
+  host: string;
+  port: number;
+  pid: number | null;
+  process: string | null;
+  /** public — слушает наружу, loopback — только 127.x/::1, interface — конкретный IP. */
+  scope: 'public' | 'loopback' | 'interface';
+}
+
+export interface PortsSnapshot {
+  timestamp: number;
+  ports: PortListener[];
+}
+
+/** Прослушиваемые порты сервера (вкладка «Порты»). */
+export function fetchPorts(profileId: string): Promise<PortsSnapshot> {
+  return api<PortsSnapshot>(`/api/ports?profileId=${encodeURIComponent(profileId)}`);
+}
+
 export async function fetchTerminalHistory(profileId: string, limit = 100): Promise<string[]> {
   const params = new URLSearchParams({ profileId, limit: String(limit) });
   const data = await api<{ commands: string[] }>(`/api/terminal/history?${params}`);
