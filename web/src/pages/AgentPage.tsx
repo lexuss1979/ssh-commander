@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, formatDate } from '../api';
+import { api, formatRelativeDate } from '../api';
 import type { Dialogue, DialogueMessage, DialogueSummary, Profile } from '../types';
 import { Markdown } from '../components/Markdown';
 import { Modal } from '../components/Modal';
@@ -46,8 +46,11 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   // Модалка «Проверка безопасности»: необязательный sudo-пароль для root-секций аудита.
   const [auditOpen, setAuditOpen] = useState(false);
   const [auditPassword, setAuditPassword] = useState('');
+  // Dropdown с историей диалогов (кнопка «История» в тулбаре).
+  const [historyOpen, setHistoryOpen] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const historyRef = useRef<HTMLDivElement>(null);
   // Актуальные значения для эффекта «Спросить агента» — без добавления в deps,
   // чтобы смена состояния не расходовала запрос повторно.
   const connectedRef = useRef(connected);
@@ -290,6 +293,25 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages]);
 
+  // Dropdown истории: закрывается по клику вне его и по Escape.
+  useEffect(() => {
+    if (!historyOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (historyRef.current && !historyRef.current.contains(e.target as Node)) {
+        setHistoryOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setHistoryOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [historyOpen]);
+
   // Запрос «Спросить агента» из терминала: если WS готов и агент свободен —
   // отправляем сообщение сразу; иначе (нет соединения или идёт выполнение)
   // подставляем текст в поле ввода, чтобы пользователь отправил сам и текущий
@@ -351,45 +373,82 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
 
   return (
     <div className="page agent-page">
-      <aside className="agent-sidebar">
-        <div className="agent-sidebar-head">
-          <span className="sidebar-label">Диалоги</span>
-          <button className="btn btn-primary btn-mini" onClick={() => void startNewDialogue()}>
-            Новый
-          </button>
-        </div>
-        <div className="agent-dialogues">
-          {dialogues.length === 0 && !loading && <div className="muted dialogue-empty">Пока нет диалогов</div>}
-          {dialogues.map((d) => (
-            <div
-              key={d.id}
-              className={`dialogue-item ${d.id === activeDialogueId ? 'active' : ''}`}
-              onClick={() => setActiveDialogueId(d.id)}
-            >
-              <div className="dialogue-item-title" title={d.title}>
-                {d.title}
-              </div>
-              <div className="dialogue-item-meta">
-                {d.messageCount} сообщ. · {formatDate(d.updatedAt)}
-              </div>
-              {d.preview && <div className="dialogue-item-preview">{d.preview}</div>}
-              <button
-                className="dialogue-delete"
-                title="Удалить диалог"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void removeDialogue(d.id);
-                }}
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-        </div>
-      </aside>
-
       <div className="agent-chat">
         <div className="toolbar">
+          <div className="agent-history" ref={historyRef}>
+            <button
+              className={`btn btn-ghost agent-history-btn ${historyOpen ? 'open' : ''}`}
+              title="История диалогов"
+              onClick={() => {
+                const next = !historyOpen;
+                setHistoryOpen(next);
+                if (next) void refreshDialogues();
+              }}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                <path d="M3 3v5h5" />
+                <path d="M12 7v5l4 2" />
+              </svg>
+              История
+            </button>
+            {historyOpen && (
+              <div className="agent-history-dropdown">
+                <div className="agent-history-head">
+                  <span className="sidebar-label">Диалоги</span>
+                  <button
+                    className="btn btn-primary btn-mini"
+                    onClick={() => {
+                      setHistoryOpen(false);
+                      void startNewDialogue();
+                    }}
+                  >
+                    Новый
+                  </button>
+                </div>
+                <div className="agent-history-list">
+                  {dialogues.length === 0 && !loading && (
+                    <div className="muted dialogue-empty">Пока нет диалогов</div>
+                  )}
+                  {dialogues.map((d) => (
+                    <div
+                      key={d.id}
+                      className={`dialogue-item ${d.id === activeDialogueId ? 'active' : ''}`}
+                      onClick={() => {
+                        setActiveDialogueId(d.id);
+                        setHistoryOpen(false);
+                      }}
+                    >
+                      <div className="dialogue-item-title" title={d.title}>
+                        {d.title}
+                      </div>
+                      <div className="dialogue-item-meta">{formatRelativeDate(d.updatedAt)}</div>
+                      <button
+                        className="dialogue-delete"
+                        title="Удалить диалог"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void removeDialogue(d.id);
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
           <span className="muted">
             AI-агент · {profile.name} ({profile.username}@{profile.host})
           </span>

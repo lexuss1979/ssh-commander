@@ -443,17 +443,9 @@ body.resizing-agent {
   background: var(--bg-raised);
 }
 
-/* В узкой панели список диалогов укладывается над чатом, а не сбоку */
-.agent-panel .agent-page {
-  flex-direction: column;
-}
-
-.agent-panel .agent-sidebar {
-  width: auto;
-  flex-shrink: 0;
-  max-height: 170px;
-  border-right: none;
-  border-bottom: 1px solid var(--border);
+/* Dropdown истории диалогов растягивается на всю ширину панели агента */
+.agent-panel .agent-history-dropdown {
+  max-height: 50vh;
 }
 
 .agent-panel .agent-messages {
@@ -534,6 +526,7 @@ body.resizing-agent {
   background: var(--bg-raised);
   min-height: 50px;
   flex-wrap: wrap;
+  position: relative;
 }
 
 .toolbar-actions {
@@ -569,6 +562,7 @@ body.resizing-agent {
 /* Terminal */
 .terminal-page {
   min-height: 0;
+  padding-bottom: 16px;
 }
 
 .terminal-container {
@@ -976,17 +970,38 @@ body.resizing-agent {
   align-items: stretch;
 }
 
-.agent-sidebar {
-  width: 250px;
-  flex-shrink: 0;
+/* Dropdown истории диалогов: обёртка статична, чтобы выпадающий список
+   позиционировался по тулбару и занимал всю ширину панели */
+.agent-history {
+  position: static;
+}
+
+.agent-history-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-history-btn.open {
+  background: var(--bg-input);
+}
+
+.agent-history-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 30;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-right: 1px solid var(--border);
+  max-height: 60vh;
   background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
 }
 
-.agent-sidebar-head {
+.agent-history-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -995,13 +1010,13 @@ body.resizing-agent {
   border-bottom: 1px solid var(--border);
 }
 
-.agent-dialogues {
+.agent-history-list {
   flex: 1;
   overflow-y: auto;
   padding: 8px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   scrollbar-gutter: stable;
 }
 
@@ -1011,11 +1026,10 @@ body.resizing-agent {
 }
 
 .dialogue-item {
-  position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 8px 10px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
   border: 1px solid transparent;
   border-radius: 8px;
   cursor: pointer;
@@ -1031,7 +1045,8 @@ body.resizing-agent {
 }
 
 .dialogue-item-title {
-  padding-right: 18px;
+  flex: 1;
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   overflow: hidden;
@@ -1040,22 +1055,13 @@ body.resizing-agent {
 }
 
 .dialogue-item-meta {
+  flex-shrink: 0;
   font-size: 11px;
   color: var(--muted);
 }
 
-.dialogue-item-preview {
-  font-size: 12px;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .dialogue-delete {
-  position: absolute;
-  top: 6px;
-  right: 6px;
+  flex-shrink: 0;
   padding: 2px 6px;
   border: none;
   border-radius: 4px;

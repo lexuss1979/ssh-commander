@@ -261,3 +261,25 @@ export function formatDate(ms: number): string {
   });
 }
 
+/**
+ * Относительная дата для списков: «только что», «5 мин назад»,
+ * «2 часа назад», иначе — полная дата «04.08.26 16:12».
+ */
+export function formatRelativeDate(ms: number): string {
+  if (!ms) return '—';
+  const minutes = Math.floor((Date.now() - ms) / 60000);
+  if (minutes < 1) return 'только что';
+  if (minutes < 60) return `${minutes} мин назад`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ${pluralHours(hours)} назад`;
+  return formatDate(ms);
+}
+
+function pluralHours(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'час';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'часа';
+  return 'часов';
+}
+
