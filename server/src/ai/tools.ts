@@ -8,6 +8,11 @@ const required = (name: string, description: string) => ({
   required: [name],
 });
 
+// Адресация сервера в мульти-серверном диалоге: необязательное имя профиля
+// из list_servers; без параметра инструмент выполняется на домашнем сервере.
+const serverParam = () =>
+  str('Имя профиля сервера из list_servers; без параметра — домашний сервер диалога');
+
 export const toolDefs: ToolDef[] = [
   {
     type: 'function',
@@ -19,6 +24,7 @@ export const toolDefs: ToolDef[] = [
         type: 'object',
         properties: {
           command: str('Команда для выполнения'),
+          server: serverParam(),
         },
         required: ['command'],
       },
@@ -34,6 +40,7 @@ export const toolDefs: ToolDef[] = [
         type: 'object',
         properties: {
           command: str('Команда для выполнения'),
+          server: serverParam(),
         },
         required: ['command'],
       },
@@ -44,7 +51,14 @@ export const toolDefs: ToolDef[] = [
     function: {
       name: 'read_file',
       description: 'Прочитать текстовый файл на сервере (до 256 КБ).',
-      parameters: required('path', 'Абсолютный путь к файлу'),
+      parameters: {
+        type: 'object',
+        properties: {
+          path: str('Абсолютный путь к файлу'),
+          server: serverParam(),
+        },
+        required: ['path'],
+      },
     },
   },
   {
@@ -53,8 +67,13 @@ export const toolDefs: ToolDef[] = [
       name: 'read_memory',
       description:
         'Прочитать MEMORY.md профиля — заметки, накопленные в прошлых сессиях. Это память приложения, а не файл на удалённом сервере. ' +
-        'В начале сессии её содержимое уже загружено в контекст; вызывай, когда нужно освежить полный текст (например, в длинной сессии).',
-      parameters: { type: 'object', properties: {}, additionalProperties: false },
+        'В начале сессии её содержимое уже загружено в контекст; вызывай, когда нужно освежить полный текст (например, в длинной сессии). ' +
+        'Память ведётся отдельно для каждого сервера — параметр server выбирает, чью память читать.',
+      parameters: {
+        type: 'object',
+        properties: { server: serverParam() },
+        additionalProperties: false,
+      },
     },
   },
   {
@@ -63,12 +82,14 @@ export const toolDefs: ToolDef[] = [
       name: 'write_memory',
       description:
         'Обновить MEMORY.md профиля — записать важные находки для будущих сессий. Требует подтверждения пользователя. ' +
-        'content — это полный новый текст файла: обязательно сохраняй все существующие записи и только добавляй/правь нужное, без дублей.',
+        'content — это полный новый текст файла: обязательно сохраняй все существующие записи и только добавляй/правь нужное, без дублей. ' +
+        'Память ведётся отдельно для каждого сервера — параметр server выбирает, чью память обновить.',
       parameters: {
         type: 'object',
         properties: {
           content: str('Полный новый текст MEMORY.md (существующие записи + изменения)'),
           reason: str('Короткое пояснение для пользователя, что и зачем записывается'),
+          server: serverParam(),
         },
         required: ['content'],
       },
@@ -79,7 +100,14 @@ export const toolDefs: ToolDef[] = [
     function: {
       name: 'list_dir',
       description: 'Показать содержимое директории на сервере.',
-      parameters: required('path', 'Абсолютный путь к директории'),
+      parameters: {
+        type: 'object',
+        properties: {
+          path: str('Абсолютный путь к директории'),
+          server: serverParam(),
+        },
+        required: ['path'],
+      },
     },
   },
   {
@@ -92,6 +120,7 @@ export const toolDefs: ToolDef[] = [
         properties: {
           path: str('Абсолютный путь к файлу'),
           content: str('Содержимое файла'),
+          server: serverParam(),
         },
         required: ['path', 'content'],
       },
@@ -102,7 +131,11 @@ export const toolDefs: ToolDef[] = [
     function: {
       name: 'docker_ps',
       description: 'Список контейнеров Docker (все, включая остановленные).',
-      parameters: { type: 'object', properties: {}, additionalProperties: false },
+      parameters: {
+        type: 'object',
+        properties: { server: serverParam() },
+        additionalProperties: false,
+      },
     },
   },
   {
@@ -115,6 +148,7 @@ export const toolDefs: ToolDef[] = [
         properties: {
           containerId: str('ID или имя контейнера'),
           tail: str('Количество строк (по умолчанию 100)'),
+          server: serverParam(),
         },
         required: ['containerId'],
       },
@@ -125,7 +159,14 @@ export const toolDefs: ToolDef[] = [
     function: {
       name: 'docker_inspect',
       description: 'Подробная информация о контейнере, образе, volume или сети Docker.',
-      parameters: required('target', 'ID или имя объекта Docker'),
+      parameters: {
+        type: 'object',
+        properties: {
+          target: str('ID или имя объекта Docker'),
+          server: serverParam(),
+        },
+        required: ['target'],
+      },
     },
   },
   {
@@ -149,6 +190,7 @@ export const toolDefs: ToolDef[] = [
             description:
               'Выполнить root-проверки через sudo (работает, только если пользователь ввёл sudo-пароль в интерфейсе; пароль модели недоступен)',
           },
+          server: serverParam(),
         },
         required: [],
       },
@@ -178,9 +220,30 @@ export const toolDefs: ToolDef[] = [
             description: 'Переменные окружения вида "KEY=VALUE" (для run)',
           },
           command: str('Команда внутри контейнера (для run)'),
+          server: serverParam(),
         },
         required: ['action'],
       },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_servers',
+      description:
+        'Список всех серверов (профилей подключения) приложения: имя, host, порт, пользователь, заметка и признак подключения к текущему диалогу. ' +
+        'Секреты не возвращаются. Выполняется автоматически без подтверждения. ' +
+        'Инструменты можно выполнять только на подключённых к диалогу серверах (connected=true) — остальные подключай через connect_server.',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'connect_server',
+      description:
+        'Подключить сервер к текущему диалогу по имени из list_servers, чтобы выполнять на нём инструменты. Требует подтверждения пользователя.',
+      parameters: required('server', 'Имя профиля из list_servers'),
     },
   },
   {
@@ -206,6 +269,7 @@ export const READ_ONLY_TOOLS = new Set([
   'docker_inspect',
   'security_audit',
   'web_search',
+  'list_servers',
 ]);
 
 /**

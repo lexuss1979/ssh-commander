@@ -64,8 +64,15 @@ export default function App() {
   const [agentWidth, setAgentWidth] = useState<number>(loadAgentWidth);
   const [agentOpen, setAgentOpen] = useState<boolean>(loadAgentOpen);
   // Одноразовый запрос из терминала («Спросить агента»): AgentPage расходует
-  // его и сбрасывает через onAgentRequestConsumed.
-  const [agentRequest, setAgentRequest] = useState<{ id: number; text: string } | null>(null);
+  // его и сбрасывает через onAgentRequestConsumed. profileId — панель агента
+  // того профиля, из терминала которого пришёл запрос.
+  const [agentRequest, setAgentRequest] = useState<{ id: number; text: string; profileId: string } | null>(null);
+  // Keep-alive панели агента: монтируются для всех посещённых за сессию
+  // профилей, неактивные скрываются display:none — WS и чат-стейт живут.
+  const [visitedProfileIds, setVisitedProfileIds] = useState<string[]>([]);
+  // Активность агента по профилям для индикатора в сайдбаре:
+  // 'pending' (ждёт подтверждения) важнее 'running'.
+  const [agentActivity, setAgentActivity] = useState<Record<string, 'running' | 'pending'>>({});
   const toastTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -176,13 +183,39 @@ export default function App() {
     setProfiles([]);
     setActiveProfileId('');
     setTab('servers');
+    setVisitedProfileIds([]);
+    setAgentActivity({});
   }, []);
 
-  // Кнопка «Спросить агента» в терминале: раскрывает панель и передаёт контекст.
-  const handleAskAgent = useCallback((text: string) => {
-    setAgentOpen(true);
-    setAgentRequest({ id: Date.now(), text });
+  // Панель агента монтируется при первом посещении профиля и дальше живёт.
+  useEffect(() => {
+    if (!activeProfileId) return;
+    setVisitedProfileIds((prev) => (prev.includes(activeProfileId) ? prev : [...prev, activeProfileId]));
+  }, [activeProfileId]);
+
+  // AgentPage сообщает о своей активности; null — снять индикатор.
+  const handleAgentActivity = useCallback((profileId: string, state: 'running' | 'pending' | null) => {
+    setAgentActivity((prev) => {
+      if (state === null) {
+        if (!(profileId in prev)) return prev;
+        const next = { ...prev };
+        delete next[profileId];
+        return next;
+      }
+      if (prev[profileId] === state) return prev;
+      return { ...prev, [profileId]: state };
+    });
   }, []);
+
+  // Кнопка «Спросить агента» в терминале: раскрывает панель и передаёт контекст
+  // панели того профиля, чей терминал прислал запрос (терминал — активного).
+  const handleAskAgent = useCallback(
+    (text: string) => {
+      setAgentOpen(true);
+      setAgentRequest({ id: Date.now(), text, profileId: activeProfileId });
+    },
+    [activeProfileId],
+  );
 
   // Drag-разделитель панели агента: ширина считается от правого края окна.
   const onResizerMouseDown = useCallback(
@@ -256,6 +289,7 @@ export default function App() {
                   ? 'доступен'
                   : `недоступен: ${st.error ?? 'нет данных'}`
                 : 'статус проверяется';
+              const activity = agentActivity[p.id];
               return (
                 <button
                   key={p.id}
@@ -270,6 +304,16 @@ export default function App() {
                   <span className="profile-item-head">
                     <span className={`status-dot${dotClass ? ` ${dotClass}` : ''}`} />
                     <strong>{p.name}</strong>
+                    {activity && (
+                      <span
+                        className={`agent-dot ${activity}`}
+                        title={
+                          activity === 'pending'
+                            ? 'Агент ждёт подтверждения действия'
+                            : 'Агент выполняет задачу'
+                        }
+                      />
+                    )}
                   </span>
                   <span className="muted">
                     {p.username}@{p.host}
@@ -414,13 +458,24 @@ export default function App() {
                   »
                 </button>
               </div>
-              <AgentPage
-                key={activeProfile.id}
-                profile={activeProfile}
-                showError={showError}
-                agentRequest={agentRequest}
-                onAgentRequestConsumed={() => setAgentRequest(null)}
-              />
+              {visitedProfileIds.map((id) => {
+                const p = profiles.find((pr) => pr.id === id);
+                if (!p) return null;
+                return (
+                  <div
+                    key={id}
+                    className={`agent-page-slot${id === activeProfileId ? '' : ' hidden'}`}
+                  >
+                    <AgentPage
+                      profile={p}
+                      showError={showError}
+                      agentRequest={agentRequest?.profileId === id ? agentRequest : null}
+                      onAgentRequestConsumed={() => setAgentRequest(null)}
+                      onActivity={handleAgentActivity}
+                    />
+                  </div>
+                );
+              })}
             </aside>
           )}
         </div>

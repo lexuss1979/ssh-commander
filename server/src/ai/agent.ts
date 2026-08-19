@@ -28,8 +28,11 @@ import {
   dockerExec,
 } from '../services/docker.js';
 import { runSecurityAudit } from '../services/security-audit.js';
+import { getProfile, listProfiles } from '../profiles.js';
 import {
+  attachProfileToDialogue,
   createDialogue,
+  detachProfileFromDialogue,
   getDialogue,
   saveDialogueMessages,
   type Dialogue,
@@ -61,20 +64,35 @@ export class AgentSession {
   private loopAbort: AbortController | null = null;
   // План составлен и ждёт approve_plan (или правок обычным message с planMode=true).
   private planPending = false;
-  // sudo-пароль для привилегированного security_audit. Только в памяти сессии:
-  // не логируется, не попадает в сообщения диалога/на диск, не передаётся модели.
-  // Очищается в stop()/onWsClose().
-  private sudoPassword: string | null = null;
+  // sudo-пароли для привилегированного security_audit по серверам диалога
+  // (profileId → пароль). Только в памяти сессии: не логируются, не попадают
+  // в сообщения диалога/на диск, не передаются модели.
+  // Очищаются в stop()/onWsClose() и при detach сервера.
+  private sudoPasswords = new Map<string, string>();
+  // Серверы, подключённые к диалогу: домашний всегда, остальные — через
+  // connect_server (approve) или attach_server (действие пользователя).
+  private attached = new Map<string, Profile>();
 
   constructor(
-    private profile: Profile,
+    private homeProfile: Profile,
     private ws: WebSocket,
     dialogue?: Dialogue,
   ) {
-    this.dialogueId = dialogue?.id ?? createDialogue(profile.id).id;
+    this.dialogueId = dialogue?.id ?? createDialogue(homeProfile.id).id;
+    this.attached.set(homeProfile.id, homeProfile);
+    // Подгружаем серверы, сохранённые в диалоге прошлой сессией;
+    // несуществующие профили пропускаем, диалог от этого не ломается.
+    for (const extraId of dialogue?.extraProfileIds ?? []) {
+      const extra = getProfile(extraId);
+      if (extra) {
+        this.attached.set(extra.id, extra);
+      } else {
+        console.warn(`dialogue ${this.dialogueId}: attached profile ${extraId} not found, skipped`);
+      }
+    }
     let systemPrompt =
       'Ты — AI-ассистент для администрирования удалённого Linux-сервера ' +
-      `${profile.username}@${profile.host}. ` +
+      `${homeProfile.username}@${homeProfile.host}. ` +
       'Ты работаешь только через предоставленные инструменты, не выдумывай результаты. ' +
       'Инструменты чтения (exec_readonly, read_file, list_dir, docker_ps, docker_logs, docker_inspect, read_memory, security_audit) выполняются автоматически. ' +
       'Инструменты записи (exec, write_file, docker_action, write_memory) требуют подтверждения пользователя — не пытайся обойти это ограничение, ' +
@@ -93,13 +111,26 @@ export class AgentSession {
       'Предлагай запись через write_memory после того, как нашёл такое знание; пиши кратко и структурированно (markdown: заголовки, короткие пункты). ' +
       'write_memory принимает полный новый текст файла: обязательно сохраняй все прежние записи и только добавляй/правь нужное, без дублей. ' +
       'Не записывай память через exec/write_file — только через write_memory.';
+    // Мульти-серверность: домашний сервер диалога + подключённые к нему.
+    systemPrompt +=
+      ' Этот диалог привязан к домашнему серверу — инструменты без параметра server выполняются на нём. ' +
+      'К диалогу могут быть подключены дополнительные серверы: полный список профилей показывает list_servers ' +
+      '(поле connected), а выполнять инструменты можно только на подключённых — при работе не с домашним сервером ' +
+      'всегда указывай его имя в параметре server явно. ' +
+      'Чтобы подключить новый сервер, вызови connect_server (потребуется подтверждение пользователя) или попроси пользователя добавить его. ' +
+      'Не путай факты между серверами: в отчётах всегда подписывай, к какому серверу относится информация. ' +
+      'Память (MEMORY.md) ведётся отдельно для каждого сервера — read_memory/write_memory с параметром server работают с памятью указанного сервера.';
+    const attachedNames = [...this.attached.values()].map((p) => p.name);
+    if (attachedNames.length > 1) {
+      systemPrompt += ` Сейчас к диалогу подключены серверы: ${attachedNames.join(', ')}.`;
+    }
     if (isSearchConfigured()) {
       systemPrompt +=
         ' Инструмент web_search ищет в интернете (документация, changelog, актуальные версии) и выполняется автоматически ' +
         'без подтверждения — используй его, когда нужен свежий или неизвестный факт (версии, релизы, настройки сервисов), ' +
         'вместо ответа по памяти.';
     }
-    const memoryBlock = memoryPromptBlock(profile.id);
+    const memoryBlock = memoryPromptBlock(homeProfile.id);
     if (memoryBlock) {
       systemPrompt += `\n\n${memoryBlock}`;
     }
@@ -126,6 +157,127 @@ export class AgentSession {
 
   notifyDialogue(): void {
     this.send({ type: 'dialogue', id: this.dialogueId });
+  }
+
+  /** Событие `servers` — шапка панели агента синхронизируется по нему. */
+  notifyServers(): void {
+    this.send(this.serversEvent());
+  }
+
+  /**
+   * Резолвит параметр `server` инструмента в подключённый профиль.
+   * Без имени — домашний сервер; имя матчится точно, затем без учёта регистра.
+   * Ошибка — не исключение: возвращается текст для обычного tool_result,
+   * чтобы цикл агента не падал на опечатке модели.
+   */
+  resolveServer(name?: string): { profile: Profile } | { error: string } {
+    const trimmed = (name ?? '').trim();
+    if (!trimmed) {
+      return { profile: this.homeProfile };
+    }
+    const attached = [...this.attached.values()];
+    const exact = attached.find((p) => p.name === trimmed);
+    if (exact) {
+      return { profile: exact };
+    }
+    const lower = trimmed.toLowerCase();
+    const insensitive = attached.find((p) => p.name.toLowerCase() === lower);
+    if (insensitive) {
+      return { profile: insensitive };
+    }
+    const known = this.findProfileByName(trimmed);
+    if (known) {
+      return {
+        error:
+          `Сервер «${known.name}» не подключён к диалогу — вызови connect_server ` +
+          'или попроси пользователя подключить его.',
+      };
+    }
+    const available = attached.map((p) => p.name).join(', ');
+    return {
+      error:
+        `Неизвестный сервер «${trimmed}». Подключённые к диалогу серверы: ${available}. ` +
+        'Полный список профилей — инструмент list_servers.',
+    };
+  }
+
+  /** Ручное подключение сервера к диалогу (WS attach_server) — без approve. */
+  attachServerById(profileId: string): { ok: true } | { ok: false; error: string } {
+    const profile = getProfile(profileId);
+    if (!profile) {
+      return { ok: false, error: `Профиль ${profileId} не найден` };
+    }
+    if (!this.attached.has(profile.id)) {
+      try {
+        attachProfileToDialogue(this.dialogueId, profile.id);
+      } catch (err) {
+        return { ok: false, error: String((err as Error).message ?? err) };
+      }
+      this.attached.set(profile.id, profile);
+      this.notifyServers();
+    }
+    return { ok: true };
+  }
+
+  /** Отключение сервера от диалога (WS detach_server). Домашний — нельзя. */
+  detachServerById(profileId: string): { ok: true } | { ok: false; error: string } {
+    if (profileId === this.homeProfile.id) {
+      return { ok: false, error: 'Домашний сервер диалога отцепить нельзя' };
+    }
+    if (this.attached.delete(profileId)) {
+      try {
+        detachProfileFromDialogue(this.dialogueId, profileId);
+      } catch (err) {
+        console.warn(`Failed to detach profile ${profileId} from dialogue ${this.dialogueId}:`, err);
+      }
+      this.sudoPasswords.delete(profileId);
+      this.notifyServers();
+    }
+    return { ok: true };
+  }
+
+  private serversEvent(): WsMessage {
+    return {
+      type: 'servers',
+      home: this.homeProfile.id,
+      attached: [...this.attached.values()].map((p) => ({
+        id: p.id,
+        name: p.name,
+        host: p.host,
+        username: p.username,
+      })),
+    };
+  }
+
+  /** Профиль по имени среди всех профилей приложения (точно, затем без регистра). */
+  private findProfileByName(name: string): Profile | undefined {
+    const all = listProfiles();
+    const exact = all.find((p) => p.name === name);
+    if (exact) {
+      return exact;
+    }
+    const lower = name.toLowerCase();
+    return all.find((p) => p.name.toLowerCase() === lower);
+  }
+
+  /**
+   * Имя сервера для событий tool_start/tool_pending/tool_result (бейдж в UI).
+   * Для connect_server — имя целевого сервера (он ещё не подключён);
+   * для list_servers/web_search сервер не имеет смысла — поле опускается.
+   */
+  private serverLabelFor(name: string, args: Record<string, unknown>): string | undefined {
+    const raw = typeof args.server === 'string' ? args.server.trim() : '';
+    if (name === 'connect_server') {
+      return raw ? (this.findProfileByName(raw)?.name ?? raw) : undefined;
+    }
+    if (name === 'list_servers' || name === 'web_search') {
+      return undefined;
+    }
+    const resolved = this.resolveServer(raw || undefined);
+    if ('profile' in resolved) {
+      return resolved.profile.name;
+    }
+    return raw || undefined;
   }
 
   handleClientMessage(data: WsMessage): void {
@@ -174,8 +326,31 @@ export class AgentSession {
       case 'sudo_credentials': {
         // sudo-пароль для привилегированного security_audit: только поле сессии
         // в памяти. НЕ логировать, НЕ сохранять в диалог, НЕ передавать модели.
+        // profileId выбирает сервер диалога (по умолчанию — домашний).
         const password = typeof data.password === 'string' ? data.password : '';
-        this.sudoPassword = password || null;
+        const profileId =
+          typeof data.profileId === 'string' && data.profileId ? data.profileId : this.homeProfile.id;
+        if (password) {
+          this.sudoPasswords.set(profileId, password);
+        } else {
+          this.sudoPasswords.delete(profileId);
+        }
+        break;
+      }
+      case 'attach_server': {
+        // Ручное подключение сервера чипом «+» — действие самого пользователя,
+        // approve не требуется.
+        const result = this.attachServerById(String(data.profileId ?? ''));
+        if (!result.ok) {
+          this.send({ type: 'error', message: result.error });
+        }
+        break;
+      }
+      case 'detach_server': {
+        const result = this.detachServerById(String(data.profileId ?? ''));
+        if (!result.ok) {
+          this.send({ type: 'error', message: result.error });
+        }
         break;
       }
       case 'stop': {
@@ -188,8 +363,8 @@ export class AgentSession {
   stop(): void {
     this.stopRequested = true;
     this.planPending = false;
-    // Пароль sudo не должен жить дольше текущего запуска.
-    this.sudoPassword = null;
+    // Пароли sudo не должны жить дольше текущего запуска.
+    this.sudoPasswords.clear();
     this.loopAbort?.abort();
     for (const pending of this.pending.values()) {
       pending.resolve('aborted');
@@ -326,16 +501,18 @@ export class AgentSession {
           if (this.stopRequested) break;
           const { name, args } = this.parseCall(call);
           const readOnly = READ_ONLY_TOOLS.has(name);
+          const server = this.serverLabelFor(name, args);
 
           if (readOnly) {
             // Живая видимость read-only вызова: карточка «выполняется…» до
             // результата (без кнопок подтверждения — в отличие от tool_pending).
-            this.send({ type: 'tool_start', callId: call.id, name, args });
+            this.send({ type: 'tool_start', callId: call.id, name, args, server });
             const result = await this.runTool(name, args);
             this.send({
               type: 'tool_result',
               callId: call.id,
               name,
+              server,
               status: result.status,
               output: result.output,
               truncated: result.truncated,
@@ -347,7 +524,7 @@ export class AgentSession {
               content: result.output,
             });
           } else {
-            this.send({ type: 'tool_pending', callId: call.id, name, args });
+            this.send({ type: 'tool_pending', callId: call.id, name, args, server });
             const decision = await this.waitDecision(call.id);
             if (decision === 'rejected' || decision === 'aborted') {
               const output = decision === 'aborted'
@@ -357,6 +534,7 @@ export class AgentSession {
                 type: 'tool_result',
                 callId: call.id,
                 name,
+                server,
                 status: 'rejected',
                 output,
               });
@@ -372,6 +550,7 @@ export class AgentSession {
                 type: 'tool_result',
                 callId: call.id,
                 name,
+                server,
                 status: result.status,
                 output: result.output,
                 truncated: result.truncated,
@@ -437,11 +616,94 @@ export class AgentSession {
     return { status: 'ok', ...this.truncate(output) };
   }
 
+  /** Вывод list_servers: все профили без секретов + признак подключения к диалогу. */
+  private listServersOutput(): string {
+    const rows = listProfiles().map((p) => ({
+      name: p.name,
+      host: p.host,
+      port: p.port,
+      username: p.username,
+      note: p.note,
+      connected: this.attached.has(p.id),
+    }));
+    return JSON.stringify(rows, null, 2);
+  }
+
+  /**
+   * Подключение сервера к диалогу по approve: запись в extraProfileIds диалога
+   * и в attached сессии. tool_result включает блок памяти подключаемого
+   * сервера — так память попадает в контекст лениво, не раздувая промпт.
+   */
+  private connectServer(name: string): { status: 'ok' | 'error'; output: string; truncated: boolean } {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return { status: 'error', output: 'Не указано имя сервера (параметр server).', truncated: false };
+    }
+    const target = this.findProfileByName(trimmed);
+    if (!target) {
+      const available = listProfiles().map((p) => p.name).join(', ');
+      return {
+        status: 'error',
+        output: `Неизвестный сервер «${trimmed}». Доступные профили: ${available || '(профилей нет)'}.`,
+        truncated: false,
+      };
+    }
+    if (this.attached.has(target.id)) {
+      return { status: 'ok', output: `Сервер «${target.name}» уже подключён к диалогу.`, truncated: false };
+    }
+    attachProfileToDialogue(this.dialogueId, target.id);
+    this.attached.set(target.id, target);
+    this.notifyServers();
+    let output = `Сервер «${target.name}» (${target.username}@${target.host}) подключён к диалогу.`;
+    const memoryBlock = memoryPromptBlock(target.id);
+    if (memoryBlock) {
+      output += `\n\n${memoryBlock}`;
+    }
+    return { status: 'ok', ...this.truncate(output) };
+  }
+
   private async runTool(
     name: string,
     args: Record<string, unknown>,
   ): Promise<{ status: 'ok' | 'error'; output: string; truncated: boolean }> {
     try {
+      // Инструменты без привязки к подключённому серверу: список профилей,
+      // подключение сервера к диалогу и сетевой веб-поиск.
+      if (name === 'list_servers') {
+        return { status: 'ok', ...this.truncate(this.listServersOutput()) };
+      }
+      if (name === 'connect_server') {
+        return this.connectServer(String(args.server ?? ''));
+      }
+      if (name === 'web_search') {
+        // Двойной гейтинг: без конфигурации инструмент модели не объявляется,
+        // но вызов может прийти из старого диалога — отвечаем понятной ошибкой.
+        if (!isSearchConfigured()) {
+          return {
+            status: 'error',
+            output: 'Веб-поиск не настроен на сервере приложения (AI_SEARCH_API_BASE пуст).',
+            truncated: false,
+          };
+        }
+        this.searchCalls += 1;
+        if (this.searchCalls > MAX_SEARCH_CALLS_PER_RUN) {
+          return {
+            status: 'error',
+            output: `Достигнут лимит поисковых запросов (${MAX_SEARCH_CALLS_PER_RUN} за запуск).`,
+            truncated: false,
+          };
+        }
+        const result = await searchWeb(String(args.query ?? ''));
+        return { status: result.ok ? 'ok' : 'error', ...this.truncate(result.output) };
+      }
+      // Остальные инструменты адресуются серверу: параметр `server` (имя
+      // профиля), по умолчанию — домашний сервер диалога. Ошибка резолва —
+      // обычный tool_result с текстом, цикл не падает.
+      const resolved = this.resolveServer(typeof args.server === 'string' ? args.server : undefined);
+      if ('error' in resolved) {
+        return { status: 'error', output: resolved.error, truncated: false };
+      }
+      const profile = resolved.profile;
       switch (name) {
         case 'exec_readonly': {
           const command = String(args.command ?? '');
@@ -449,25 +711,25 @@ export class AgentSession {
           if (!guard.ok) {
             return { status: 'error', output: `Отклонено: ${guard.reason}`, truncated: false };
           }
-          const result = await exec(this.profile, command, { timeoutMs: 60000 });
+          const result = await exec(profile, command, { timeoutMs: 60000 });
           return this.execToolResult(result);
         }
         case 'exec': {
           const command = String(args.command ?? '');
-          const result = await exec(this.profile, command, { timeoutMs: 120000 });
+          const result = await exec(profile, command, { timeoutMs: 120000 });
           return this.execToolResult(result);
         }
         case 'read_file': {
           const path = String(args.path ?? '');
-          const stat = await withSftp(this.profile, (sftp) => sftpStat(sftp, path));
+          const stat = await withSftp(profile, (sftp) => sftpStat(sftp, path));
           if ((stat.size ?? 0) > 256 * 1024) {
             return { status: 'error', output: 'Файл больше 256 КБ — используйте exec_readonly (head/tail).', truncated: false };
           }
-          const content = await withSftp(this.profile, (sftp) => sftpReadFile(sftp, path, 'utf8'));
+          const content = await withSftp(profile, (sftp) => sftpReadFile(sftp, path, 'utf8'));
           return { status: 'ok', ...this.truncate(content) };
         }
         case 'read_memory': {
-          const content = readMemory(this.profile.id);
+          const content = readMemory(profile.id);
           return {
             status: 'ok',
             ...this.truncate(content ?? '(MEMORY.md пока нет — записей из прошлых сессий нет)'),
@@ -478,12 +740,12 @@ export class AgentSession {
           if (!content.trim()) {
             return { status: 'error', output: 'Пустое содержимое MEMORY.md — запись отменена.', truncated: false };
           }
-          const { bytes } = writeMemory(this.profile.id, content);
+          const { bytes } = writeMemory(profile.id, content);
           return { status: 'ok', output: `MEMORY.md обновлён (${bytes} байт).`, truncated: false };
         }
         case 'list_dir': {
           const path = String(args.path ?? '/');
-          const entries = await withSftp(this.profile, (sftp) => sftpReaddir(sftp, path));
+          const entries = await withSftp(profile, (sftp) => sftpReaddir(sftp, path));
           const lines = entries.map((e) => {
             const a = e.attrs;
             const isDir = (a.mode & 0o170000) === 0o040000;
@@ -495,11 +757,11 @@ export class AgentSession {
         case 'write_file': {
           const path = String(args.path ?? '');
           const content = String(args.content ?? '');
-          await withSftp(this.profile, (sftp) => sftpWriteFile(sftp, path, content));
+          await withSftp(profile, (sftp) => sftpWriteFile(sftp, path, content));
           return { status: 'ok', output: `Файл ${path} записан (${content.length} символов).`, truncated: false };
         }
         case 'docker_ps': {
-          const containers = await listContainers(this.profile);
+          const containers = await listContainers(profile);
           const lines = containers.map((c) =>
             `${String(c.ID ?? c.ContainerID ?? '').slice(0, 12)} ${String(c.Image ?? '')} ${String(c.Status ?? '')} ${String(c.Names ?? '')}`,
           );
@@ -508,13 +770,13 @@ export class AgentSession {
         case 'docker_logs': {
           const id = String(args.containerId ?? '');
           const tail = String(args.tail ?? '100');
-          const result = await dockerExec(this.profile, ['logs', '--tail', tail, id], { timeoutMs: 60000 });
+          const result = await dockerExec(profile, ['logs', '--tail', tail, id], { timeoutMs: 60000 });
           const output = [result.stdout, result.stderr].filter(Boolean).join('\n') || '(логов нет)';
           return { status: 'ok', ...this.truncate(output) };
         }
         case 'docker_inspect': {
           const target = String(args.target ?? '');
-          const data = await inspect(this.profile, target);
+          const data = await inspect(profile, target);
           return { status: 'ok', ...this.truncate(JSON.stringify(data, null, 2)) };
         }
         case 'security_audit': {
@@ -523,34 +785,14 @@ export class AgentSession {
             : undefined;
           // privileged подставляется сервером, а не доверяется модели: root-проверки
           // выполняются, только когда пользователь ввёл sudo-пароль в UI (он хранится
-          // в сессии и модели недоступен).
-          const output = await runSecurityAudit(this.profile, {
+          // в сессии и модели недоступен). Пароль берётся для целевого сервера.
+          const sudoPassword = this.sudoPasswords.get(profile.id);
+          const output = await runSecurityAudit(profile, {
             sections,
-            privileged: this.sudoPassword != null,
-            sudoPassword: this.sudoPassword ?? undefined,
+            privileged: sudoPassword != null,
+            sudoPassword,
           });
           return { status: 'ok', ...this.truncate(output) };
-        }
-        case 'web_search': {
-          // Двойной гейтинг: без конфигурации инструмент модели не объявляется,
-          // но вызов может прийти из старого диалога — отвечаем понятной ошибкой.
-          if (!isSearchConfigured()) {
-            return {
-              status: 'error',
-              output: 'Веб-поиск не настроен на сервере приложения (AI_SEARCH_API_BASE пуст).',
-              truncated: false,
-            };
-          }
-          this.searchCalls += 1;
-          if (this.searchCalls > MAX_SEARCH_CALLS_PER_RUN) {
-            return {
-              status: 'error',
-              output: `Достигнут лимит поисковых запросов (${MAX_SEARCH_CALLS_PER_RUN} за запуск).`,
-              truncated: false,
-            };
-          }
-          const result = await searchWeb(String(args.query ?? ''));
-          return { status: result.ok ? 'ok' : 'error', ...this.truncate(result.output) };
         }
         case 'docker_action': {
           const action = String(args.action ?? '');
@@ -560,19 +802,19 @@ export class AgentSession {
             case 'start':
             case 'stop':
             case 'restart':
-              output = await containerAction(this.profile, action, target);
+              output = await containerAction(profile, action, target);
               break;
             case 'rm':
-              output = await containerAction(this.profile, 'rm', target);
+              output = await containerAction(profile, 'rm', target);
               break;
             case 'pull':
-              output = await pullImage(this.profile, String(args.image ?? ''));
+              output = await pullImage(profile, String(args.image ?? ''));
               break;
             case 'rmi':
-              output = await removeImage(this.profile, target);
+              output = await removeImage(profile, target);
               break;
             case 'run':
-              output = await runContainer(this.profile, {
+              output = await runContainer(profile, {
                 image: String(args.image ?? ''),
                 name: args.name ? String(args.name) : undefined,
                 ports: Array.isArray(args.ports) ? args.ports.map(String) : [],
@@ -595,6 +837,8 @@ export class AgentSession {
   }
 }
 
+// Реестр активных сессий: ключ — домашний профиль диалога (модель
+// «одна сессия на профиль» сохраняется и в мульти-серверном режиме).
 const sessions = new Map<string, AgentSession>();
 
 export function attachAgent(ws: WebSocket, profile: Profile, dialogueId?: string): AgentSession {
@@ -610,6 +854,8 @@ export function attachAgent(ws: WebSocket, profile: Profile, dialogueId?: string
   let dialogue: Dialogue | undefined;
   if (dialogueId) {
     const found = getDialogue(dialogueId);
+    // Домашний профиль диалога обязан совпасть; extraProfileIds подгружаются
+    // в конструкторе сессии (несуществующие пропускаются с warning).
     if (found?.profileId === profile.id) {
       dialogue = found;
     }
@@ -617,6 +863,7 @@ export function attachAgent(ws: WebSocket, profile: Profile, dialogueId?: string
   const session = new AgentSession(profile, ws, dialogue);
   sessions.set(profile.id, session);
   session.notifyDialogue();
+  session.notifyServers();
   ws.on('close', () => {
     session.onWsClose();
     if (sessions.get(profile.id) === session) {

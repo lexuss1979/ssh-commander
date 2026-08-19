@@ -96,4 +96,42 @@ describe('dialogues store', () => {
     expect(raw.dialogues.some((x: { id: string }) => x.id === d.id)).toBe(true);
     store.deleteDialogue(d.id);
   });
+
+  it('attaches and detaches extra profiles (round-trip)', () => {
+    const profileId = uniqueProfile();
+    const extraA = uniqueProfile();
+    const extraB = uniqueProfile();
+    const d = store.createDialogue(profileId);
+    expect(d.extraProfileIds).toBeUndefined();
+
+    store.attachProfileToDialogue(d.id, extraA);
+    store.attachProfileToDialogue(d.id, extraB);
+    // Повторное подключение идемпотентно, домашний не дублируется в extra.
+    store.attachProfileToDialogue(d.id, extraA);
+    store.attachProfileToDialogue(d.id, profileId);
+    let got = store.getDialogue(d.id);
+    expect(got?.extraProfileIds).toEqual([extraA, extraB]);
+    // Сводка списка тоже отдаёт extraProfileIds (бейдж «+N серверов»).
+    expect(store.listDialogues(profileId)[0].extraProfileIds).toEqual([extraA, extraB]);
+    // Сохранение сообщений поле не затирает.
+    store.saveDialogueMessages(d.id, [{ role: 'user', content: 'вопрос' }]);
+    expect(store.getDialogue(d.id)?.extraProfileIds).toEqual([extraA, extraB]);
+
+    store.detachProfileFromDialogue(d.id, extraA);
+    got = store.getDialogue(d.id);
+    expect(got?.extraProfileIds).toEqual([extraB]);
+    // Отцепление отсутствующего — no-op, ошибки нет.
+    store.detachProfileFromDialogue(d.id, extraA);
+    expect(store.getDialogue(d.id)?.extraProfileIds).toEqual([extraB]);
+    store.deleteDialogue(d.id);
+  });
+
+  it('refuses to detach the home profile', () => {
+    const profileId = uniqueProfile();
+    const d = store.createDialogue(profileId);
+    expect(() => store.detachProfileFromDialogue(d.id, profileId)).toThrow(/домашний/i);
+    expect(() => store.attachProfileToDialogue('missing-dialogue', uniqueProfile())).toThrow();
+    expect(() => store.detachProfileFromDialogue('missing-dialogue', uniqueProfile())).toThrow();
+    store.deleteDialogue(d.id);
+  });
 });

@@ -9,6 +9,9 @@ import { sanitizeMessages } from './messages.js';
 export interface Dialogue {
   id: string;
   profileId: string;
+  // Дополнительные профили, подключённые к мульти-серверному диалогу
+  // (profileId — домашний, он подключён всегда и сюда не входит).
+  extraProfileIds?: string[];
   title: string;
   messages: ChatMessage[];
   messageCount: number;
@@ -24,6 +27,7 @@ export interface DialogueSummary {
   messageCount: number;
   createdAt: number;
   updatedAt: number;
+  extraProfileIds?: string[];
 }
 
 const toolCallSchema = z.object({
@@ -46,6 +50,8 @@ const messageSchema = z.object({
 const dialogueSchema = z.object({
   id: z.string().min(1),
   profileId: z.string().min(1),
+  // Опционально: старые ai-dialogues.json без поля остаются валидными.
+  extraProfileIds: z.array(z.string()).optional(),
   title: z.string(),
   messages: z.array(messageSchema).default([]),
   messageCount: z.number().int().min(0),
@@ -116,6 +122,7 @@ export function listDialogues(profileId: string): DialogueSummary[] {
       messageCount: d.messageCount,
       createdAt: d.createdAt,
       updatedAt: d.updatedAt,
+      extraProfileIds: d.extraProfileIds,
     }));
 }
 
@@ -149,6 +156,57 @@ export function deleteDialogue(id: string): void {
     throw new Error(`Dialogue ${id} not found`);
   }
   persist(next);
+}
+
+/**
+ * Attaches an extra profile to a multi-server dialogue. Idempotent: the home
+ * profile and already attached ids are left as-is. The caller checks that the
+ * profile exists — the store itself does not import the profiles module.
+ */
+export function attachProfileToDialogue(dialogueId: string, profileId: string): Dialogue {
+  const list = load();
+  const idx = list.findIndex((d) => d.id === dialogueId);
+  if (idx < 0) {
+    throw new Error(`Dialogue ${dialogueId} not found`);
+  }
+  const current = list[idx];
+  if (profileId === current.profileId || current.extraProfileIds?.includes(profileId)) {
+    return copy(current);
+  }
+  list[idx] = {
+    ...current,
+    extraProfileIds: [...(current.extraProfileIds ?? []), profileId],
+    updatedAt: Date.now(),
+  };
+  persist(list);
+  return copy(list[idx]);
+}
+
+/**
+ * Detaches an extra profile from a dialogue. The home profile can never be
+ * detached — the dialogue belongs to it. Detaching a missing id is a no-op.
+ */
+export function detachProfileFromDialogue(dialogueId: string, profileId: string): Dialogue {
+  const list = load();
+  const idx = list.findIndex((d) => d.id === dialogueId);
+  if (idx < 0) {
+    throw new Error(`Dialogue ${dialogueId} not found`);
+  }
+  const current = list[idx];
+  if (profileId === current.profileId) {
+    throw new Error('Домашний профиль диалога отцепить нельзя');
+  }
+  const extra = current.extraProfileIds ?? [];
+  if (!extra.includes(profileId)) {
+    return copy(current);
+  }
+  list[idx] = {
+    ...current,
+    extraProfileIds: extra.filter((id) => id !== profileId),
+    updatedAt: Date.now(),
+  };
+  persist(list);
+  return copy(list[idx]);
 }
 
 function oneLine(text: string, max: number): string {

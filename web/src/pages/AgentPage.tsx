@@ -10,6 +10,15 @@ interface Props {
   /** Одноразовый запрос «Спросить агента» из терминала (расходуется эффектом ниже). */
   agentRequest?: { id: number; text: string } | null;
   onAgentRequestConsumed?: () => void;
+  /** Индикатор активности в сайдбаре: 'pending' (ждёт approve) важнее 'running'. */
+  onActivity?: (profileId: string, state: 'running' | 'pending' | null) => void;
+}
+
+interface AttachedServer {
+  id: string;
+  name: string;
+  host: string;
+  username: string;
 }
 
 interface ToolCallView {
@@ -19,6 +28,8 @@ interface ToolCallView {
   status: 'running' | 'pending' | 'ok' | 'error' | 'rejected';
   output?: string;
   truncated?: boolean;
+  /** Имя сервера из событий tool_start/tool_pending/tool_result (бейдж). */
+  server?: string;
 }
 
 interface ChatMessageView {
@@ -31,7 +42,7 @@ interface ChatMessageView {
 
 let nextId = 1;
 
-export function AgentPage({ profile, showError, agentRequest, onAgentRequestConsumed }: Props) {
+export function AgentPage({ profile, showError, agentRequest, onAgentRequestConsumed, onActivity }: Props) {
   const [messages, setMessages] = useState<ChatMessageView[]>([]);
   const [input, setInput] = useState('');
   const [connected, setConnected] = useState(false);
@@ -46,11 +57,19 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   // Модалка «Проверка безопасности»: необязательный sudo-пароль для root-секций аудита.
   const [auditOpen, setAuditOpen] = useState(false);
   const [auditPassword, setAuditPassword] = useState('');
+  // Сервер, на котором запускать аудит ('' — домашний профиль диалога).
+  const [auditServerId, setAuditServerId] = useState('');
   // Dropdown с историей диалогов (кнопка «История» в тулбаре).
   const [historyOpen, setHistoryOpen] = useState(false);
+  // Серверы, подключённые к диалогу (событие WS `servers`): домашний первым.
+  const [serversInfo, setServersInfo] = useState<{ home: string; attached: AttachedServer[] } | null>(null);
+  // Dropdown кнопки «+» — профили, которые можно подключить к диалогу.
+  const [addOpen, setAddOpen] = useState(false);
+  const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
+  const addRef = useRef<HTMLDivElement>(null);
   // Актуальные значения для эффекта «Спросить агента» — без добавления в deps,
   // чтобы смена состояния не расходовала запрос повторно.
   const connectedRef = useRef(connected);
@@ -87,10 +106,11 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     name: string,
     args: Record<string, unknown>,
     status: 'running' | 'pending',
+    server?: string,
   ) => {
     setMessages((prev) => {
       const last = prev[prev.length - 1];
-      const toolCall: ToolCallView = { callId, name, args, status };
+      const toolCall: ToolCallView = { callId, name, args, status, server };
       if (last?.role === 'assistant') {
         return [...prev.slice(0, -1), { ...last, toolCalls: [...(last.toolCalls ?? []), toolCall] }];
       }
@@ -248,6 +268,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
             String(msg.name ?? ''),
             (msg.args ?? {}) as Record<string, unknown>,
             'running',
+            typeof msg.server === 'string' && msg.server ? msg.server : undefined,
           );
           break;
         case 'tool_pending':
@@ -256,8 +277,14 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
             String(msg.name ?? ''),
             (msg.args ?? {}) as Record<string, unknown>,
             'pending',
+            typeof msg.server === 'string' && msg.server ? msg.server : undefined,
           );
           break;
+        case 'servers': {
+          const attached = Array.isArray(msg.attached) ? (msg.attached as AttachedServer[]) : [];
+          setServersInfo({ home: String(msg.home ?? profile.id), attached });
+          break;
+        }
         case 'tool_result': {
           const status = msg.status === 'rejected' ? 'rejected' : msg.status === 'error' ? 'error' : 'ok';
           updateTool(String(msg.callId ?? ''), {
@@ -328,6 +355,36 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     };
   }, [historyOpen]);
 
+  // Dropdown «+» (подключить сервер): закрывается по клику вне его и по Escape.
+  useEffect(() => {
+    if (!addOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (addRef.current && !addRef.current.contains(e.target as Node)) {
+        setAddOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAddOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [addOpen]);
+
+  // Индикатор активности для сайдбара (App): висящее подтверждение (pending)
+  // важнее, чем просто «работает» — без него агент молча ждёт approve в фоне.
+  const hasPending = messages.some((m) => m.toolCalls?.some((t) => t.status === 'pending'));
+  useEffect(() => {
+    onActivity?.(profile.id, hasPending ? 'pending' : running ? 'running' : null);
+  }, [hasPending, running, onActivity, profile.id]);
+  useEffect(() => {
+    const id = profile.id;
+    return () => onActivity?.(id, null);
+  }, [onActivity, profile.id]);
+
   // Запрос «Спросить агента» из терминала: если WS готов и агент свободен —
   // отправляем сообщение сразу; иначе (нет соединения или идёт выполнение)
   // подставляем текст в поле ввода, чтобы пользователь отправил сам и текущий
@@ -336,7 +393,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   useEffect(() => {
     if (!agentRequest || agentRequest.id === lastHandledRequestRef.current) return;
     lastHandledRequestRef.current = agentRequest.id;
-    const content = `Объясни этот вывод терминала:\n\`\`\`\n${agentRequest.text}\n\`\`\``;
+    const content = `Объясни этот вывод терминала (сервер ${profile.name}):\n\`\`\`\n${agentRequest.text}\n\`\`\``;
     if (connectedRef.current && !runningRef.current && activeDialogueIdRef.current) {
       setMessages((prev) => [...prev, { id: nextId++, role: 'user', content }]);
       setPlanReady(false);
@@ -345,7 +402,26 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       setInput(content);
     }
     onAgentRequestConsumed?.();
-  }, [agentRequest, planMode, sendWs, onAgentRequestConsumed]);
+  }, [agentRequest, planMode, sendWs, onAgentRequestConsumed, profile.name]);
+
+  // Подключённые серверы для чипов и модалки аудита: до события `servers`
+  // показываем только домашний профиль.
+  const attachedServers: AttachedServer[] = serversInfo?.attached ?? [
+    { id: profile.id, name: profile.name, host: profile.host, username: profile.username },
+  ];
+  const homeServerId = serversInfo?.home ?? profile.id;
+  const availableProfiles = allProfiles.filter((p) => !attachedServers.some((s) => s.id === p.id));
+
+  // Кнопка «+»: при открытии подгружаем полный список профилей.
+  const toggleAdd = () => {
+    const next = !addOpen;
+    setAddOpen(next);
+    if (next) {
+      void api<Profile[]>('/api/profiles')
+        .then(setAllProfiles)
+        .catch(() => undefined);
+    }
+  };
 
   const send = () => {
     const content = input.trim();
@@ -372,11 +448,14 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       return;
     }
     const password = auditPassword;
+    const targetId = auditServerId || profile.id;
+    const targetName = attachedServers.find((s) => s.id === targetId)?.name ?? profile.name;
     if (password) {
-      sendWs({ type: 'sudo_credentials', password });
+      sendWs({ type: 'sudo_credentials', password, profileId: targetId });
     }
     const content =
       'Выполни проверку безопасности сервера с помощью инструмента security_audit' +
+      (targetId !== profile.id ? ` на сервере «${targetName}» (укажи параметр server: "${targetName}")` : '') +
       (password ? ' с параметром privileged: true' : '') +
       '. Проанализируй результаты и дай отчёт: критичные проблемы, предупреждения, рекомендации.';
     setMessages((prev) => [...prev, { id: nextId++, role: 'user', content }]);
@@ -384,6 +463,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     // planMode: false — аудит запускается сразу, минуя режим планирования.
     sendWs({ type: 'message', content, planMode: false });
     setAuditPassword('');
+    setAuditServerId('');
     setAuditOpen(false);
   };
 
@@ -448,6 +528,14 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                       <div className="dialogue-item-title" title={d.title}>
                         {d.title}
                       </div>
+                      {d.extraProfileIds && d.extraProfileIds.length > 0 && (
+                        <span
+                          className="dialogue-badge"
+                          title={`Мульти-серверный диалог: подключено ещё ${d.extraProfileIds.length} серверов`}
+                        >
+                          +{d.extraProfileIds.length}
+                        </span>
+                      )}
                       <div className="dialogue-item-meta">{formatRelativeDate(d.updatedAt)}</div>
                       <button
                         className="dialogue-delete"
@@ -486,7 +574,10 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           <button
             className="btn btn-ghost"
             title="Детерминированная проверка безопасности сервера (инструмент security_audit)"
-            onClick={() => setAuditOpen(true)}
+            onClick={() => {
+              setAuditServerId('');
+              setAuditOpen(true);
+            }}
           >
             Проверка безопасности
           </button>
@@ -495,6 +586,58 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
               Стоп
             </button>
           )}
+        </div>
+
+        <div className="agent-servers">
+          {attachedServers.map((s) => (
+            <span
+              key={s.id}
+              className={`server-chip${s.id === homeServerId ? ' home' : ''}`}
+              title={`${s.username}@${s.host}`}
+            >
+              {s.name}
+              {s.id !== homeServerId && (
+                <button
+                  className="server-chip-remove"
+                  title="Отключить сервер от диалога"
+                  onClick={() => sendWs({ type: 'detach_server', profileId: s.id })}
+                >
+                  ✕
+                </button>
+              )}
+            </span>
+          ))}
+          <div className="server-add" ref={addRef}>
+            <button
+              className="btn btn-ghost btn-mini"
+              title="Подключить сервер к диалогу"
+              onClick={toggleAdd}
+            >
+              +
+            </button>
+            {addOpen && (
+              <div className="server-add-dropdown">
+                {availableProfiles.length === 0 && (
+                  <div className="muted server-add-empty">Нет других серверов</div>
+                )}
+                {availableProfiles.map((p) => (
+                  <button
+                    key={p.id}
+                    className="server-add-item"
+                    onClick={() => {
+                      sendWs({ type: 'attach_server', profileId: p.id });
+                      setAddOpen(false);
+                    }}
+                  >
+                    <strong>{p.name}</strong>
+                    <span className="muted">
+                      {p.username}@{p.host}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="agent-messages" ref={listRef}>
@@ -569,6 +712,16 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           </p>
           <div className="form-grid">
             <label>
+              Сервер
+              <select value={auditServerId || homeServerId} onChange={(e) => setAuditServerId(e.target.value)}>
+                {attachedServers.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({s.username}@{s.host})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
               sudo-пароль (необязательно)
               <input
                 type="password"
@@ -611,6 +764,7 @@ function toSummary(d: Dialogue): DialogueSummary {
     messageCount: d.messageCount,
     createdAt: d.createdAt,
     updatedAt: d.updatedAt,
+    extraProfileIds: d.extraProfileIds,
   };
 }
 
@@ -685,8 +839,14 @@ function ToolCard({ tool, onApprove, onReject }: {
     docker_action: 'Действие Docker',
     security_audit: 'Аудит безопасности',
     web_search: '🌐 Поиск в интернете',
+    list_servers: 'Список серверов',
   };
-  const name = labels[tool.name] ?? tool.name;
+  // connect_server — карточка «Подключить <сервер> к диалогу?»: целевой сервер
+  // приходит в поле server события (он ещё не подключён), фолбэк — args.server.
+  const name =
+    tool.name === 'connect_server'
+      ? `Подключить «${tool.server ?? String(tool.args.server ?? '')}» к диалогу${tool.status === 'pending' ? '?' : ''}`
+      : labels[tool.name] ?? tool.name;
   // Пока инструмент выполняется, вместо вывода показываем его главный аргумент
   // (запрос поиска, команду, путь) — видно, чем занят агент прямо сейчас.
   const argPreview = (() => {
@@ -704,6 +864,11 @@ function ToolCard({ tool, onApprove, onReject }: {
       <div className="tool-card-row">
         <span className={`tool-dot ${tool.status}`} />
         <span className="tool-name" title={name}>{name}</span>
+        {tool.server && tool.name !== 'connect_server' && (
+          <span className="tool-server" title={`Сервер: ${tool.server}`}>
+            {tool.server}
+          </span>
+        )}
         {tool.status === 'pending' ? (
           <>
             <span className="tool-status">{decided ? 'отправлено…' : 'ждёт подтверждения'}</span>

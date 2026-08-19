@@ -57,6 +57,8 @@ export interface DialogueSummary {
   messageCount: number;
   createdAt: number;
   updatedAt: number;
+  /** Дополнительные серверы, подключённые к диалогу (мульти-серверный режим). */
+  extraProfileIds?: string[];
 }
 
 export interface Dialogue extends DialogueSummary {

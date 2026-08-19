@@ -416,6 +416,20 @@ button {
   display: none;
 }
 
+/* Keep-alive панели агента: по слоту на посещённый профиль, неактивные
+   скрываются — WS и чат-стейт при переключении профиля не рвутся. */
+.agent-page-slot {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-page-slot.hidden {
+  display: none;
+}
+
 /* Правая панель агента */
 .agent-resizer {
   width: 5px;
@@ -459,6 +473,100 @@ body.resizing-agent {
 /* Dropdown истории диалогов растягивается на всю ширину панели агента */
 .agent-panel .agent-history-dropdown {
   max-height: 50vh;
+}
+
+/* Чипы серверов, подключённых к диалогу агента (событие WS `servers`) */
+.agent-servers {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+
+.server-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 180px;
+  padding: 2px 8px;
+  font-size: 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.server-chip.home {
+  border-color: var(--accent-soft-border);
+}
+
+.server-chip-remove {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.server-chip-remove:hover {
+  color: var(--danger);
+}
+
+/* Кнопка «+» и dropdown профилей, которые можно подключить к диалогу */
+.server-add {
+  position: relative;
+}
+
+.server-add-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px var(--shadow);
+}
+
+.server-add-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.server-add-item:hover {
+  background: var(--bg-input);
+}
+
+.server-add-item .muted {
+  font-size: 11px;
+}
+
+.server-add-empty {
+  padding: 8px;
+  font-size: 12px;
 }
 
 .agent-panel .agent-messages {
@@ -618,6 +726,24 @@ body.resizing-agent {
 .status-dot.closed,
 .status-dot.error {
   background: var(--danger);
+}
+
+/* Индикатор активности агента у профиля в сайдбаре:
+   зелёная пульсирующая — работает, жёлтая — ждёт подтверждения. */
+.agent-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.agent-dot.running {
+  background: var(--ok);
+  animation: tool-dot-pulse 1.1s ease-in-out infinite;
+}
+
+.agent-dot.pending {
+  background: var(--warn);
 }
 
 .status-text {
@@ -1319,6 +1445,16 @@ body.resizing-agent {
   color: var(--muted);
 }
 
+/* Бейдж «+N» у мульти-серверного диалога в истории */
+.dialogue-badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--accent);
+  border: 1px solid var(--accent-soft-border);
+  border-radius: 8px;
+}
+
 .dialogue-delete {
   flex-shrink: 0;
   padding: 2px 6px;
@@ -1636,6 +1772,20 @@ body.resizing-agent {
 .tool-name {
   font-size: 12px;
   font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Бейдж сервера в карточке инструмента (поле `server` событий WS) */
+.tool-server {
+  flex-shrink: 0;
+  max-width: 120px;
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
