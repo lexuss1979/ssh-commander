@@ -41,6 +41,9 @@ function ServerCard({
           {entry.host}:{entry.port}
         </span>
       </div>
+      {entry.externalIp && (
+        <div className="server-ip muted">Внешний IP: {entry.externalIp}</div>
+      )}
 
       {entry.ok && entry.metrics ? (
         <>

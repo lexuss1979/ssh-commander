@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { fetchMetrics } from '../api';
 import type { ServerMetrics } from '../api';
 import type { Profile } from '../types';
+import { useSortBy, SortableTh } from '../hooks/useSortBy';
 
 interface Props {
   profile: Profile;
@@ -89,6 +90,16 @@ export function OverviewPage({ profile, visible }: Props) {
 
   const mem = metrics?.memory;
 
+  const processes = metrics?.processes ?? [];
+  const procAccessors = useMemo(() => ({
+    command: (p: (typeof processes)[0]) => p.command,
+    pid: (p: (typeof processes)[0]) => p.pid,
+    user: (p: (typeof processes)[0]) => p.user,
+    cpu: (p: (typeof processes)[0]) => p.cpuPercent ?? 0,
+    mem: (p: (typeof processes)[0]) => p.memPercent ?? 0,
+  }), []);
+  const { sort: procSort, toggle: toggleProcSort, sorted: sortedProcesses } = useSortBy(processes, procAccessors, { key: 'cpu', dir: 'desc' });
+
   return (
     <div className="page overview-page">
       <div className="toolbar">
@@ -174,15 +185,15 @@ export function OverviewPage({ profile, visible }: Props) {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Процесс</th>
-                  <th className="col-narrow">PID</th>
-                  <th className="col-narrow">Пользователь</th>
-                  <th className="col-narrow">CPU</th>
-                  <th className="col-narrow">Память</th>
+                  <SortableTh sortKey="command" currentSort={procSort} onToggle={toggleProcSort}>Процесс</SortableTh>
+                  <SortableTh sortKey="pid" currentSort={procSort} onToggle={toggleProcSort} className="col-narrow">PID</SortableTh>
+                  <SortableTh sortKey="user" currentSort={procSort} onToggle={toggleProcSort} className="col-narrow">Пользователь</SortableTh>
+                  <SortableTh sortKey="cpu" currentSort={procSort} onToggle={toggleProcSort} className="col-narrow">CPU</SortableTh>
+                  <SortableTh sortKey="mem" currentSort={procSort} onToggle={toggleProcSort} className="col-narrow">Память</SortableTh>
                 </tr>
               </thead>
               <tbody>
-                {(metrics?.processes ?? []).map((p) => (
+                {sortedProcesses.map((p) => (
                   <tr key={p.pid}>
                     <td className="proc-command" title={p.command}>
                       {p.command}
@@ -193,7 +204,7 @@ export function OverviewPage({ profile, visible }: Props) {
                     <td>{formatPct(p.memPercent)}</td>
                   </tr>
                 ))}
-                {metrics && metrics.processes.length === 0 && (
+                {metrics && sortedProcesses.length === 0 && (
                   <tr>
                     <td colSpan={5} className="muted">
                       Нет данных

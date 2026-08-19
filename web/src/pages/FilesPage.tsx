@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState, lazy, Suspense } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 import {
   api,
+  downloadBatch,
   downloadDirUrl,
   downloadUrl,
   formatDate,
@@ -11,6 +12,7 @@ import {
 } from '../api';
 import type { FileEntry, FileListResponse, FileSearchResult, Profile } from '../types';
 import { Modal } from '../components/Modal';
+import { useSortBy, SortableTh } from '../hooks/useSortBy';
 
 // Редактор с подсветкой грузится отдельным чанком, чтобы не раздувать основной бандл
 const CodeEditor = lazy(() => import('../components/CodeEditor'));
@@ -40,6 +42,19 @@ export function FilesPage({ profile, showError }: Props) {
   const [searchMode, setSearchMode] = useState<'name' | 'content'>('name');
   const [searching, setSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<FileSearchResult[] | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const dragCounter = useRef(0);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [batchLoading, setBatchLoading] = useState(false);
+
+  const fileAccessors = useMemo(() => ({
+    // Папки всегда выше файлов; внутри группы — по алфавиту.
+    name: (e: FileEntry) => `${e.isDirectory ? '0' : '1'}${e.name.toLowerCase()}`,
+    size: (e: FileEntry) => e.size,
+    mtime: (e: FileEntry) => e.mtime,
+    mode: (e: FileEntry) => e.mode,
+  }), []);
+  const { sort: fileSort, toggle: toggleFileSort, sorted: sortedEntries } = useSortBy(entries, fileAccessors, { key: 'name', dir: 'asc' });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,8 +80,6 @@ export function FilesPage({ profile, showError }: Props) {
       showError((err as Error).message);
     }
   };
-
-  const navigate = (p: string) => setPath(p);
 
   const uploadArchive = async (files: FileList | null) => {
     const file = files?.[0];
@@ -127,6 +140,84 @@ export function FilesPage({ profile, showError }: Props) {
         showError(`${file.name}: ${(err as Error).message}`);
       }
     }
+    void load();
+  };
+
+  // Drag & drop: счётчик enter/leave корректно работает с вложенными элементами.
+  const onDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current++;
+    if (e.dataTransfer.types.includes('Files')) setDragOver(true);
+  };
+  const onDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current--;
+    if (dragCounter.current <= 0) {
+      dragCounter.current = 0;
+      setDragOver(false);
+    }
+  };
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  const onDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current = 0;
+    setDragOver(false);
+    const files = e.dataTransfer.files;
+    if (files.length > 0) await upload(files);
+  };
+
+  // Мультивыбор: toggle, select all, batch download/delete.
+  const toggleSelect = (path: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path); else next.add(path);
+      return next;
+    });
+  };
+  const toggleSelectAll = () => {
+    if (selected.size === sortedEntries.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(sortedEntries.map((e) => e.path)));
+    }
+  };
+  // При смене директории сбрасываем выделение.
+  const navigate = (p: string) => { setSelected(new Set()); setPath(p); };
+
+  const batchDownload = async () => {
+    if (selected.size === 0) return;
+    setBatchLoading(true);
+    try {
+      const names = sortedEntries.filter((e) => selected.has(e.path)).map((e) => e.name);
+      await downloadBatch(profile.id, path, names);
+    } catch (err) {
+      showError((err as Error).message);
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+  const batchDelete = async () => {
+    if (selected.size === 0) return;
+    const count = selected.size;
+    if (!window.confirm(`Удалить ${count} объект(ов)? Это действие необратимо.`)) return;
+    for (const entry of sortedEntries) {
+      if (!selected.has(entry.path)) continue;
+      try {
+        await api('/api/files/delete', {
+          method: 'POST',
+          body: JSON.stringify({ profileId: profile.id, path: entry.path, recursive: true }),
+        });
+      } catch (err) {
+        showError(`${entry.name}: ${(err as Error).message}`);
+      }
+    }
+    setSelected(new Set());
     void load();
   };
 
@@ -272,6 +363,19 @@ export function FilesPage({ profile, showError }: Props) {
           >
             Переподключить
           </button>
+          {selected.size > 0 && (
+            <>
+              <span className="muted" style={{ fontSize: 12 }}>
+                выбрано: {selected.size}
+              </span>
+              <button className="btn" disabled={batchLoading} onClick={() => void batchDownload()}>
+                {batchLoading ? 'Упаковка…' : '⬇ Скачать'}
+              </button>
+              <button className="btn btn-danger" onClick={() => void batchDelete()}>
+                ✕ Удалить
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -327,30 +431,56 @@ export function FilesPage({ profile, showError }: Props) {
         </div>
       )}
 
-      <div className="table-wrap">
+      <div
+        className={`table-wrap${dragOver ? ' drop-target' : ''}`}
+        onDragEnter={onDragEnter}
+        onDragLeave={onDragLeave}
+        onDragOver={onDragOver}
+        onDrop={(e) => void onDrop(e)}
+      >
+        {dragOver && (
+          <div className="drop-overlay">
+            <span>Отпустите файлы для загрузки</span>
+          </div>
+        )}
         <table className="data-table">
           <thead>
             <tr>
-              <th>Имя</th>
-              <th className="col-narrow">Размер</th>
-              <th className="col-narrow">Изменён</th>
-              <th className="col-narrow">Права</th>
+              <th style={{ width: 32 }}>
+                <input
+                  type="checkbox"
+                  checked={sortedEntries.length > 0 && selected.size === sortedEntries.length}
+                  onChange={toggleSelectAll}
+                  title="Выбрать все"
+                />
+              </th>
+              <SortableTh sortKey="name" currentSort={fileSort} onToggle={toggleFileSort}>Имя</SortableTh>
+              <SortableTh sortKey="size" currentSort={fileSort} onToggle={toggleFileSort} className="col-narrow">Размер</SortableTh>
+              <SortableTh sortKey="mtime" currentSort={fileSort} onToggle={toggleFileSort} className="col-narrow">Изменён</SortableTh>
+              <SortableTh sortKey="mode" currentSort={fileSort} onToggle={toggleFileSort} className="col-narrow">Права</SortableTh>
               <th className="col-narrow">Действия</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={5} className="muted">Загрузка…</td>
+                <td colSpan={6} className="muted">Загрузка…</td>
               </tr>
             )}
-            {!loading && entries.length === 0 && (
+            {!loading && sortedEntries.length === 0 && (
               <tr>
-                <td colSpan={5} className="muted">Директория пуста</td>
+                <td colSpan={6} className="muted">Директория пуста</td>
               </tr>
             )}
-            {entries.map((entry) => (
-              <tr key={entry.path}>
+            {sortedEntries.map((entry) => (
+              <tr key={entry.path} className={selected.has(entry.path) ? 'selected' : ''}>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(entry.path)}
+                    onChange={() => toggleSelect(entry.path)}
+                  />
+                </td>
                 <td>
                   <button
                     className="link-cell"

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildBatchDownloadCommand,
   buildTarDownloadCommand,
   buildTarUploadCommand,
   isCommandNotFound,
@@ -18,6 +19,20 @@ describe('buildTarDownloadCommand', () => {
   it('quotes names with spaces and quotes', () => {
     expect(buildTarDownloadCommand(`/srv/my dir's`)).toBe(
       `tar -czf - -C '/srv' 'my dir'\\''s'`,
+    );
+  });
+});
+
+describe('buildBatchDownloadCommand', () => {
+  it('packs multiple names from the same parent directory', () => {
+    expect(buildBatchDownloadCommand('/var/log', ['app.log', 'syslog'])).toBe(
+      `tar -czf - -C '/var/log' 'app.log' 'syslog'`,
+    );
+  });
+
+  it('quotes names with special characters', () => {
+    expect(buildBatchDownloadCommand('/srv', [`my file's`, 'normal'])).toBe(
+      `tar -czf - -C '/srv' 'my file'\\''s' 'normal'`,
     );
   });
 });

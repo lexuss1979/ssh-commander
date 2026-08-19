@@ -12,6 +12,12 @@ export function buildTarUploadCommand(path: string): string {
   return `tar -xzf - -C ${shq(path)}`;
 }
 
+/** Batch-скачивание нескольких файлов/папок из одного каталога. */
+export function buildBatchDownloadCommand(parentDir: string, names: string[]): string {
+  const items = names.map((n) => shq(n)).join(' ');
+  return `tar -czf - -C ${shq(parentDir)} ${items}`;
+}
+
 export function isCommandNotFound(stderr: string, code: number | null): boolean {
   return code === 127 || /command not found|: not found/i.test(stderr);
 }

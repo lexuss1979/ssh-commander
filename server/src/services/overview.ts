@@ -1,6 +1,7 @@
 import { listProfiles } from '../profiles.js';
 import type { Profile } from '../types.js';
 import { listContainers, type DockerEntity } from './docker.js';
+import { getExternalIp } from './external-ip.js';
 import { collectMetrics, type ServerMetrics } from './metrics.js';
 
 export interface DockerSummary {
@@ -16,6 +17,8 @@ export interface OverviewEntry {
   username: string;
   ok: boolean;
   error?: string;
+  /** Внешний (публичный) IP сервера; отсутствует, если определить не удалось. */
+  externalIp?: string;
   metrics?: ServerMetrics;
   docker?: DockerSummary;
 }
@@ -29,6 +32,7 @@ export interface OverviewResponse {
 /** Результат опроса одного профиля до маппинга в ответ. */
 export interface ProfileProbe {
   metrics: ServerMetrics;
+  externalIp?: string;
   docker?: DockerSummary;
 }
 
@@ -70,13 +74,18 @@ export function toOverviewEntry(
   return {
     ...base,
     ok: true,
+    ...(result.value.externalIp ? { externalIp: result.value.externalIp } : {}),
     metrics: result.value.metrics,
     ...(result.value.docker ? { docker: result.value.docker } : {}),
   };
 }
 
 async function probeProfile(profile: Profile): Promise<ProfileProbe> {
-  const metrics = await collectMetrics(profile);
+  // Внешний IP опрашивается параллельно с метриками и сам себя кэширует.
+  const [metrics, externalIp] = await Promise.all([
+    collectMetrics(profile),
+    getExternalIp(profile),
+  ]);
   // Docker необязателен: демон может быть не установлен — тогда счётчики
   // просто не включаем в ответ, метрики остаются.
   let docker: DockerSummary | undefined;
@@ -85,7 +94,7 @@ async function probeProfile(profile: Profile): Promise<ProfileProbe> {
   } catch {
     docker = undefined;
   }
-  return { metrics, docker };
+  return { metrics, externalIp: externalIp ?? undefined, docker };
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {

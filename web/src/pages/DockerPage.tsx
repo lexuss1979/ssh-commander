@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import type { DockerEntity, Profile } from '../types';
 import { Modal } from '../components/Modal';
+import { useSortBy, SortableTh } from '../hooks/useSortBy';
 
 interface Props {
   profile: Profile;
@@ -268,6 +269,14 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
 
   const shortId = (id: unknown): string => String(id ?? '').slice(0, 12);
 
+  const containerAccessors = useMemo(() => ({
+    name: (c: DockerEntity) => String(c.Names ?? c.ID ?? '').replace(/^\//, '').toLowerCase(),
+    image: (c: DockerEntity) => String(c.Image ?? ''),
+    status: (c: DockerEntity) => String(c.Status ?? ''),
+    ports: (c: DockerEntity) => String(c.Ports ?? ''),
+  }), []);
+  const { sort: containerSort, toggle: toggleContainerSort, sorted: sortedContainers } = useSortBy(containers, containerAccessors, { key: 'name', dir: 'asc' });
+
   return (
     <div className="page">
       <div className="toolbar">
@@ -334,19 +343,19 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Имя</th>
-                <th>Образ</th>
-                <th>Статус</th>
+                <SortableTh sortKey="name" currentSort={containerSort} onToggle={toggleContainerSort}>Имя</SortableTh>
+                <SortableTh sortKey="image" currentSort={containerSort} onToggle={toggleContainerSort}>Образ</SortableTh>
+                <SortableTh sortKey="status" currentSort={containerSort} onToggle={toggleContainerSort}>Статус</SortableTh>
                 <th>CPU %</th>
                 <th>MEM</th>
-                <th>Порты</th>
+                <SortableTh sortKey="ports" currentSort={containerSort} onToggle={toggleContainerSort}>Порты</SortableTh>
                 <th className="col-actions">Действия</th>
               </tr>
             </thead>
             <tbody>
               {loading && <tr><td colSpan={8} className="muted">Загрузка…</td></tr>}
-              {!loading && containers.length === 0 && <tr><td colSpan={8} className="muted">Контейнеров нет</td></tr>}
-              {containers.map((c) => {
+              {!loading && sortedContainers.length === 0 && <tr><td colSpan={8} className="muted">Контейнеров нет</td></tr>}
+              {sortedContainers.map((c) => {
                 const id = String(c.ID ?? c.ContainerID ?? '');
                 const name = String(c.Names ?? id).replace(/^\//, '');
                 const running = String(c.State ?? '').toLowerCase() === 'running' || /^Up /.test(String(c.Status ?? ''));

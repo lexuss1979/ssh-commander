@@ -187,6 +187,8 @@ export interface OverviewServerEntry {
   username: string;
   ok: boolean;
   error?: string;
+  /** Внешний (публичный) IP сервера; отсутствует, если определить не удалось. */
+  externalIp?: string;
   metrics?: ServerMetrics;
   docker?: { containersTotal: number; containersRunning: number };
 }
@@ -276,6 +278,84 @@ export function deleteTunnel(id: string): Promise<void> {
   return api<void>(`/api/tunnels/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
+// Cron-задачи
+export interface CronEntry {
+  /** Номер строки в файле (0-based) — ключ для мутаций пользовательского crontab. */
+  index: number;
+  /** Исходная строка файла как есть. */
+  raw: string;
+  /** false — задача закомментирована. */
+  enabled: boolean;
+  schedule: string;
+  command: string;
+  /** Пользователь из колонки системного формата (/etc/crontab, /etc/cron.d). */
+  user?: string;
+  /** Человекочитаемое описание расписания. */
+  human: string;
+}
+
+export interface ParsedCrontab {
+  entries: CronEntry[];
+  env: string[];
+  comments: string[];
+}
+
+export interface CronSnapshot {
+  timestamp: number;
+  username: string;
+  userCrontab: (ParsedCrontab & { raw: string }) | null;
+  systemCrontab: ParsedCrontab | null;
+  cronD: { file: string; entries: CronEntry[] }[];
+}
+
+/** Cron-задачи сервера (вкладка «Cron»). */
+export function fetchCron(profileId: string): Promise<CronSnapshot> {
+  return api<CronSnapshot>(`/api/cron?profileId=${encodeURIComponent(profileId)}`);
+}
+
+export function addCronEntry(
+  profileId: string,
+  entry: { schedule: string; command: string },
+): Promise<CronSnapshot> {
+  return api<CronSnapshot>(`/api/cron/entries?profileId=${encodeURIComponent(profileId)}`, {
+    method: 'POST',
+    body: JSON.stringify(entry),
+  });
+}
+
+export function updateCronEntry(
+  profileId: string,
+  index: number,
+  entry: { expectedRaw: string; schedule: string; command: string },
+): Promise<CronSnapshot> {
+  return api<CronSnapshot>(
+    `/api/cron/entries/${index}?profileId=${encodeURIComponent(profileId)}`,
+    { method: 'PUT', body: JSON.stringify(entry) },
+  );
+}
+
+export function deleteCronEntry(
+  profileId: string,
+  index: number,
+  expectedRaw: string,
+): Promise<CronSnapshot> {
+  return api<CronSnapshot>(
+    `/api/cron/entries/${index}?profileId=${encodeURIComponent(profileId)}`,
+    { method: 'DELETE', body: JSON.stringify({ expectedRaw }) },
+  );
+}
+
+export function toggleCronEntry(
+  profileId: string,
+  index: number,
+  expectedRaw: string,
+): Promise<CronSnapshot> {
+  return api<CronSnapshot>(
+    `/api/cron/entries/${index}/toggle?profileId=${encodeURIComponent(profileId)}`,
+    { method: 'POST', body: JSON.stringify({ expectedRaw }) },
+  );
+}
+
 export async function fetchTerminalHistory(profileId: string, limit = 100): Promise<string[]> {
   const params = new URLSearchParams({ profileId, limit: String(limit) });
   const data = await api<{ commands: string[] }>(`/api/terminal/history?${params}`);
@@ -285,6 +365,33 @@ export async function fetchTerminalHistory(profileId: string, limit = 100): Prom
 export function downloadDirUrl(profileId: string, path: string): string {
   const params = new URLSearchParams({ profileId, path });
   return `/api/files/download-dir?${params}`;
+}
+
+/** Batch-скачивание выбранных файлов/папок одним tar.gz (POST → blob → download). */
+export async function downloadBatch(profileId: string, dirPath: string, names: string[]): Promise<void> {
+  const params = new URLSearchParams({ profileId });
+  const res = await fetch(`/api/files/download-batch?${params}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ path: dirPath, names }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = res.statusText;
+    try { msg = JSON.parse(text).error; } catch { /* ignore */ }
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get('Content-Disposition') ?? '';
+  const match = /filename="?(.+?)"?$/.exec(disposition);
+  const filename = match ? decodeURIComponent(match[1]) : 'selected.tar.gz';
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export async function uploadDirArchive(profileId: string, path: string, file: Blob): Promise<void> {

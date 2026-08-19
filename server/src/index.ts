@@ -16,6 +16,7 @@ import { metricsRouter } from './routes/metrics.js';
 import { portsRouter } from './routes/ports.js';
 import { tunnelsRouter } from './routes/tunnels.js';
 import { overviewRouter } from './routes/overview.js';
+import { cronRouter } from './routes/cron.js';
 import { terminalRouter } from './routes/terminal.js';
 import { requireProfile } from './profiles.js';
 import { attachTerminal } from './ws/terminal.js';
@@ -41,6 +42,7 @@ app.use('/api/metrics', requireAuth, metricsRouter);
 app.use('/api/ports', requireAuth, portsRouter);
 app.use('/api/tunnels', requireAuth, tunnelsRouter);
 app.use('/api/overview', requireAuth, overviewRouter);
+app.use('/api/cron', requireAuth, cronRouter);
 app.use('/api/terminal', requireAuth, terminalRouter);
 
 // SPA static files (built web app).

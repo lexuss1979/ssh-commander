@@ -234,6 +234,44 @@ esac
   });
   check('docker logs', (await logs.text()).includes('log line 1'));
 
+  console.log('== cron ==');
+  const cron0 = await req(`/api/cron?${P()}`);
+  check('cron snapshot', typeof cron0.username === 'string' && 'systemCrontab' in cron0, JSON.stringify(cron0).slice(0, 200));
+  const added = await req(`/api/cron/entries?${P()}`, {
+    method: 'POST',
+    body: JSON.stringify({ schedule: '*/5 * * * *', command: '/bin/true # sc-test' }),
+  });
+  const entry = added.userCrontab?.entries.find((e) => e.command.includes('sc-test'));
+  check('cron add', !!entry && entry.enabled === true, JSON.stringify(added.userCrontab));
+  if (entry) {
+    const toggled = await req(`/api/cron/entries/${entry.index}/toggle?${P()}`, {
+      method: 'POST',
+      body: JSON.stringify({ expectedRaw: entry.raw }),
+    });
+    const off = toggled.userCrontab?.entries.find((e) => e.command.includes('sc-test'));
+    check('cron toggle off', !!off && off.enabled === false, JSON.stringify(toggled.userCrontab));
+    if (off) {
+      try {
+        await req(`/api/cron/entries/${off.index}?${P()}`, {
+          method: 'DELETE',
+          body: JSON.stringify({ expectedRaw: entry.raw }),
+        });
+        check('cron conflict on stale expectedRaw', false, 'ожидался 409');
+      } catch (err) {
+        check('cron conflict on stale expectedRaw', String(err).includes('409'), String(err));
+      }
+      const deleted = await req(`/api/cron/entries/${off.index}?${P()}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ expectedRaw: off.raw }),
+      });
+      check(
+        'cron delete',
+        !deleted.userCrontab?.entries.some((e) => e.command.includes('sc-test')),
+        JSON.stringify(deleted.userCrontab),
+      );
+    }
+  }
+
   console.log('== cleanup ==');
   await req(`/api/profiles/${pid}`, { method: 'DELETE' });
   check('profile deleted', true);

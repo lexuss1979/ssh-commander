@@ -90,7 +90,17 @@ describe('toOverviewEntry', () => {
     expect(entry.ok).toBe(true);
     expect(entry.metrics).toBeDefined();
     expect(entry.docker).toBeUndefined();
+    expect(entry.externalIp).toBeUndefined();
     expect(entry.error).toBeUndefined();
+  });
+
+  it('passes through externalIp when detected', () => {
+    const entry = toOverviewEntry(
+      makeProfile('e5'),
+      fulfilled({ metrics: makeMetrics(), externalIp: '203.0.113.10' }),
+    );
+    expect(entry.ok).toBe(true);
+    expect(entry.externalIp).toBe('203.0.113.10');
   });
 
   it('maps a rejected probe to ok:false with the error message', () => {

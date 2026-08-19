@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { fetchPorts, fetchTunnels, createTunnel, deleteTunnel } from '../api';
 import type {
   PortListener,
@@ -8,6 +8,7 @@ import type {
   Tunnel,
 } from '../api';
 import type { Profile } from '../types';
+import { useSortBy, SortableTh } from '../hooks/useSortBy';
 
 interface Props {
   profile: Profile;
@@ -380,11 +381,21 @@ export function PortsPage({ profile, visible, showError }: Props) {
     }
   };
 
-  const ports = (snapshot?.ports ?? []).filter((p) => matchesHostFilter(p, filter));
+  const portsFiltered = (snapshot?.ports ?? []).filter((p) => matchesHostFilter(p, filter));
   const publicCount = (snapshot?.ports ?? []).filter((p) => p.scope === 'public').length;
   const containers = snapshot?.containers;
   const containersWithPorts = containers?.filter((c) => c.ports.length > 0);
   const activeTunnels = tunnels.filter((t) => t.status === 'active');
+
+  const portAccessors = useMemo(() => ({
+    proto: (p: PortListener) => p.proto,
+    port: (p: PortListener) => p.port,
+    host: (p: PortListener) => p.host,
+    process: (p: PortListener) => p.process ?? '',
+    pid: (p: PortListener) => p.pid ?? 0,
+    scope: (p: PortListener) => p.scope,
+  }), []);
+  const { sort: portSort, toggle: togglePortSort, sorted: ports } = useSortBy(portsFiltered, portAccessors, { key: 'port', dir: 'asc' });
 
   return (
     <div className="page ports-page">
@@ -438,12 +449,12 @@ export function PortsPage({ profile, visible, showError }: Props) {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th className="col-narrow">Протокол</th>
-                  <th className="col-narrow">Порт</th>
-                  <th>Адрес</th>
-                  <th>Процесс</th>
-                  <th className="col-narrow">PID</th>
-                  <th className="col-narrow">Доступ</th>
+                  <SortableTh sortKey="proto" currentSort={portSort} onToggle={togglePortSort} className="col-narrow">Протокол</SortableTh>
+                  <SortableTh sortKey="port" currentSort={portSort} onToggle={togglePortSort} className="col-narrow">Порт</SortableTh>
+                  <SortableTh sortKey="host" currentSort={portSort} onToggle={togglePortSort}>Адрес</SortableTh>
+                  <SortableTh sortKey="process" currentSort={portSort} onToggle={togglePortSort}>Процесс</SortableTh>
+                  <SortableTh sortKey="pid" currentSort={portSort} onToggle={togglePortSort} className="col-narrow">PID</SortableTh>
+                  <SortableTh sortKey="scope" currentSort={portSort} onToggle={togglePortSort} className="col-narrow">Доступ</SortableTh>
                   <th className="col-narrow"></th>
                 </tr>
               </thead>

@@ -15,7 +15,7 @@ import {
 } from '../ssh/sftp.js';
 import { requireProfile } from '../profiles.js';
 import { searchFiles, SEARCH_MAX_RESULTS } from '../services/file-search.js';
-import { buildTarDownloadCommand, buildTarUploadCommand, tarError } from '../services/transfer.js';
+import { buildBatchDownloadCommand, buildTarDownloadCommand, buildTarUploadCommand, tarError } from '../services/transfer.js';
 import { assertSafePath, basename, dirname, joinRemotePath, modeToString } from '../util/path.js';
 import { shq } from '../util/shell.js';
 import type { FileEntry } from '../types.js';
@@ -287,6 +287,58 @@ filesRouter.get('/download-dir', async (req, res) => {
     });
     // end: false — ответ завершаем сами по 'close': если tar упал до первого
     // байта stdout (например, tar не установлен), успеваем отдать JSON-ошибку.
+    channel.pipe(res, { end: false });
+    channel.on('close', (code: number | null) => {
+      if (code !== 0 && !res.headersSent) {
+        res.status(500).json({ error: tarError(stderr, code) });
+        return;
+      }
+      res.end();
+    });
+    channel.on('error', () => {
+      if (!res.headersSent) res.status(500).json({ error: 'Ошибка SSH-канала' });
+      else res.end();
+    });
+    req.on('close', () => {
+      try {
+        channel.close();
+      } catch {
+        /* noop */
+      }
+    });
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+// Batch-скачивание нескольких файлов/папок из текущей директории одним tar.gz.
+filesRouter.post('/download-batch', async (req, res) => {
+  try {
+    const profile = requireProfile(profileId(req));
+    const dirPath = assertSafePath(normalizePath(String((req.body as Record<string, unknown>)?.path ?? '')));
+    const names = (req.body as Record<string, unknown>)?.names;
+    if (!Array.isArray(names) || names.length === 0 || !names.every((n) => typeof n === 'string')) {
+      res.status(400).json({ error: 'names must be a non-empty array of strings' });
+      return;
+    }
+    // Валидация каждого имени: безопасный путь без сепараторов.
+    for (const n of names) assertSafePath(n);
+    const stat = await withSftp(profile, (sftp) => sftpStat(sftp, dirPath));
+    if ((stat.mode & 0o170000) !== 0o040000) {
+      res.status(400).json({ error: 'Это не директория' });
+      return;
+    }
+    const archiveName = names.length === 1 ? `${names[0]}.tar.gz` : `selected-${names.length}.tar.gz`;
+    res.setHeader('Content-Type', 'application/gzip');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(archiveName)}"`,
+    );
+    const channel = await execRawChannel(profile, buildBatchDownloadCommand(dirPath, names));
+    let stderr = '';
+    channel.stderr.on('data', (d: Buffer) => {
+      if (stderr.length < 65536) stderr += d.toString();
+    });
     channel.pipe(res, { end: false });
     channel.on('close', (code: number | null) => {
       if (code !== 0 && !res.headersSent) {
