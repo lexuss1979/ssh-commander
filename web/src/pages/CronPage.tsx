@@ -285,7 +285,7 @@ export function CronPage({ profile, visible, showError }: Props) {
           </button>
         </div>
       ) : (
-        <>
+        <div className="cron-scroll">
           {/* Crontab SSH-пользователя — редактируемый */}
           <div className="cron-section">
             <h3 className="section-title">
@@ -387,7 +387,7 @@ export function CronPage({ profile, visible, showError }: Props) {
               </div>
             </div>
           ))}
-        </>
+        </div>
       )}
 
       {modal && (
