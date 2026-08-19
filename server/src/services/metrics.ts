@@ -1,5 +1,6 @@
 import { exec } from '../ssh/manager.js';
 import type { Profile } from '../types.js';
+import { appendSample } from './metrics-history.js';
 
 export interface CpuMetrics {
   /** Загрузка CPU в процентах (0–100, 1 знак после запятой) или null, если не удалось посчитать. */
@@ -253,7 +254,11 @@ export function collectMetrics(profile: Profile): Promise<ServerMetrics> {
       const detail = (result.stderr || result.stdout).trim();
       throw new Error(`metrics command exited with code ${result.code}${detail ? `: ${detail}` : ''}`);
     }
-    return parseMetricsOutput(result.stdout);
+    const snapshot = parseMetricsOutput(result.stdout);
+    // Каждое реальное снятие метрик (любой из опрашивающих роутов) кормит
+    // историю нагрузки; дубли по timestamp отсеивает appendSample.
+    appendSample(profile.id, snapshot);
+    return snapshot;
   });
   cache.set(profile.id, { at: now, promise });
   promise.catch(() => {

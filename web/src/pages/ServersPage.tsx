@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { fetchOverview } from '../api';
-import type { OverviewResponse, OverviewServerEntry } from '../api';
+import { fetchBulkMetricsHistory, fetchOverview } from '../api';
+import type { HistorySample, OverviewResponse, OverviewServerEntry } from '../api';
+import { Sparkline } from '../components/Sparkline';
 import { Meter, formatBytes, formatPct, formatUptime } from './OverviewPage';
 
 interface Props {
@@ -19,9 +20,11 @@ function mainDisk(entry: OverviewServerEntry) {
 
 function ServerCard({
   entry,
+  history,
   onOpen,
 }: {
   entry: OverviewServerEntry;
+  history: HistorySample[];
   onOpen: (profileId: string) => void;
 }) {
   const mem = entry.metrics?.memory;
@@ -53,6 +56,7 @@ function ServerCard({
               <span>{formatPct(entry.metrics.cpu.percent)}</span>
             </div>
             <Meter percent={entry.metrics.cpu.percent} />
+            <Sparkline samples={history} value={(s) => s.cpu} tone="cpu" />
           </div>
           <div className="server-metric">
             <div className="server-metric-head">
@@ -63,6 +67,7 @@ function ServerCard({
               </span>
             </div>
             <Meter percent={mem?.usedPercent ?? null} />
+            <Sparkline samples={history} value={(s) => s.memPct} tone="mem" />
           </div>
           <div className="server-metric">
             <div className="server-metric-head">
@@ -93,21 +98,26 @@ function ServerCard({
 
 export function ServersPage({ showError, visible, onOpenProfile }: Props) {
   const [data, setData] = useState<OverviewResponse | null>(null);
+  const [history, setHistory] = useState<Map<string, HistorySample[]>>(new Map());
   const [reloadKey, setReloadKey] = useState(0);
 
   // Последовательный polling только на видимой вкладке (keep-alive):
-  // ошибки запроса — в toast, последний снимок остаётся на экране.
+  // ошибки запроса — в toast, последний снимок остаётся на экране. История
+  // нагрузки для спарклайнов грузится тем же тиком и падает тихо.
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
     let timer = 0;
     const tick = async () => {
-      try {
-        const res = await fetchOverview();
-        if (cancelled) return;
-        setData(res);
-      } catch (err) {
-        if (!cancelled) showError((err as Error).message);
+      const [oRes, hRes] = await Promise.allSettled([fetchOverview(), fetchBulkMetricsHistory()]);
+      if (cancelled) return;
+      if (oRes.status === 'fulfilled') {
+        setData(oRes.value);
+      } else {
+        showError((oRes.reason as Error).message);
+      }
+      if (hRes.status === 'fulfilled') {
+        setHistory(new Map(hRes.value.profiles.map((p) => [p.id, p.samples])));
       }
       if (!cancelled) {
         timer = window.setTimeout(tick, POLL_INTERVAL_MS);
@@ -143,7 +153,7 @@ export function ServersPage({ showError, visible, onOpenProfile }: Props) {
         )}
         <div className="servers-grid">
           {(data?.servers ?? []).map((s) => (
-            <ServerCard key={s.id} entry={s} onOpen={onOpenProfile} />
+            <ServerCard key={s.id} entry={s} history={history.get(s.id) ?? []} onOpen={onOpenProfile} />
           ))}
         </div>
       </div>

@@ -1768,6 +1768,97 @@ body.resizing-agent {
   background: var(--danger);
 }
 
+/* Графики нагрузки (история метрик): SVG растягивается по контейнеру,
+   толщина линии не искажается благодаря non-scaling-stroke. */
+.sparkline {
+  display: block;
+  width: 100%;
+  height: 28px;
+  margin-top: 8px;
+}
+
+.sparkline-line {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.sparkline-area {
+  opacity: 0.15;
+}
+
+.sparkline-cpu .sparkline-line {
+  stroke: var(--accent);
+}
+
+.sparkline-cpu .sparkline-area {
+  fill: var(--accent);
+}
+
+.sparkline-mem .sparkline-line {
+  stroke: var(--ok);
+}
+
+.sparkline-mem .sparkline-area {
+  fill: var(--ok);
+}
+
+/* Место под спарклайн, пока история не накопилась. */
+.sparkline-pending {
+  height: 28px;
+  margin-top: 8px;
+  position: relative;
+}
+
+.sparkline-pending::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 1px dashed var(--border);
+}
+
+/* Крупный график на вкладке «Обзор». */
+.load-chart {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.load-chart-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.load-chart-stats .load-chart-span {
+  margin-left: auto;
+}
+
+.load-chart-svg {
+  height: 96px;
+  margin-top: 6px;
+}
+
+.load-chart-time {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.load-chart-pending {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .disk-row {
   padding: 8px 0;
   border-bottom: 1px solid var(--border-soft);

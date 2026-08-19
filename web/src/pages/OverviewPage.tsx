@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { fetchMetrics } from '../api';
-import type { ServerMetrics } from '../api';
+import { fetchMetrics, fetchMetricsHistory } from '../api';
+import type { HistorySample, ServerMetrics } from '../api';
 import type { Profile } from '../types';
 import { useSortBy, SortableTh } from '../hooks/useSortBy';
+import { LoadChart } from '../components/Sparkline';
 
 interface Props {
   profile: Profile;
@@ -58,24 +59,32 @@ export function Meter({ percent }: { percent: number | null }) {
 
 export function OverviewPage({ profile, visible }: Props) {
   const [metrics, setMetrics] = useState<ServerMetrics | null>(null);
+  const [history, setHistory] = useState<HistorySample[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   // Последовательный polling: следующий запрос только после завершения
   // предыдущего. На скрытой вкладке (keep-alive) опрос полностью остановлен.
+  // История нагрузки грузится тем же тиком, но её ошибки тихие — графики
+  // декоративные, при сбое остаётся последнее нарисованное.
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
     let timer = 0;
     const tick = async () => {
-      try {
-        const m = await fetchMetrics(profile.id);
-        if (cancelled) return;
-        setMetrics(m);
+      const [mRes, hRes] = await Promise.allSettled([
+        fetchMetrics(profile.id),
+        fetchMetricsHistory(profile.id),
+      ]);
+      if (cancelled) return;
+      if (mRes.status === 'fulfilled') {
+        setMetrics(mRes.value);
         setError(null);
-      } catch (err) {
-        if (cancelled) return;
-        setError((err as Error).message);
+      } else {
+        setError((mRes.reason as Error).message);
+      }
+      if (hRes.status === 'fulfilled') {
+        setHistory(hRes.value.samples);
       }
       if (!cancelled) {
         timer = window.setTimeout(tick, POLL_INTERVAL_MS);
@@ -138,6 +147,7 @@ export function OverviewPage({ profile, visible }: Props) {
               <div className="overview-sub">
                 Ядер: {metrics?.cpu.cores ?? '—'}
               </div>
+              <LoadChart samples={history} value={(s) => s.cpu} tone="cpu" />
             </div>
 
             <div className="overview-card">
@@ -147,6 +157,7 @@ export function OverviewPage({ profile, visible }: Props) {
               <div className="overview-sub">
                 {formatBytes(mem?.usedBytes ?? null)} из {formatBytes(mem?.totalBytes ?? null)}
               </div>
+              <LoadChart samples={history} value={(s) => s.memPct} tone="mem" />
             </div>
 
             <div className="overview-card">

@@ -203,6 +203,37 @@ export function fetchOverview(): Promise<OverviewResponse> {
   return api<OverviewResponse>('/api/overview');
 }
 
+/** Сэмпл истории нагрузки: лёгкий срез снимка метрик. */
+export interface HistorySample {
+  /** Момент снимка (мс, серверное время ssh-commander). */
+  t: number;
+  cpu: number | null;
+  memPct: number | null;
+  memUsedBytes: number | null;
+  memTotalBytes: number | null;
+  load1: number | null;
+}
+
+export interface MetricsHistoryResponse {
+  timestamp: number;
+  samples: HistorySample[];
+}
+
+export interface BulkMetricsHistoryResponse {
+  timestamp: number;
+  profiles: Array<{ id: string; samples: HistorySample[] }>;
+}
+
+/** История нагрузки одного профиля — графики на вкладке «Обзор». */
+export function fetchMetricsHistory(profileId: string): Promise<MetricsHistoryResponse> {
+  return api<MetricsHistoryResponse>(`/api/metrics-history?profileId=${encodeURIComponent(profileId)}`);
+}
+
+/** История нагрузки всех профилей — спарклайны на экране «Серверы». */
+export function fetchBulkMetricsHistory(): Promise<BulkMetricsHistoryResponse> {
+  return api<BulkMetricsHistoryResponse>('/api/metrics-history');
+}
+
 export interface PortListener {
   proto: 'tcp' | 'udp';
   host: string;

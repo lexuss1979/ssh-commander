@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { createProfile, deleteProfile, listProfiles, parseProfileInput, updateProfile } from '../profiles.js';
 import { ProfileTransferError, buildExport, importBackup } from '../services/profile-transfer.js';
+import { clearHistory } from '../services/metrics-history.js';
 import { closeProfileConnection, testConnection } from '../ssh/manager.js';
 
 export const profilesRouter = Router();
@@ -102,6 +103,7 @@ profilesRouter.put('/:id', (req, res) => {
 profilesRouter.delete('/:id', (req, res) => {
   try {
     closeProfileConnection(req.params.id);
+    clearHistory(req.params.id);
     deleteProfile(req.params.id);
     res.json({ ok: true });
   } catch (err) {
