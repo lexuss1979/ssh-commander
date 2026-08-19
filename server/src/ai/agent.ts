@@ -3,9 +3,10 @@ import { config } from '../config.js';
 import { streamChatCompletion, type ChatMessage, type ToolCall } from './client.js';
 import { sanitizeMessages } from './messages.js';
 import { buildPlanRequestMessages, toolsForRequest } from './plan.js';
-import { toolDefs, READ_ONLY_TOOLS } from './tools.js';
+import { getToolDefs, READ_ONLY_TOOLS } from './tools.js';
 import { checkReadOnlyCommand } from './guard.js';
 import { readMemory, writeMemory, memoryPromptBlock } from './memory.js';
+import { isSearchConfigured, searchWeb } from './web-search.js';
 import { exec, withSftp } from '../ssh/manager.js';
 import {
   readFile as sftpReadFile,
@@ -36,6 +37,12 @@ import {
 
 const MAX_TOOL_OUTPUT = 12000;
 
+// Лимит вызовов web_search на один запуск цикла (каждый вызов — до
+// MAX_USES_PER_CALL реальных поисков на стороне API). Общий шаг агента
+// (AI_MAX_STEPS) ограничивает и это, но поиск — платный сетевой вызов,
+// держим отдельный потолок.
+const MAX_SEARCH_CALLS_PER_RUN = 10;
+
 type WsMessage = Record<string, unknown>;
 
 interface PendingCall {
@@ -47,6 +54,7 @@ export class AgentSession {
   private messages: ChatMessage[] = [];
   private pending = new Map<string, PendingCall>();
   private steps = 0;
+  private searchCalls = 0;
   private stopRequested = false;
   private running = false;
   private wsClosed = false;
@@ -85,6 +93,12 @@ export class AgentSession {
       'Предлагай запись через write_memory после того, как нашёл такое знание; пиши кратко и структурированно (markdown: заголовки, короткие пункты). ' +
       'write_memory принимает полный новый текст файла: обязательно сохраняй все прежние записи и только добавляй/правь нужное, без дублей. ' +
       'Не записывай память через exec/write_file — только через write_memory.';
+    if (isSearchConfigured()) {
+      systemPrompt +=
+        ' Инструмент web_search ищет в интернете (документация, changelog, актуальные версии) и выполняется автоматически ' +
+        'без подтверждения — используй его, когда нужен свежий или неизвестный факт (версии, релизы, настройки сервисов), ' +
+        'вместо ответа по памяти.';
+    }
     const memoryBlock = memoryPromptBlock(profile.id);
     if (memoryBlock) {
       systemPrompt += `\n\n${memoryBlock}`;
@@ -267,6 +281,7 @@ export class AgentSession {
     this.running = true;
     this.stopRequested = false;
     this.steps = 0;
+    this.searchCalls = 0;
     // Не отправляем в API и не сохраняем оборванный обмен tool_calls (например,
     // после остановки агента или перезагрузки вкладки в середине вызова).
     this.messages = sanitizeMessages(this.messages);
@@ -283,7 +298,7 @@ export class AgentSession {
         try {
           assistant = await streamChatCompletion({
             messages: sanitizeMessages(this.messages),
-            tools: toolDefs,
+            tools: getToolDefs(),
             signal: this.loopAbort.signal,
             onToken: (token) => this.send({ type: 'token', content: token }),
           });
@@ -313,6 +328,9 @@ export class AgentSession {
           const readOnly = READ_ONLY_TOOLS.has(name);
 
           if (readOnly) {
+            // Живая видимость read-only вызова: карточка «выполняется…» до
+            // результата (без кнопок подтверждения — в отличие от tool_pending).
+            this.send({ type: 'tool_start', callId: call.id, name, args });
             const result = await this.runTool(name, args);
             this.send({
               type: 'tool_result',
@@ -512,6 +530,27 @@ export class AgentSession {
             sudoPassword: this.sudoPassword ?? undefined,
           });
           return { status: 'ok', ...this.truncate(output) };
+        }
+        case 'web_search': {
+          // Двойной гейтинг: без конфигурации инструмент модели не объявляется,
+          // но вызов может прийти из старого диалога — отвечаем понятной ошибкой.
+          if (!isSearchConfigured()) {
+            return {
+              status: 'error',
+              output: 'Веб-поиск не настроен на сервере приложения (AI_SEARCH_API_BASE пуст).',
+              truncated: false,
+            };
+          }
+          this.searchCalls += 1;
+          if (this.searchCalls > MAX_SEARCH_CALLS_PER_RUN) {
+            return {
+              status: 'error',
+              output: `Достигнут лимит поисковых запросов (${MAX_SEARCH_CALLS_PER_RUN} за запуск).`,
+              truncated: false,
+            };
+          }
+          const result = await searchWeb(String(args.query ?? ''));
+          return { status: result.ok ? 'ok' : 'error', ...this.truncate(result.output) };
         }
         case 'docker_action': {
           const action = String(args.action ?? '');

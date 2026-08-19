@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '../src/ai/client.js';
 import { PLAN_MODE_INSTRUCTION, buildPlanRequestMessages, toolsForRequest } from '../src/ai/plan.js';
-import { toolDefs } from '../src/ai/tools.js';
+import { getToolDefs } from '../src/ai/tools.js';
 
 const history: ChatMessage[] = [
   { role: 'system', content: 'Базовый системный промпт.' },
@@ -16,7 +16,7 @@ describe('toolsForRequest', () => {
   });
 
   it('в обычном режиме возвращается полный набор инструментов', () => {
-    expect(toolsForRequest(false)).toBe(toolDefs);
+    expect(toolsForRequest(false)).toEqual(getToolDefs(false));
     expect(toolsForRequest(false)?.length).toBeGreaterThan(0);
   });
 });

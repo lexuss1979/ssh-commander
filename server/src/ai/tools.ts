@@ -1,4 +1,5 @@
 import type { ToolDef } from './client.js';
+import { isSearchConfigured } from './web-search.js';
 
 const str = (description: string) => ({ type: 'string', description });
 const required = (name: string, description: string) => ({
@@ -182,6 +183,17 @@ export const toolDefs: ToolDef[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'web_search',
+      description:
+        'Поиск в интернете: документация, man, changelog, актуальные версии пакетов, сообщения об ошибках. ' +
+        'Выполняется автоматически без подтверждения. Используй, когда факт может быть устаревшим или неизвестен ' +
+        '(версии, релизы, свежие настройки сервисов), — не отвечай по памяти.',
+      parameters: required('query', 'Поисковый запрос (краткий, на языке искомых документов)'),
+    },
+  },
 ];
 
 export const READ_ONLY_TOOLS = new Set([
@@ -193,4 +205,16 @@ export const READ_ONLY_TOOLS = new Set([
   'docker_logs',
   'docker_inspect',
   'security_audit',
+  'web_search',
 ]);
+
+/**
+ * Инструменты, объявляемые модели: web_search включается, только когда поиск
+ * настроен (AI_SEARCH_API_BASE + ключ) — иначе модель вообще не видит
+ * инструмент и не может его вызвать.
+ */
+export function getToolDefs(searchEnabled: boolean = isSearchConfigured()): ToolDef[] {
+  return searchEnabled
+    ? toolDefs
+    : toolDefs.filter((t) => t.function.name !== 'web_search');
+}
