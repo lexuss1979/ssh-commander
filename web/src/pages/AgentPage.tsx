@@ -668,6 +668,7 @@ function ToolCard({ tool, onApprove, onReject }: {
     docker_inspect: 'Inspect Docker',
     docker_action: 'Действие Docker',
     security_audit: 'Аудит безопасности',
+    web_search: 'Поиск в интернете',
   };
   const name = labels[tool.name] ?? tool.name;
   const preview = (tool.output ?? '').replace(/\s+/g, ' ').trim();

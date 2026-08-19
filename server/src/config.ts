@@ -52,6 +52,11 @@ export const config = {
     model: process.env.AI_MODEL || 'gpt-4.1-mini',
     maxSteps: int('AI_MAX_STEPS', 30),
     temperature: float('AI_TEMPERATURE', 0.2),
+    // Веб-поиск для агента: Anthropic-совместимый endpoint с серверным
+    // инструментом web_search (у DeepSeek — тот же API-ключ, что и у chat).
+    // Пустой AI_SEARCH_API_BASE выключает поиск: инструмент агенту не объявляется.
+    searchApiBase: (process.env.AI_SEARCH_API_BASE || '').replace(/\/+$/, ''),
+    searchModel: process.env.AI_SEARCH_MODEL || 'deepseek-v4-flash',
   },
 };
 

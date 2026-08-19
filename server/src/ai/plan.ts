@@ -1,5 +1,5 @@
 import type { ChatMessage, ToolDef } from './client.js';
-import { toolDefs } from './tools.js';
+import { getToolDefs } from './tools.js';
 
 /**
  * Дополнение к системному промпту на шаге планирования (режим planMode).
@@ -13,9 +13,10 @@ export const PLAN_MODE_INSTRUCTION =
  * Инструменты для запроса к Chat Completions API. В режиме планирования
  * инструменты не передаются вовсе: `undefined` означает, что ключ `tools`
  * отсутствует в теле запроса — защита на уровне API, а не только промпта.
+ * В обычном режиме отдаётся набор с учётом гейтинга web_search.
  */
 export function toolsForRequest(planMode: boolean): ToolDef[] | undefined {
-  return planMode ? undefined : toolDefs;
+  return planMode ? undefined : getToolDefs();
 }
 
 /**
