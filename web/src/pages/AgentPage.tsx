@@ -16,7 +16,7 @@ interface ToolCallView {
   callId: string;
   name: string;
   args: Record<string, unknown>;
-  status: 'pending' | 'ok' | 'error' | 'rejected';
+  status: 'running' | 'pending' | 'ok' | 'error' | 'rejected';
   output?: string;
   truncated?: boolean;
 }
@@ -80,10 +80,17 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     });
   }, []);
 
-  const addToolPending = useCallback((callId: string, name: string, args: Record<string, unknown>) => {
+  // Карточка инструмента: 'running' — read-only вызов исполняется (tool_start),
+  // 'pending' — мутрующий ждёт подтверждения (tool_pending).
+  const addToolCard = useCallback((
+    callId: string,
+    name: string,
+    args: Record<string, unknown>,
+    status: 'running' | 'pending',
+  ) => {
     setMessages((prev) => {
       const last = prev[prev.length - 1];
-      const toolCall: ToolCallView = { callId, name, args, status: 'pending' };
+      const toolCall: ToolCallView = { callId, name, args, status };
       if (last?.role === 'assistant') {
         return [...prev.slice(0, -1), { ...last, toolCalls: [...(last.toolCalls ?? []), toolCall] }];
       }
@@ -235,11 +242,20 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
         case 'message':
           finalizeAssistant(String(msg.content ?? ''));
           break;
-        case 'tool_pending':
-          addToolPending(
+        case 'tool_start':
+          addToolCard(
             String(msg.callId ?? ''),
             String(msg.name ?? ''),
             (msg.args ?? {}) as Record<string, unknown>,
+            'running',
+          );
+          break;
+        case 'tool_pending':
+          addToolCard(
+            String(msg.callId ?? ''),
+            String(msg.name ?? ''),
+            (msg.args ?? {}) as Record<string, unknown>,
+            'pending',
           );
           break;
         case 'tool_result': {
@@ -283,7 +299,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     profile.id,
     pushAssistantToken,
     finalizeAssistant,
-    addToolPending,
+    addToolCard,
     updateTool,
     showError,
     refreshDialogues,
@@ -668,14 +684,23 @@ function ToolCard({ tool, onApprove, onReject }: {
     docker_inspect: 'Inspect Docker',
     docker_action: 'Действие Docker',
     security_audit: 'Аудит безопасности',
-    web_search: 'Поиск в интернете',
+    web_search: '🌐 Поиск в интернете',
   };
   const name = labels[tool.name] ?? tool.name;
-  const preview = (tool.output ?? '').replace(/\s+/g, ' ').trim();
+  // Пока инструмент выполняется, вместо вывода показываем его главный аргумент
+  // (запрос поиска, команду, путь) — видно, чем занят агент прямо сейчас.
+  const argPreview = (() => {
+    for (const key of ['query', 'command', 'path', 'target', 'containerId']) {
+      const v = tool.args?.[key];
+      if (typeof v === 'string' && v.trim()) return v;
+    }
+    return '';
+  })();
+  const preview = (tool.status === 'running' ? argPreview : (tool.output ?? '')).replace(/\s+/g, ' ').trim();
   const short = preview.length > 80 ? `${preview.slice(0, 80)}…` : preview;
 
   return (
-    <div className={`tool-card ${tool.status}`}>
+    <div className={`tool-card ${tool.status}${tool.name === 'web_search' ? ' web' : ''}`}>
       <div className="tool-card-row">
         <span className={`tool-dot ${tool.status}`} />
         <span className="tool-name" title={name}>{name}</span>
@@ -708,7 +733,13 @@ function ToolCard({ tool, onApprove, onReject }: {
         ) : (
           <>
             <span className={`tool-status ${tool.status}`}>
-              {tool.status === 'ok' ? 'выполнено' : tool.status === 'rejected' ? 'отклонено' : 'ошибка'}
+              {tool.status === 'running'
+                ? 'выполняется…'
+                : tool.status === 'ok'
+                  ? 'выполнено'
+                  : tool.status === 'rejected'
+                    ? 'отклонено'
+                    : 'ошибка'}
             </span>
             <span className="tool-preview" title={preview}>{short || '—'}</span>
             <button className="btn btn-ghost btn-mini tool-toggle" onClick={() => setExpanded((x) => !x)}>

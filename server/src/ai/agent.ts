@@ -328,6 +328,9 @@ export class AgentSession {
           const readOnly = READ_ONLY_TOOLS.has(name);
 
           if (readOnly) {
+            // Живая видимость read-only вызова: карточка «выполняется…» до
+            // результата (без кнопок подтверждения — в отличие от tool_pending).
+            this.send({ type: 'tool_start', callId: call.id, name, args });
             const result = await this.runTool(name, args);
             this.send({
               type: 'tool_result',
