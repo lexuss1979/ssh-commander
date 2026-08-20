@@ -1,0 +1,679 @@
+import { exec } from '../ssh/manager.js';
+import { dockerCommand } from './docker.js';
+import type { DbEngine, MysqlFlavor } from './db-discovery.js';
+import type { Profile } from '../types.js';
+
+/**
+ * Билдеры команд и парсеры вывода SQL-консоли (эпик 12, итерация 2). Всё
+ * чистое — под unit-тесты; SSH-exec делает тонкая обёртка `runDbQuery`.
+ *
+ * Схема экранирования: аргументы docker шэкуются один раз (`dockerCommand`
+ * → удалённый shell передаёт их docker verbatim), а имена пользователя/базы
+ * внутри `sh -c '...'` — второй раз (внутренний shell контейнера). SQL идёт
+ * в stdin канала и в shell не попадает вовсе.
+ *
+ * Пароль пользователя нельзя брать из env контейнера (его там нет или он
+ * протух — причина отката итерации 1), а `docker exec -e PGPASSWORD=...`
+ * светит его в argv/ps хоста. Решение — первая строка stdin:
+ *
+ *   docker exec -i <c> sh -c 'IFS= read -r PGPASSWORD; export PGPASSWORD;
+ *   exec psql -U <user> -d <db> -X -v ON_ERROR_STOP=1 --csv'
+ *
+ * stdin канала: `<пароль>\n<SQL>`. `read` забирает первую строку, клиент
+ * получает остаток. `IFS=` и `-r` обязательны (пробелы по краям и бэкслеши
+ * в пароле). Пароль не попадает ни в argv, ни в env хоста, ни в логи.
+ */
+
+/** Таймаут statement'а внутри БД (с); канал страхует 120 с (см. routes). */
+export const DB_STATEMENT_TIMEOUT_S = 115;
+/** Таймаут SSH-канала — страховка от зависшего docker exec. */
+export const DB_CHANNEL_TIMEOUT_MS = 120000;
+/** Таймаут проверки подключения (SELECT 1) — быстро и без запросов данных. */
+export const DB_TEST_TIMEOUT_MS = 15000;
+/** Лимит строк грида; излишек режется с пометкой в UI. */
+export const DB_ROW_LIMIT = 1000;
+/** Максимальный размер SQL (zod-лимит роута должен совпадать). */
+export const DB_SQL_MAX_BYTES = 64 * 1024;
+/** Свёртка полного stdout для UI (моно-блок со скроллом). */
+export const RAW_OUTPUT_LIMIT = 64 * 1024;
+
+/** Системные базы, скрываемые из списков (план эпика 12). */
+export const SYSTEM_DATABASES = new Set([
+  'information_schema',
+  'performance_schema',
+  'sys',
+  'template0',
+  'template1',
+]);
+
+/** Системные схемы PG, скрываемые из списка таблиц. */
+export const PG_SYSTEM_SCHEMAS = new Set(['pg_catalog', 'information_schema']);
+
+/**
+ * Разрешённая цель выполнения: подключение из хранилища, приведённое к виду
+ * билдеров. Контейнер — рабочий путь v1; host — v2.x.
+ */
+export interface DbExecTarget {
+  engine: DbEngine;
+  containerId: string;
+  username: string;
+  /** '' — без пароля (PG в официальном образе: локальный trust); непустой —
+   * передаётся первой строкой stdin. */
+  password: string;
+  /** MariaDB-семейство — другой синтаксис SET-таймаута. */
+  flavor?: MysqlFlavor;
+  /** База по умолчанию из подключения; null — нет. */
+  defaultDatabase: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Билдеры команд
+// ---------------------------------------------------------------------------
+
+/** Пролог чтения пароля из первой строки stdin (без перевода строки: `read`
+ * забирает строку до `\n`, а хвост — уже SQL). */
+function passwordPrologue(envVar: 'PGPASSWORD' | 'MYSQL_PWD', password: string): string {
+  return password ? `IFS= read -r ${envVar}; export ${envVar}; ` : '';
+}
+
+/**
+ * Аргументы `docker exec` для psql. SQL — в stdin канала за паролем (нет
+ * лимита argv); таймаут — через PGOPTIONS env: применяется до любого
+ * statement'а и не зависит от read-only-переключателя в тексте запроса.
+ */
+export function psqlArgs(target: DbExecTarget, database: string): string[] {
+  const inner =
+    `${passwordPrologue('PGPASSWORD', target.password)}` +
+    `exec psql -U ${shellQuote(target.username)} -d ${shellQuote(database)} ` +
+    `-X -v ON_ERROR_STOP=1 --csv`;
+  return [
+    'exec', '-i',
+    '-e', `PGOPTIONS=-c statement_timeout=${DB_STATEMENT_TIMEOUT_S}s`,
+    target.containerId,
+    'sh', '-c', inner,
+  ];
+}
+
+/**
+ * Аргументы `docker exec` для mysql. Пароль — из первой строки stdin
+ * (MYSQL_PWD), не из env и не из argv. `database: null` — подключение без
+ * схемы по умолчанию (служебные запросы): dedicated user без прав на чужую
+ * системную базу не должен падать на «Access denied» до своего запроса.
+ */
+export function mysqlArgs(target: DbExecTarget, database: string | null): string[] {
+  const inner =
+    `${passwordPrologue('MYSQL_PWD', target.password)}` +
+    `exec mysql -u ${shellQuote(target.username)} ` +
+    `--batch --default-character-set=utf8mb4${database ? ` ${shellQuote(database)}` : ''}`;
+  return ['exec', '-i', target.containerId, 'sh', '-c', inner];
+}
+
+/**
+ * Гарантирует терминатор statement'а: psql молча отбрасывает незавершённый
+ * буфер на EOF — `SELECT 1` без `;` вернул бы пустой вывод с exit 0.
+ * Точка с запятой на отдельной строке: хвостовой `-- комментарий` поглощает
+ * `;` в своей строке, а на новой — корректно завершает statement. Хвостовые
+ * метакоманды (`… \g` psql, `… \G` mysql — исполняют буфер) и продолжение
+ * `\` не трогаем.
+ */
+export function ensureTerminator(sql: string): string {
+  const t = sql.trim();
+  if (!t || t.endsWith(';') || t.endsWith('\\') || /(?:^|\s)\\[a-z]+$/i.test(t)) return t;
+  return `${t}\n;`;
+}
+
+/**
+ * SQL-часть stdin: statement таймаута (MySQL — в SQL, у PG он в
+ * PGOPTIONS), read-only-переключатель и сам запрос. Read-only — защита от
+ * случайности, не от намеренного: пользовательский `SET … = off` снимает её
+ * (документировано в UI и AGENTS.md).
+ */
+export function buildStdinSql(
+  engine: DbEngine,
+  sql: string,
+  opts: { readOnly: boolean; flavor?: 'mysql' | 'mariadb' },
+): string {
+  const parts: string[] = [];
+  if (engine === 'mysql') {
+    parts.push(
+      opts.flavor === 'mariadb'
+        ? `SET SESSION max_statement_time=${DB_STATEMENT_TIMEOUT_S};`
+        : `SET SESSION max_execution_time=${DB_STATEMENT_TIMEOUT_S * 1000};`,
+    );
+  }
+  if (opts.readOnly) {
+    parts.push(
+      engine === 'postgres'
+        ? 'SET default_transaction_read_only = on;'
+        : 'SET SESSION TRANSACTION READ ONLY;',
+    );
+  }
+  parts.push(ensureTerminator(sql));
+  return `${parts.join('\n')}\n`;
+}
+
+/**
+ * Полный stdin канала: при непустом пароле он идёт первой строкой (её
+ * забирает `read` в прологе команды), дальше — SQL. Пустой пароль не пишет
+ * ничего — пролога в команде нет, SQL начинается сразу.
+ */
+export function buildChannelStdin(
+  target: DbExecTarget,
+  sql: string,
+  opts: { readOnly: boolean },
+): string {
+  const body = buildStdinSql(target.engine, sql, { readOnly: opts.readOnly, flavor: target.flavor });
+  return target.password ? `${target.password}\n${body}` : body;
+}
+
+/** Экранирование для внутреннего shell контейнера (`sh -c`). */
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+// ---------------------------------------------------------------------------
+// Парсеры вывода
+// ---------------------------------------------------------------------------
+
+export interface ParsedTable {
+  columns: string[];
+  rows: string[][];
+  /** Вывод обрезан по лимиту (maxOutput) — последняя строка выброшена. */
+  truncated: boolean;
+  /** Строки после расхождения колонок (многоstatement'ный вывод) — не для грида. */
+  stoppedEarly: boolean;
+}
+
+/**
+ * Парсер CSV-вывода psql (`--csv`, RFC 4180: кавычки, запятые и переводы
+ * строк в значениях). Первая строка — заголовок; при расхождении числа
+ * колонок (второй result set / command tag) строки дальше не берём —
+ * полный stdout остаётся в rawOutput. Выход без хвостового `\n` — вывод
+ * обрезан лимитом: последнюю неполную строку выбрасываем, truncated=true.
+ */
+export function parseCsvTable(out: string): ParsedTable {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let inQuotes = false;
+  let i = 0;
+
+  while (i < out.length) {
+    const ch = out[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (out[i + 1] === '"') {
+          cell += '"';
+          i += 2;
+          continue;
+        }
+        inQuotes = false;
+        i++;
+        continue;
+      }
+      cell += ch;
+      i++;
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = true;
+      i++;
+      continue;
+    }
+    if (ch === ',') {
+      row.push(cell);
+      cell = '';
+      i++;
+      continue;
+    }
+    if (ch === '\r' && out[i + 1] === '\n') {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+      i += 2;
+      continue;
+    }
+    if (ch === '\n') {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+      i++;
+      continue;
+    }
+    cell += ch;
+    i++;
+  }
+
+  // Хвост без перевода строки: psql завершает каждую строку `\n` (или
+  // `\r\n`), значит вывод отрезан лимитом — строку выбрасываем.
+  let truncated = false;
+  if (cell || row.length > 0 || inQuotes) {
+    truncated = true;
+  }
+
+  return finishTable(rows, truncated);
+}
+
+/**
+ * Парсер TSV-вывода mysql (`--batch`): колонки — реальные табы; `\t`, `\n`,
+ * `\\` и `\0` внутри значений экранированы — разэкранируем. NULL приходит
+ * строкой `NULL` и от значения 'NULL' неотличим — известное ограничение
+ * (фиксируется тестом-документацией). Неполная последняя строка (без
+ * хвостового `\n`) выбрасывается, truncated=true.
+ */
+export function parseTsvTable(out: string): ParsedTable {
+  const lines = out.split('\n');
+  // split оставляет пустой хвост после финального `\n`; непустой хвост —
+  // вывод отрезан лимитом, последнюю неполную строку выбрасываем.
+  const trailing = lines.pop();
+  const truncated = trailing !== undefined && trailing !== '';
+  const rows = lines.map((line) => line.split('\t').map(unescapeMysql));
+  return finishTable(rows, truncated);
+}
+
+/** `\t`/`\n`/`\\`/`\0` → реальные символы (batch-экранирование mysql). */
+export function unescapeMysql(s: string): string {
+  return s.replace(/\\(.)/g, (m, c: string) => {
+    switch (c) {
+      case 'n': return '\n';
+      case 't': return '\t';
+      case '0': return '\0';
+      default: return c; // `\\` → `\`, прочие `\x` — как есть
+    }
+  });
+}
+
+/** Заголовок + строки до первого расхождения колонок. */
+function finishTable(rows: string[][], truncated: boolean): ParsedTable {
+  if (rows.length === 0) {
+    return { columns: [], rows: [], truncated, stoppedEarly: false };
+  }
+  const columns = rows[0];
+  const result: string[][] = [];
+  let stoppedEarly = false;
+  for (let r = 1; r < rows.length; r++) {
+    if (rows[r].length !== columns.length) {
+      stoppedEarly = true;
+      break;
+    }
+    result.push(rows[r]);
+  }
+  return { columns, rows: result, truncated, stoppedEarly };
+}
+
+// ---------------------------------------------------------------------------
+// Выполнение
+// ---------------------------------------------------------------------------
+
+export interface DbQueryResult {
+  columns: string[];
+  rows: string[][];
+  /** Число строк в гриде (≤ DB_ROW_LIMIT). */
+  rowCount: number;
+  /** Полное число строк результата до обрезки лимитом. */
+  totalRows: number;
+  durationMs: number;
+  truncated: boolean;
+  /** Полный stdout, когда грид не вместил всё (многоstatement'ный вывод). */
+  rawOutput?: string;
+}
+
+export class DbQueryError extends Error {
+  stderr: string;
+  exitCode: number | null;
+
+  constructor(message: string, stderr: string, exitCode: number | null) {
+    super(message);
+    this.stderr = stderr;
+    this.exitCode = exitCode;
+  }
+}
+
+/** Сообщение об ошибке клиента БД (stderr первичен — там «Access denied»). */
+function clientErrorMessage(result: { code: number | null; stdout: string; stderr: string }): string {
+  return (
+    result.stderr.trim()
+    || result.stdout.trim()
+    || `Клиент БД завершился с кодом ${result.code}`
+  );
+}
+
+/** Полная shell-команда для запроса (отдельно — под тесты двойного экранирования). */
+export function buildQueryCommand(
+  profile: Profile,
+  target: DbExecTarget,
+  database: string | null,
+): string {
+  const args = target.engine === 'postgres'
+    ? psqlArgs(target, database ?? 'postgres')
+    : mysqlArgs(target, database);
+  return dockerCommand(profile, args);
+}
+
+/**
+ * Выполняет SQL через CLI-клиент в контейнере: пароль и SQL — в stdin
+ * канала, вывод до 2 МБ (стандартный лимит exec). Ненулевой exit code →
+ * DbQueryError со stderr клиента и кодом — UI показывает их mono-блоком.
+ */
+export async function runDbQuery(
+  profile: Profile,
+  target: DbExecTarget,
+  database: string,
+  sql: string,
+  readOnly: boolean,
+): Promise<DbQueryResult> {
+  const command = buildQueryCommand(profile, target, database);
+  const stdin = buildChannelStdin(target, sql, { readOnly });
+  const startedAt = Date.now();
+  const result = await exec(profile, command, {
+    timeoutMs: DB_CHANNEL_TIMEOUT_MS,
+    stdin,
+  });
+  const durationMs = Date.now() - startedAt;
+  if (result.code !== 0) {
+    throw new DbQueryError(clientErrorMessage(result), result.stderr.trim(), result.code);
+  }
+
+  const parsed = target.engine === 'postgres'
+    ? parseCsvTable(result.stdout)
+    : parseTsvTable(result.stdout);
+  const totalRows = parsed.rows.length;
+  const rows = parsed.rows.slice(0, DB_ROW_LIMIT);
+  const limited = totalRows > rows.length;
+  const response: DbQueryResult = {
+    columns: parsed.columns,
+    rows,
+    rowCount: rows.length,
+    totalRows,
+    durationMs,
+    truncated: parsed.truncated,
+  };
+  // Полный stdout нужен, когда грид не показывает всё: нет result set,
+  // обрезка или несколько statement'ов.
+  if (parsed.stoppedEarly || parsed.columns.length === 0 || limited || parsed.truncated) {
+    response.rawOutput = result.stdout.slice(0, RAW_OUTPUT_LIMIT);
+  }
+  return response;
+}
+
+/**
+ * Проверка креденшалов без сохранения (route `/connections/test`, паттерн
+ * `profiles/test-connection`): разовый `SELECT 1` по каналу консоли. Ошибка
+ * клиента (Access denied) уходит текстом как есть — видна до сохранения.
+ */
+export async function testDbConnection(profile: Profile, target: DbExecTarget): Promise<void> {
+  const command = buildQueryCommand(
+    profile,
+    target,
+    target.defaultDatabase ?? (target.engine === 'postgres' ? 'postgres' : null),
+  );
+  const result = await exec(profile, command, {
+    timeoutMs: DB_TEST_TIMEOUT_MS,
+    stdin: buildChannelStdin(target, 'SELECT 1', { readOnly: true }),
+  });
+  if (result.code !== 0) {
+    throw new DbQueryError(clientErrorMessage(result), result.stderr.trim(), result.code);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Служебные запросы (списки, обзор)
+// ---------------------------------------------------------------------------
+
+export interface DbDatabaseInfo {
+  name: string;
+  sizeBytes: number | null;
+  tableCount: number | null;
+}
+
+export interface DbTableInfo {
+  schema: string;
+  name: string;
+}
+
+export interface DbColumnInfo {
+  schema: string;
+  table: string;
+  name: string;
+}
+
+/** Список баз PG с размерами (системные скрыты); null при отказе в правах. */
+export const PG_DATABASES_SQL =
+  `SELECT datname AS name, pg_database_size(datname) AS size\n` +
+  `FROM pg_database\n` +
+  `WHERE datallowconn AND datname <> ALL (ARRAY['template0','template1'])\n` +
+  `ORDER BY 1`;
+
+/** Список таблиц PG по всем несистемным схемам подключённой базы. */
+export const PG_TABLES_SQL =
+  `SELECT table_schema AS schema, table_name AS name\n` +
+  `FROM information_schema.tables\n` +
+  `WHERE table_schema <> ALL (ARRAY['pg_catalog','information_schema'])\n` +
+  `ORDER BY 1, 2`;
+
+/** Число таблиц подключённой базы PG. */
+export const PG_TABLE_COUNT_SQL =
+  `SELECT count(*) FROM information_schema.tables\n` +
+  `WHERE table_schema <> ALL (ARRAY['pg_catalog','information_schema'])`;
+
+/** Список баз MySQL с размерами и числом таблиц одной командой. */
+export const MYSQL_DATABASES_SQL =
+  `SELECT table_schema AS name, COALESCE(SUM(data_length + index_length), 0) AS size, COUNT(*) AS tables\n` +
+  `FROM information_schema.tables\n` +
+  `GROUP BY table_schema\n` +
+  `ORDER BY 1`;
+
+/** Список таблиц выбранной базы MySQL (DATABASE() — защита от интерполяции). */
+export const MYSQL_TABLES_SQL =
+  `SELECT table_schema AS schema, table_name AS name\n` +
+  `FROM information_schema.tables\n` +
+  `WHERE table_schema = DATABASE()\n` +
+  `ORDER BY 1, 2`;
+
+/** Колонки таблиц PG по всем несистемным схемам (для схемы в промпте агента). */
+export const PG_COLUMNS_SQL =
+  `SELECT table_schema AS schema, table_name AS "table", column_name AS "column"\n` +
+  `FROM information_schema.columns\n` +
+  `WHERE table_schema <> ALL (ARRAY['pg_catalog','information_schema'])\n` +
+  `ORDER BY table_schema, table_name, ordinal_position`;
+
+/** Колонки таблиц выбранной базы MySQL (DATABASE() — без интерполяции имени). */
+export const MYSQL_COLUMNS_SQL =
+  'SELECT table_schema AS `schema`, table_name AS `table`, column_name AS `column`\n' +
+  'FROM information_schema.columns\n' +
+  'WHERE table_schema = DATABASE()\n' +
+  'ORDER BY table_schema, table_name, ordinal_position';
+
+/** Верхняя граница колонок в ответе /columns (границит промпт схемы). */
+export const DB_COLUMNS_LIMIT = 4000;
+
+export function isSystemDatabase(name: string): boolean {
+  return SYSTEM_DATABASES.has(name.toLowerCase());
+}
+
+/** Число или null; 0 — валидное значение (размер пустой базы), не null. */
+function toNumberOrNull(raw: string | undefined): number | null {
+  if (raw === undefined || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Разбирает вывод запроса баз в `DbDatabaseInfo[]` (общий для CSV и TSV:
+ * колонки name[, size][, tables]). Системные базы фильтруются.
+ */
+export function parseDatabaseList(parsed: ParsedTable, engine: DbEngine): DbDatabaseInfo[] {
+  const list: DbDatabaseInfo[] = [];
+  for (const row of parsed.rows) {
+    const name = row[parsed.columns.indexOf('name')] ?? '';
+    if (!name || isSystemDatabase(name)) continue;
+    const tablesRaw = row[parsed.columns.indexOf('tables')];
+    list.push({
+      name,
+      sizeBytes: toNumberOrNull(row[parsed.columns.indexOf('size')]),
+      // У PG счётчик таблиц приходит отдельным запросом на базу — здесь null.
+      tableCount: engine === 'mysql' ? toNumberOrNull(tablesRaw) : null,
+    });
+  }
+  return list;
+}
+
+/** Разбирает вывод запроса таблиц (колонки schema, name). */
+export function parseTableList(parsed: ParsedTable, engine: DbEngine): DbTableInfo[] {
+  const tables: DbTableInfo[] = [];
+  for (const row of parsed.rows) {
+    const schema = row[parsed.columns.indexOf('schema')] ?? '';
+    const name = row[parsed.columns.indexOf('name')] ?? '';
+    if (!name) continue;
+    if (engine === 'postgres' && PG_SYSTEM_SCHEMAS.has(schema.toLowerCase())) continue;
+    if (engine === 'mysql' && isSystemDatabase(schema)) continue;
+    tables.push({ schema, name });
+  }
+  return tables;
+}
+
+/** Разбирает вывод запроса колонок (schema, table, column) — для промпта агента. */
+export function parseColumnList(parsed: ParsedTable, engine: DbEngine): DbColumnInfo[] {
+  const columns: DbColumnInfo[] = [];
+  for (const row of parsed.rows) {
+    const schema = row[parsed.columns.indexOf('schema')] ?? '';
+    const table = row[parsed.columns.indexOf('table')] ?? '';
+    const name = row[parsed.columns.indexOf('column')] ?? '';
+    if (!table || !name) continue;
+    if (engine === 'postgres' && PG_SYSTEM_SCHEMAS.has(schema.toLowerCase())) continue;
+    if (engine === 'mysql' && isSystemDatabase(schema)) continue;
+    columns.push({ schema, table, name });
+  }
+  return columns.slice(0, DB_COLUMNS_LIMIT);
+}
+
+/** Список баз PG без размеров (фолбэк при отказе в правах на pg_database_size). */
+export const PG_DATABASES_FALLBACK_SQL =
+  `SELECT datname AS name FROM pg_database WHERE datallowconn ORDER BY 1`;
+
+/** Все схемы MySQL (включая пустые базы — в sizes-запросе их нет). */
+export const MYSQL_SCHEMATA_SQL =
+  `SELECT schema_name AS name FROM information_schema.schemata ORDER BY 1`;
+
+/** Выполняет служебный SELECT и возвращает разобранную таблицу. */
+export async function runDbMetaQuery(
+  profile: Profile,
+  target: DbExecTarget,
+  database: string | null,
+  sql: string,
+): Promise<ParsedTable> {
+  const command = buildQueryCommand(profile, target, database);
+  const result = await exec(profile, command, {
+    timeoutMs: DB_CHANNEL_TIMEOUT_MS,
+    stdin: buildChannelStdin(target, sql, { readOnly: true }),
+  });
+  if (result.code !== 0) {
+    throw new DbQueryError(clientErrorMessage(result), result.stderr.trim(), result.code);
+  }
+  return target.engine === 'postgres'
+    ? parseCsvTable(result.stdout)
+    : parseTsvTable(result.stdout);
+}
+
+/**
+ * База для служебных запросов без выбранной пользователем базы. MySQL:
+ * схема по умолчанию не нужна и может быть недоступна пользователю без прав
+ * на чужую базу — подключаемся без базы (null). PG без -d не умеет — дефолт
+ * 'postgres' (в official-образе доступен всем локальным пользователям).
+ */
+function metaDatabase(target: DbExecTarget): string | null {
+  return target.defaultDatabase ?? (target.engine === 'postgres' ? 'postgres' : null);
+}
+
+/** Версия сервера (`SELECT version()` / `SELECT @@version`). */
+export async function fetchDbVersion(profile: Profile, target: DbExecTarget): Promise<string> {
+  const sql = target.engine === 'postgres'
+    ? 'SELECT version() AS version'
+    : 'SELECT @@version AS version';
+  const table = await runDbMetaQuery(profile, target, metaDatabase(target), sql);
+  return table.rows[0]?.[0] ?? '';
+}
+
+export interface DbOverview {
+  engine: DbEngine;
+  version: string;
+  databases: DbDatabaseInfo[];
+}
+
+/** Верхний порог баз, по которым PG считает таблицы (по одному exec на базу). */
+export const PG_TABLE_COUNT_DB_LIMIT = 25;
+
+/**
+ * Обзор подключения: версия, базы с размерами и числом таблиц. У PG счётчик
+ * таблиц — отдельный запрос в каждую базу (кросс-БД-запросов нет), размер
+ * недоступен без прав → фолбэк на список имён. У MySQL пустые базы берутся
+ * из schemata и сливаются с sizes-запросом.
+ */
+export async function fetchDbOverview(profile: Profile, target: DbExecTarget): Promise<DbOverview> {
+  const version = await fetchDbVersion(profile, target);
+  const meta = metaDatabase(target);
+
+  if (target.engine === 'postgres') {
+    let list: DbDatabaseInfo[];
+    try {
+      list = parseDatabaseList(
+        await runDbMetaQuery(profile, target, meta, PG_DATABASES_SQL), 'postgres');
+    } catch {
+      list = parseDatabaseList(
+        await runDbMetaQuery(profile, target, meta, PG_DATABASES_FALLBACK_SQL), 'postgres');
+    }
+    for (const db of list.slice(0, PG_TABLE_COUNT_DB_LIMIT)) {
+      try {
+        const t = await runDbMetaQuery(profile, target, db.name, PG_TABLE_COUNT_SQL);
+        db.tableCount = Number(t.rows[0]?.[0]) || 0;
+      } catch {
+        /* без прав на базу — счётчик остаётся null */
+      }
+    }
+    return { engine: target.engine, version, databases: list };
+  }
+
+  const byName = new Map(
+    parseDatabaseList(await runDbMetaQuery(profile, target, meta, MYSQL_DATABASES_SQL), 'mysql')
+      .map((d) => [d.name, d]),
+  );
+  const list = parseDatabaseList(
+    await runDbMetaQuery(profile, target, meta, MYSQL_SCHEMATA_SQL), 'mysql');
+  return {
+    engine: target.engine,
+    version,
+    databases: list.map((d) => byName.get(d.name) ?? { ...d, sizeBytes: 0, tableCount: 0 }),
+  };
+}
+
+/** Список имён баз (без размеров — дешёвая альтернатива обзору). */
+export async function fetchDbDatabases(profile: Profile, target: DbExecTarget): Promise<string[]> {
+  const sql = target.engine === 'postgres' ? PG_DATABASES_FALLBACK_SQL : MYSQL_SCHEMATA_SQL;
+  const list = parseDatabaseList(
+    await runDbMetaQuery(profile, target, metaDatabase(target), sql), target.engine);
+  return list.map((d) => d.name);
+}
+
+/** Список таблиц базы (schema + name; системные схемы отфильтрованы). */
+export async function fetchDbTables(
+  profile: Profile,
+  target: DbExecTarget,
+  database: string,
+): Promise<DbTableInfo[]> {
+  const sql = target.engine === 'postgres' ? PG_TABLES_SQL : MYSQL_TABLES_SQL;
+  return parseTableList(
+    await runDbMetaQuery(profile, target, database, sql), target.engine);
+}
+
+/** Колонки таблиц базы (для схемы в промпте «Спросить агента»). */
+export async function fetchDbColumns(
+  profile: Profile,
+  target: DbExecTarget,
+  database: string,
+): Promise<DbColumnInfo[]> {
+  const sql = target.engine === 'postgres' ? PG_COLUMNS_SQL : MYSQL_COLUMNS_SQL;
+  return parseColumnList(
+    await runDbMetaQuery(profile, target, database, sql), target.engine);
+}

@@ -2,6 +2,7 @@ node_modules/
 dist/
 .env
 data/profiles.json
+data/db-connections.json
 data/ai-dialogues.json
 data/memory/
 data/*.tmp

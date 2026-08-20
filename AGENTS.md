@@ -35,7 +35,7 @@ cd web && npm run build                   # tsc && vite build → web/dist
 - `Dockerfile` — multi-stage (`web-builder` → `server-builder` → `server-deps` → runtime `node:20-alpine`).
 - `docker-compose.yml` — публикация `127.0.0.1:8080:8080`, volumes `./data:/data` и `./keys:/keys`. `docker-compose.dev.yml` + `scripts/docker-dev.sh` — dev-режим с hot-reload; изменение зависимостей (package.json/lock) требует пересборки dev-стадии через `scripts/docker-dev.sh up`.
 - `docs/roadmap.md` — план развития (эпики); перед каждым эпиком — детальное планирование. `docs/architecture.md` — детали реализации.
-- `data/` — volume: `profiles.json` (профили, пароли открытым текстом), `ai-dialogues.json` (диалоги агента), `memory/<profileId>/MEMORY.md` (память агента).
+- `data/` — volume: `profiles.json` (профили, пароли открытым текстом), `db-connections.json` (подключения БД, пароли открытым текстом), `ai-dialogues.json` (диалоги агента), `memory/<profileId>/MEMORY.md` (память агента).
 - `keys/` — SSH-ключи, монтируются в контейнер в `/keys` (в образ не копируются); импорт через UI сохраняет с правами 0600.
 - `server/test/` — unit-тесты (vitest) и ручные сценарии (`*.manual.mjs` / `*.manual.ts`).
 
@@ -47,7 +47,7 @@ cd web && npm run build                   # tsc && vite build → web/dist
 |---|---|---|
 | `APP_PORT` / `APP_HOST` | `8080` / `0.0.0.0` | Порт и адрес HTTP/WS сервера |
 | `APP_PASSWORD` | `admin` | Пароль входа в веб-интерфейс |
-| `DATA_DIR` | `/data` (docker) | Каталог с `profiles.json`, `ai-dialogues.json` и `memory/` |
+| `DATA_DIR` | `/data` (docker) | Каталог с `profiles.json`, `db-connections.json`, `ai-dialogues.json` и `memory/` |
 | `KEYS_DIR` | `/keys` (docker) | Каталог с SSH-ключами |
 | `WEB_DIST` | авто-определение | Путь к собранному фронтенду |
 | `AI_API_BASE` | `https://api.openai.com/v1` | Базовый URL OpenAI-совместимого API |
@@ -95,11 +95,12 @@ cd web && npm run build                   # tsc && vite build → web/dist
 
 ## Неочевидные инварианты
 
-- Хранилища JSON (`profiles.ts`, `ai/dialogues.ts`): zod-валидация, атомарная запись tmp+rename. Битый JSON переименовывается в `*.corrupt-<timestamp>`, persist отказывается перезаписывать файл до рестарта — молчаливого затирания нет.
+- Хранилища JSON (`profiles.ts`, `db-connections.ts`, `ai/dialogues.ts`): zod-валидация, атомарная запись tmp+rename. Битый JSON переименовывается в `*.corrupt-<timestamp>`, persist отказывается перезаписывать файл до рестарта — молчаливого затирания нет.
 - SFTP — только promise-обёртки из `src/ssh/sftp.ts`, не сырые callback-методы ssh2.
 - `src/ssh/manager.ts` — постоянные SSH-подключения на профиль с авто-переподключением; параллельные `getClient` делят один connect. `exec`: timeout 60 c, лимит вывода 2 МБ, опциональный `stdin` (подача пароля в `sudo -S`).
 - Docker по SSH (`src/services/docker.ts`): команда собирается из `dockerCommand` профиля + `shq`-экранирование аргументов; команда контейнера в `run` оборачивается в `sh -c` (многословная команда = shell-строка). Compose — только v2 (`docker compose`), standalone v1 отклоняется.
-- Update профиля: непереданный секрет (`password`/`keyPath`/`keyPassphrase`) сохраняется из существующего профиля; при смене `authType` новый секрет обязателен.
+- Update профиля: непереданный секрет (`password`/`keyPath`/`keyPassphrase`) сохраняется из существующего профиля; при смене `authType` новый секрет обязателен. То же у подключений БД (`db-connections.ts`): непереданный пароль сохраняется из существующей записи.
+- Подключения БД (вкладка «Базы данных», эпик 12): пароль пользователя передаётся **первой строкой stdin** канала (`IFS= read -r PGPASSWORD/MYSQL_PWD` в `sh -c` внутри контейнера) — не в argv, не в env хоста, не из env контейнера (может протухнуть). `\n`/`\r` в пароле отклоняются валидацией. Тумблер «только чтение» — серверный SET перед запросом, защита от случайности, не от намеренного. Подробности — `docs/architecture.md`.
 - Метрики/порты/cron — кэш 2 с на профиль. История нагрузки (`metrics-history.ts`) — in-memory, пишется хуком внутри `collectMetrics`: собственный опрос не нужен, историю кормят запросы `/api/metrics` и `/api/overview`.
 - SSH-туннели — in-memory реестр без персистентности; локальный конец слушает на `127.0.0.1`, диапазон `TUNNEL_PORT_MIN`–`TUNNEL_PORT_MAX`.
 - Мутации crontab — только пользовательского (`crontab -`), с защитой от гонки через `expectedRaw` (409 при расхождении); системные файлы read-only.
@@ -113,7 +114,8 @@ cd web && npm run build                   # tsc && vite build → web/dist
   - `server/test/agent.manual.mjs` — цикл агента против мокового OpenAI-совместимого endpoint'а.
   - `server/test/multi-server.manual.mjs` + `server/test/mock-openai-manual.mjs` — мульти-серверный режим: мок на :8199 и два sshd-контейнера на :2222/:2223.
   - `server/test/security-audit.manual.ts` — live-прогон аудита против sshd на :2222 с `SUDO_ACCESS=true` (`npx tsx test/security-audit.manual.ts`).
+  - `server/test/db.manual.mjs` — вкладка «Базы данных»: контейнеры `postgres:16-alpine` + `postgres:16` (dash) + `mysql:8`, подключения с явными креденшалами, test-connection (в т.ч. неверный пароль), query/dump, частичный update пароля.
 
 ## Безопасность (кратко)
 
-Сервис однопользовательский: localhost-only, пароль из `APP_PASSWORD`, httpOnly-cookie, rate-limit логина. SSH-пароли лежат открытым текстом в `data/profiles.json` — это осознанный компромисс локального инструмента, volume наружу не публиковать. Мутирующие действия агента никогда не выполняются без подтверждения; deny-лист read-only команд консервативен — лучше отказать, чем пропустить. SSH-туннели: локальный конец слушает на `127.0.0.1` внутри контейнера, доступен любому локальному процессу без авторизации (обходит `APP_PASSWORD`). Для однопользовательской машины приемлемо (как и терминал), но это ослабление модели безопасности — туннель даёт доступ к удалённым сервисам всем, кто может подключиться к `127.0.0.1:<порт>`.
+Сервис однопользовательский: localhost-only, пароль из `APP_PASSWORD`, httpOnly-cookie, rate-limit логина. SSH-пароли лежат открытым текстом в `data/profiles.json`, пароли подключений БД — в `data/db-connections.json` — это осознанный компромисс локального инструмента (тот же trust domain), volume наружу не публиковать. Пароль БД не светится в argv/ps хоста: передаётся первой строкой stdin канала. Мутирующие действия агента никогда не выполняются без подтверждения; deny-лист read-only команд консервативен — лучше отказать, чем пропустить. SSH-туннели: локальный конец слушает на `127.0.0.1` внутри контейнера, доступен любому локальному процессу без авторизации (обходит `APP_PASSWORD`). Для однопользовательской машины приемлемо (как и терминал), но это ослабление модели безопасности — туннель даёт доступ к удалённым сервисам всем, кто может подключиться к `127.0.0.1:<порт>`.

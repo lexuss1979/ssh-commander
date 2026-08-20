@@ -393,6 +393,253 @@ export async function fetchTerminalHistory(profileId: string, limit = 100): Prom
   return data.commands;
 }
 
+// Вкладка «Базы данных» (эпик 12, итерация 2: явные креденшалы)
+export type DbEngine = 'postgres' | 'mysql';
+export type MysqlFlavor = 'mysql' | 'mariadb';
+
+/** Цель подключения: контейнер (рабочий путь v1) или хост (модель под v2). */
+export type DbConnectionTarget =
+  | { kind: 'container'; containerId: string }
+  | { kind: 'host'; host: string; port: number };
+
+/** Сохранённое подключение (пароль наружу не отдаётся). */
+export interface DbConnectionInfo {
+  id: string;
+  profileId: string;
+  name: string;
+  engine: DbEngine;
+  target: DbConnectionTarget;
+  username: string;
+  hasPassword: boolean;
+  defaultDatabase?: string;
+  flavor?: MysqlFlavor;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Поля подключения, создаваемые/обновляемые формой. */
+export interface DbConnectionInput {
+  profileId: string;
+  name: string;
+  engine: DbEngine;
+  target: DbConnectionTarget;
+  username: string;
+  password?: string;
+  defaultDatabase?: string;
+  flavor?: MysqlFlavor;
+}
+
+export function fetchDbConnections(profileId: string): Promise<DbConnectionInfo[]> {
+  return api<{ connections: DbConnectionInfo[] }>(
+    `/api/db/connections?profileId=${encodeURIComponent(profileId)}`,
+  ).then((r) => r.connections);
+}
+
+export function createDbConnection(input: DbConnectionInput): Promise<DbConnectionInfo> {
+  return api('/api/db/connections', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+/** PUT: непереданный (пустой) пароль сохраняется из хранилища. */
+export function updateDbConnection(id: string, input: DbConnectionInput): Promise<DbConnectionInfo> {
+  return api(`/api/db/connections/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteDbConnection(id: string): Promise<void> {
+  return api(`/api/db/connections/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/**
+ * Проверка креденшалов без сохранения: SELECT 1 по реальному каналу.
+ * Ошибка клиента БД приходит структурой {message, stderr, exitCode} —
+ * выбрасываем её, а не строку.
+ */
+export async function testDbConnection(
+  input: DbConnectionInput & { id?: string },
+): Promise<void> {
+  const res = await fetch('/api/db/connections/test', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const text = await res.text();
+  let body: { error?: unknown } = {};
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    body = { error: text.slice(0, 500) };
+  }
+  if (!res.ok) {
+    if (res.status === 401) unauthorizedHandler?.();
+    const err = body?.error as { message?: string } | string | undefined;
+    if (err && typeof err === 'object') {
+      throw Object.assign(new Error(err.message ?? 'Ошибка запроса'), {
+        info: err as DbQueryErrorInfo,
+      });
+    }
+    throw new ApiError(res.status, typeof err === 'string' ? err : res.statusText);
+  }
+}
+
+/** Контейнер СУБД из discovery — автозаполнение формы подключения. */
+export interface DbSuggestion {
+  id: string;
+  name: string;
+  engine: DbEngine;
+  image: string;
+  suggestedUser: string;
+  suggestedDatabase: string | null;
+  flavor?: MysqlFlavor;
+}
+
+export interface DbHint {
+  id: string;
+  name: string;
+  port: number;
+}
+
+export function fetchDbDiscovery(
+  profileId: string,
+): Promise<{ suggestions: DbSuggestion[]; hints: DbHint[] }> {
+  return api(`/api/db/discovery?profileId=${encodeURIComponent(profileId)}`);
+}
+
+export interface DbDatabaseInfo {
+  name: string;
+  sizeBytes: number | null;
+  tableCount: number | null;
+}
+
+export interface DbOverview {
+  engine: DbEngine;
+  version: string;
+  databases: DbDatabaseInfo[];
+}
+
+export function fetchDbOverview(profileId: string, connectionId: string): Promise<DbOverview> {
+  const params = new URLSearchParams({ profileId, connectionId });
+  return api(`/api/db/overview?${params}`);
+}
+
+export interface DbTableInfo {
+  schema: string;
+  name: string;
+}
+
+export function fetchDbTables(
+  profileId: string,
+  connectionId: string,
+  database: string,
+): Promise<DbTableInfo[]> {
+  const params = new URLSearchParams({ profileId, connectionId, database });
+  return api<{ tables: DbTableInfo[] }>(`/api/db/tables?${params}`).then((r) => r.tables);
+}
+
+export interface DbColumnInfo {
+  schema: string;
+  table: string;
+  name: string;
+}
+
+/** Колонки таблиц базы — схема для промпта «Спросить агента».
+ * `truncated` — сервер обрезал список по лимиту (4000). */
+export function fetchDbColumns(
+  profileId: string,
+  connectionId: string,
+  database: string,
+): Promise<{ columns: DbColumnInfo[]; truncated: boolean }> {
+  const params = new URLSearchParams({ profileId, connectionId, database });
+  return api(`/api/db/columns?${params}`);
+}
+
+export interface DbQueryResult {
+  columns: string[];
+  rows: string[][];
+  rowCount: number;
+  totalRows: number;
+  durationMs: number;
+  truncated: boolean;
+  rawOutput?: string;
+}
+
+/** Структурированная ошибка клиента БД: stderr и exit code — в mono-блок. */
+export interface DbQueryErrorInfo {
+  message: string;
+  stderr: string;
+  exitCode: number | null;
+}
+
+/**
+ * Выполнение SQL. Ошибка приходит телом {error: {message, stderr, exitCode}}
+ * — выбрасываем её структуру, а не строку (в отличие от api()).
+ */
+export async function runDbQuery(
+  profileId: string,
+  params: { connectionId: string; database: string; sql: string; readOnly: boolean },
+): Promise<DbQueryResult> {
+  const res = await fetch('/api/db/query', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ profileId, ...params }),
+  });
+  const text = await res.text();
+  let body: { error?: unknown } = {};
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    body = { error: text.slice(0, 500) };
+  }
+  if (!res.ok) {
+    if (res.status === 401) unauthorizedHandler?.();
+    const err = body?.error as { message?: string } | string | undefined;
+    if (err && typeof err === 'object') {
+      throw Object.assign(new Error(err.message ?? 'Ошибка запроса'), {
+        info: err as DbQueryErrorInfo,
+      });
+    }
+    throw new ApiError(res.status, typeof err === 'string' ? err : res.statusText);
+  }
+  return body as DbQueryResult;
+}
+
+/** Скачивание дампа базы: .sql.gz стримом → Blob → файл. Дамп собирается в
+ * памяти браузера целиком — осознанное упрощение v1 (Blob не удерживает
+ * JS-heap так, как string-конкатенация, но очень большие базы лимитируют). */
+export async function downloadDbDump(
+  profileId: string,
+  connectionId: string,
+  database: string,
+): Promise<void> {
+  const params = new URLSearchParams({ profileId, connectionId, database });
+  const res = await fetch(`/api/db/dump?${params}`, { credentials: 'same-origin' });
+  if (!res.ok) {
+    let msg = res.statusText;
+    try {
+      msg = (await res.json()).error ?? msg;
+    } catch {
+      /* keep statusText */
+    }
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get('Content-Disposition') ?? '';
+  const match = /filename="?(.+?)"?$/.exec(disposition);
+  const filename = match ? decodeURIComponent(match[1]) : `${database}.sql.gz`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function downloadDirUrl(profileId: string, path: string): string {
   const params = new URLSearchParams({ profileId, path });
   return `/api/files/download-dir?${params}`;
@@ -460,7 +707,9 @@ export async function searchFiles(
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} Б`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
+  if (bytes < 1024 * 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} ГБ`;
+  return `${(bytes / (1024 * 1024 * 1024 * 1024)).toFixed(2)} ТБ`;
 }
 
 export function formatDate(ms: number): string {

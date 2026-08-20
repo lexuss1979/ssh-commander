@@ -19,6 +19,7 @@ import { tunnelsRouter } from './routes/tunnels.js';
 import { overviewRouter } from './routes/overview.js';
 import { cronRouter } from './routes/cron.js';
 import { terminalRouter } from './routes/terminal.js';
+import { dbRouter } from './routes/db.js';
 import { requireProfile } from './profiles.js';
 import { attachTerminal } from './ws/terminal.js';
 import { handleAgentWs } from './ws/agent.js';
@@ -46,6 +47,7 @@ app.use('/api/tunnels', requireAuth, tunnelsRouter);
 app.use('/api/overview', requireAuth, overviewRouter);
 app.use('/api/cron', requireAuth, cronRouter);
 app.use('/api/terminal', requireAuth, terminalRouter);
+app.use('/api/db', requireAuth, dbRouter);
 
 // SPA static files (built web app).
 if (fs.existsSync(config.webDist)) {
