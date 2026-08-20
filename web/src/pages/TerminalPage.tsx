@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import type { Profile } from '../types';
+import type { AgentAskMode, Profile } from '../types';
 import { fetchTerminalHistory } from '../api';
 
 interface Props {
@@ -13,13 +13,20 @@ interface Props {
   container?: { id: string; name: string } | null;
   onExitContainer?: () => void;
   /** «Спросить агента»: передать контекст терминала AI-агенту. */
-  onAskAgent?: (text: string) => void;
+  onAskAgent?: (text: string, mode?: AgentAskMode) => void;
 }
 
 // Лимиты контекста для кнопки «Спросить агента» (см. roadmap, эпик 7):
 // последние ~30 непустых строк, суммарно не более ~4 КБ.
 const ASK_AGENT_MAX_LINES = 30;
 const ASK_AGENT_MAX_CHARS = 4096;
+
+// Выделение xterm (с той же обрезкой до 4 КБ с сохранением хвоста, что и
+// в collectTerminalContext) — для действий меню «В чат», работающих только
+// на выделении.
+function collectSelection(term: Terminal): string {
+  return term.getSelection().trim().slice(-ASK_AGENT_MAX_CHARS);
+}
 
 // Выделение xterm, если есть; иначе — хвост буфера (последние непустые строки).
 function collectTerminalContext(term: Terminal): string {
@@ -153,6 +160,10 @@ export function TerminalPage({ profile, showError, visible, container, onExitCon
   const [status, setStatus] = useState('connecting');
   const [sessionKey, setSessionKey] = useState(0);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // Есть ли выделение в xterm — включает пункты меню «В чат».
+  const [hasSelection, setHasSelection] = useState(false);
+  const [askMenuOpen, setAskMenuOpen] = useState(false);
+  const askMenuRef = useRef<HTMLDivElement>(null);
   const statusRef = useRef(status);
   statusRef.current = status;
   const containerId = container?.id ?? '';
@@ -190,6 +201,41 @@ export function TerminalPage({ profile, showError, visible, container, onExitCon
     term.clearSelection();
     onAskAgent(text);
   };
+
+  // Действия меню «В чат» — строго на выделении (без фолбэка хвоста буфера):
+  // 'new-dialogue' — новый диалог с выделением первым сообщением,
+  // 'prefill' — вставка в поле ввода текущего диалога без отправки.
+  const sendSelectionToChat = (mode: 'new-dialogue' | 'prefill') => {
+    const term = termRef.current;
+    if (!term || !onAskAgent) return;
+    const text = collectSelection(term);
+    if (!text) {
+      showError('Сначала выделите текст в терминале');
+      return;
+    }
+    term.clearSelection();
+    setAskMenuOpen(false);
+    onAskAgent(text, mode);
+  };
+
+  // Меню «В чат»: закрывается по клику вне его и по Escape.
+  useEffect(() => {
+    if (!askMenuOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (askMenuRef.current && !askMenuRef.current.contains(e.target as Node)) {
+        setAskMenuOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAskMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [askMenuOpen]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -246,6 +292,9 @@ export function TerminalPage({ profile, showError, visible, container, onExitCon
     sendInputRef.current = (data) => send({ type: 'input', data });
 
     term.onData((data) => send({ type: 'input', data }));
+
+    // Пункты меню «В чат» активны только при выделении — трекаем его live.
+    term.onSelectionChange(() => setHasSelection(term.hasSelection()));
 
     ws.onopen = () => {
       if (!closed) {
@@ -337,6 +386,45 @@ export function TerminalPage({ profile, showError, visible, container, onExitCon
           >
             Спросить агента
           </button>
+        )}
+        {onAskAgent && (
+          <div className="terminal-ask" ref={askMenuRef}>
+            <button
+              className={`btn btn-ghost ${askMenuOpen ? 'open' : ''}`}
+              onClick={() => setAskMenuOpen((o) => !o)}
+              title="Действия с выделением терминала в чате агента"
+            >
+              В чат ▾
+            </button>
+            {askMenuOpen && (
+              <div className="terminal-ask-menu">
+                <button
+                  className="terminal-ask-item"
+                  disabled={!hasSelection}
+                  title={
+                    hasSelection
+                      ? 'Создать новый диалог и отправить выделение первым сообщением'
+                      : 'Сначала выделите текст в терминале'
+                  }
+                  onClick={() => sendSelectionToChat('new-dialogue')}
+                >
+                  Открыть в новом чате
+                </button>
+                <button
+                  className="terminal-ask-item"
+                  disabled={!hasSelection}
+                  title={
+                    hasSelection
+                      ? 'Вставить выделение в поле ввода текущего диалога (без отправки)'
+                      : 'Сначала выделите текст в терминале'
+                  }
+                  onClick={() => sendSelectionToChat('prefill')}
+                >
+                  Добавить в чат
+                </button>
+              </div>
+            )}
+          </div>
         )}
         {container && onExitContainer && (
           <button className="btn btn-ghost" onClick={onExitContainer}>

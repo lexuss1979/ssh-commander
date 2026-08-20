@@ -569,6 +569,49 @@ body.resizing-agent {
   font-size: 12px;
 }
 
+/* Меню «В чат ▾» в тулбаре терминала: действия над выделением */
+.terminal-ask {
+  position: relative;
+}
+
+.terminal-ask-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px var(--shadow);
+}
+
+.terminal-ask-item {
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.terminal-ask-item:hover:not(:disabled) {
+  background: var(--bg-input);
+}
+
+.terminal-ask-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .agent-panel .agent-messages {
   padding: 12px;
 }

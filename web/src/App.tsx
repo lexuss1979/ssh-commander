@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, api, fetchOverview, setUnauthorizedHandler } from './api';
-import type { Profile } from './types';
+import type { AgentAskMode, Profile } from './types';
 import { LoginPage } from './pages/LoginPage';
 import { ServersPage } from './pages/ServersPage';
 import { OverviewPage } from './pages/OverviewPage';
@@ -63,10 +63,13 @@ export default function App() {
   });
   const [agentWidth, setAgentWidth] = useState<number>(loadAgentWidth);
   const [agentOpen, setAgentOpen] = useState<boolean>(loadAgentOpen);
-  // Одноразовый запрос из терминала («Спросить агента»): AgentPage расходует
-  // его и сбрасывает через onAgentRequestConsumed. profileId — панель агента
-  // того профиля, из терминала которого пришёл запрос.
-  const [agentRequest, setAgentRequest] = useState<{ id: number; text: string; profileId: string } | null>(null);
+  // Одноразовый запрос из терминала («Спросить агента» и меню «В чат»):
+  // AgentPage расходует его и сбрасывает через onAgentRequestConsumed.
+  // profileId — панель агента того профиля, из терминала которого пришёл
+  // запрос; mode — что делать с текстом (по умолчанию 'explain').
+  const [agentRequest, setAgentRequest] = useState<
+    { id: number; text: string; profileId: string; mode: AgentAskMode } | null
+  >(null);
   // Keep-alive панели агента: монтируются для всех посещённых за сессию
   // профилей, неактивные скрываются display:none — WS и чат-стейт живут.
   const [visitedProfileIds, setVisitedProfileIds] = useState<string[]>([]);
@@ -207,12 +210,13 @@ export default function App() {
     });
   }, []);
 
-  // Кнопка «Спросить агента» в терминале: раскрывает панель и передаёт контекст
-  // панели того профиля, чей терминал прислал запрос (терминал — активного).
+  // Кнопка «Спросить агента» и меню «В чат» в терминале: раскрывает панель
+  // и передаёт контекст панели того профиля, чей терминал прислал запрос
+  // (терминал — активного). mode задаёт действие над текстом в AgentPage.
   const handleAskAgent = useCallback(
-    (text: string) => {
+    (text: string, mode: AgentAskMode = 'explain') => {
       setAgentOpen(true);
-      setAgentRequest({ id: Date.now(), text, profileId: activeProfileId });
+      setAgentRequest({ id: Date.now(), text, profileId: activeProfileId, mode });
     },
     [activeProfileId],
   );

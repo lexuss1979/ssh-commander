@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, formatRelativeDate } from '../api';
-import type { Dialogue, DialogueMessage, DialogueSummary, Profile } from '../types';
+import type { AgentAskMode, Dialogue, DialogueMessage, DialogueSummary, Profile } from '../types';
 import { Markdown } from '../components/Markdown';
 import { Modal } from '../components/Modal';
 
@@ -8,7 +8,7 @@ interface Props {
   profile: Profile;
   showError: (msg: string) => void;
   /** Одноразовый запрос «Спросить агента» из терминала (расходуется эффектом ниже). */
-  agentRequest?: { id: number; text: string } | null;
+  agentRequest?: { id: number; text: string; mode?: AgentAskMode } | null;
   onAgentRequestConsumed?: () => void;
   /** Индикатор активности в сайдбаре: 'pending' (ждёт approve) важнее 'running'. */
   onActivity?: (profileId: string, state: 'running' | 'pending' | null) => void;
@@ -42,6 +42,11 @@ interface ChatMessageView {
 
 let nextId = 1;
 
+// Шаблон запроса по выводу терминала (режимы 'explain' и 'new-dialogue').
+function terminalContextMessage(text: string, serverName: string): string {
+  return `Объясни этот вывод терминала (сервер ${serverName}):\n\`\`\`\n${text}\n\`\`\``;
+}
+
 export function AgentPage({ profile, showError, agentRequest, onAgentRequestConsumed, onActivity }: Props) {
   const [messages, setMessages] = useState<ChatMessageView[]>([]);
   const [input, setInput] = useState('');
@@ -70,6 +75,12 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   // до tool_result); смена диалога сбрасывает.
   const [decidedCalls, setDecidedCalls] = useState<Set<string>>(() => new Set());
   const wsRef = useRef<WebSocket | null>(null);
+  // Отложенная отправка первого сообщения в только что созданный диалог
+  // ('new-dialogue' из терминала): заполняется после успешного POST, а
+  // отправляется в ws.onopen, когда WS нового диалога готов.
+  const pendingSendRef = useRef<{ content: string; dialogueId: string } | null>(null);
+  // Поле ввода — для фокуса/курсора после prefill из терминала.
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   // DOM-карточки вызовов в ленте — клик по плашке подтверждения скроллит к карточке.
   const cardRefs = useRef(new Map<string, HTMLDivElement>());
   const listRef = useRef<HTMLDivElement>(null);
@@ -172,7 +183,9 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     }
   }, [profile.id]);
 
-  const startNewDialogue = useCallback(async () => {
+  // Возвращает id созданного диалога (null при ошибке) — «открыть в новом
+  // чате» из терминала привязывает к нему отложенную отправку.
+  const startNewDialogue = useCallback(async (): Promise<string | null> => {
     try {
       const { dialogue } = await api<{ dialogue: Dialogue }>('/api/ai/dialogues', {
         method: 'POST',
@@ -180,8 +193,10 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       });
       setDialogues((prev) => [toSummary(dialogue), ...prev]);
       setActiveDialogueId(dialogue.id);
+      return dialogue.id;
     } catch (err) {
       showError((err as Error).message);
+      return null;
     }
   }, [profile.id, showError]);
 
@@ -269,7 +284,20 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       `/ws/agent?profileId=${encodeURIComponent(profile.id)}&dialogueId=${encodeURIComponent(activeDialogueId)}`,
     );
     wsRef.current = ws;
-    ws.onopen = () => setConnected(true);
+    ws.onopen = () => {
+      setConnected(true);
+      // Отложенное первое сообщение нового диалога ('new-dialogue' из
+      // терминала): сверка dialogueId закрывает гонку «пользователь успел
+      // переключить диалог, пока коннектился» — замыкание держит id именно
+      // этого WS. planMode: false — это готовый вопрос, а не планирование.
+      const pending = pendingSendRef.current;
+      if (pending && pending.dialogueId === activeDialogueId) {
+        pendingSendRef.current = null;
+        setMessages((prev) => [...prev, { id: nextId++, role: 'user', content: pending.content }]);
+        setPlanReady(false);
+        ws.send(JSON.stringify({ type: 'message', content: pending.content, planMode: false }));
+      }
+    };
     // Обрыв WS между кликом и tool_result: результат уже не придёт, снимаем
     // блокировку, чтобы плашка не зависала навсегда в «выполняется…»
     // (перезагрузка диалога пересоздаст сессию и состояние в любом случае).
@@ -363,6 +391,15 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     };
     return () => {
       cancelled = true;
+      // Протухший pending: пользователь ушёл с диалога до onopen —
+      // отложенное сообщение сбрасываем, чтобы не выстрелило при
+      // следующем открытии этого диалога. Условно: безусловная очистка
+      // роняла бы основной путь — ref заполняется до ре-рендера от
+      // setActiveDialogueId, и cleanup предыдущего effect'а выполняется
+      // уже после заполнения (там pending чужого dialogueId).
+      if (pendingSendRef.current?.dialogueId === activeDialogueId) {
+        pendingSendRef.current = null;
+      }
       ws.close();
       wsRef.current = null;
     };
@@ -439,11 +476,43 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   // отправляем сообщение сразу; иначе (нет соединения или идёт выполнение)
   // подставляем текст в поле ввода, чтобы пользователь отправил сам и текущий
   // поток не сломался. Запрос одноразовый: id запоминаем, App сбрасывает стейт.
+  // mode: 'explain' (кнопка «Спросить агента») — как выше; 'prefill' — всегда
+  // только вставка в поле ввода; 'new-dialogue' — создать диалог и отправить
+  // текст первым сообщением (отложенно, в ws.onopen нового диалога).
   const lastHandledRequestRef = useRef(0);
   useEffect(() => {
     if (!agentRequest || agentRequest.id === lastHandledRequestRef.current) return;
     lastHandledRequestRef.current = agentRequest.id;
-    const content = `Объясни этот вывод терминала (сервер ${profile.name}):\n\`\`\`\n${agentRequest.text}\n\`\`\``;
+    const mode = agentRequest.mode ?? 'explain';
+    if (mode === 'prefill') {
+      // Цитата без инструкции «объясни» — пользователь допишет свой вопрос;
+      // набранное не затираем. Фокус и курсор в конец — после применённого
+      // стейта, поэтому requestAnimationFrame.
+      const block = `Вывод терминала (сервер ${profile.name}):\n\`\`\`\n${agentRequest.text}\n\`\`\`\n\n`;
+      setInput((prev) => (prev ? `${prev}\n\n${block}` : block));
+      requestAnimationFrame(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+      });
+      onAgentRequestConsumed?.();
+      return;
+    }
+    if (mode === 'new-dialogue') {
+      if (runningRef.current) {
+        showError('Агент выполняет задачу — дождитесь завершения');
+        onAgentRequestConsumed?.();
+        return;
+      }
+      const content = terminalContextMessage(agentRequest.text, profile.name);
+      void startNewDialogue().then((id) => {
+        if (id) pendingSendRef.current = { content, dialogueId: id };
+      });
+      onAgentRequestConsumed?.();
+      return;
+    }
+    const content = terminalContextMessage(agentRequest.text, profile.name);
     if (connectedRef.current && !runningRef.current && activeDialogueIdRef.current) {
       setMessages((prev) => [...prev, { id: nextId++, role: 'user', content }]);
       setPlanReady(false);
@@ -452,7 +521,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       setInput(content);
     }
     onAgentRequestConsumed?.();
-  }, [agentRequest, planMode, sendWs, onAgentRequestConsumed, profile.name]);
+  }, [agentRequest, planMode, sendWs, onAgentRequestConsumed, profile.name, showError, startNewDialogue]);
 
   // Подключённые серверы для чипов и модалки аудита: до события `servers`
   // показываем только домашний профиль.
@@ -764,6 +833,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
 
         <div className="agent-input">
           <textarea
+            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
