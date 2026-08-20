@@ -1,38 +1,17 @@
-import { memo, useState, useCallback, useRef, createContext, useContext } from 'react';
-import type { ReactNode } from 'react';
+import { memo, useState, useCallback, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 interface Props {
   content: string;
-  /**
-   * Кнопка «Вставить в редактор» на ```sql-блоках (SQL-консоль вкладки
-   * «Базы данных»: ответ агента → редактор). Не задан — кнопки нет.
-   */
-  onInsertSql?: (sql: string) => void;
 }
 
-const InsertSqlContext = createContext<((sql: string) => void) | null>(null);
-
-/** Язык блока из className дочернего `<code class="language-*">`. */
-function codeLanguage(children: ReactNode): string | null {
-  if (Array.isArray(children)) children = children[0];
-  if (typeof children === 'object' && children !== null && 'props' in children) {
-    const cls = (children.props as { className?: string })?.className ?? '';
-    const m = /language-([\w+-]+)/.exec(cls);
-    return m ? m[1].toLowerCase() : null;
-  }
-  return null;
-}
-
-/** Блок <pre> с кнопкой «Копировать»; для sql-блоков — дополнительно «В SQL». */
+/** Блок <pre> с кнопкой «Копировать» в правом верхнем углу. */
 function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
   const { children, ...rest } = props;
   const [copied, setCopied] = useState(false);
   const preRef = useRef<HTMLPreElement>(null);
-  const onInsertSql = useContext(InsertSqlContext);
-  const isSql = onInsertSql && codeLanguage(children as ReactNode)?.endsWith('sql');
 
   const handleCopy = useCallback(() => {
     const text = preRef.current?.textContent ?? '';
@@ -43,50 +22,33 @@ function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
     });
   }, []);
 
-  const handleInsert = useCallback(() => {
-    const text = preRef.current?.textContent ?? '';
-    if (text) onInsertSql?.(text.trim());
-  }, [onInsertSql]);
-
   return (
     <div className="code-block-wrap">
       <pre {...rest} ref={preRef}>{children}</pre>
-      <span className="code-block-actions">
-        {isSql && (
-          <button
-            className="code-copy-btn code-insert-btn"
-            onClick={handleInsert}
-            title="Вставить SQL в редактор на вкладке «Базы данных»"
-            aria-label="Вставить SQL в редактор"
-          >
-            → SQL
-          </button>
-        )}
-        <button
-          className="code-copy-btn"
-          onClick={handleCopy}
-          title="Копировать"
-          aria-label="Копировать код"
-        >
-          {copied ? '✓' : '📋'}
-        </button>
-      </span>
+      <button
+        className="code-copy-btn"
+        onClick={handleCopy}
+        title="Копировать"
+        aria-label="Копировать код"
+      >
+        {copied ? '✓' : '📋'}
+      </button>
     </div>
   );
 }
+
+const components: Components = {
+  pre: CodeBlock as Components['pre'],
+};
 
 /**
  * Рендер сообщений чата как markdown (GFM: таблицы, списки, код, ссылки).
  * react-markdown не рендерит сырой HTML, поэтому вывод модели безопасен.
  */
-export const Markdown = memo(function Markdown({ content, onInsertSql }: Props) {
+export const Markdown = memo(function Markdown({ content }: Props) {
   return (
-    <InsertSqlContext.Provider value={onInsertSql ?? null}>
-      <div className="markdown-body">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock as Components['pre'] }}>
-          {content}
-        </ReactMarkdown>
-      </div>
-    </InsertSqlContext.Provider>
+    <div className="markdown-body">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{content}</ReactMarkdown>
+    </div>
   );
 });

@@ -6,21 +6,19 @@ import { ServersPage } from './pages/ServersPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { PortsPage } from './pages/PortsPage';
 import { CronPage } from './pages/CronPage';
-import { DatabasesPage } from './pages/DatabasesPage';
 import { TerminalPage } from './pages/TerminalPage';
 import { FilesPage } from './pages/FilesPage';
 import { DockerPage } from './pages/DockerPage';
 import { AgentPage } from './pages/AgentPage';
 import { ProfileModal } from './components/ProfileModal';
 
-type Tab = 'servers' | 'overview' | 'terminal' | 'files' | 'docker' | 'databases' | 'ports' | 'cron';
+type Tab = 'servers' | 'overview' | 'terminal' | 'files' | 'docker' | 'ports' | 'cron';
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'overview', label: 'Обзор' },
   { id: 'terminal', label: 'Терминал' },
   { id: 'files', label: 'Файлы' },
   { id: 'docker', label: 'Docker' },
-  { id: 'databases', label: 'Базы данных' },
   { id: 'ports', label: 'Порты' },
   { id: 'cron', label: 'Cron' },
 ];
@@ -65,17 +63,13 @@ export default function App() {
   });
   const [agentWidth, setAgentWidth] = useState<number>(loadAgentWidth);
   const [agentOpen, setAgentOpen] = useState<boolean>(loadAgentOpen);
-  // Одноразовый запрос «Спросить агента» (терминал, меню «В чат», SQL-консоль
-  // вкладки «Базы данных»): AgentPage расходует его и сбрасывает через
-  // onAgentRequestConsumed. profileId — панель агента того профиля, откуда
-  // пришёл запрос; mode — что делать с текстом (по умолчанию 'explain');
-  // source === 'db' включает кнопку «→ SQL» на sql-блоках ответов.
+  // Одноразовый запрос из терминала («Спросить агента» и меню «В чат»):
+  // AgentPage расходует его и сбрасывает через onAgentRequestConsumed.
+  // profileId — панель агента того профиля, из терминала которого пришёл
+  // запрос; mode — что делать с текстом (по умолчанию 'explain').
   const [agentRequest, setAgentRequest] = useState<
-    { id: number; text: string; profileId: string; mode: AgentAskMode; source?: string } | null
+    { id: number; text: string; profileId: string; mode: AgentAskMode } | null
   >(null);
-  // Обратный ход «→ SQL»: AgentPage просит вставить SQL в редактор консоли,
-  // DatabasesPage расходует и сбрасывает через onSqlInsertConsumed.
-  const [sqlInsert, setSqlInsert] = useState<{ id: number; sql: string } | null>(null);
   // Keep-alive панели агента: монтируются для всех посещённых за сессию
   // профилей, неактивные скрываются display:none — WS и чат-стейт живут.
   const [visitedProfileIds, setVisitedProfileIds] = useState<string[]>([]);
@@ -216,24 +210,16 @@ export default function App() {
     });
   }, []);
 
-  // Кнопка «Спросить агента», меню «В чат» в терминале и кнопка SQL-консоли:
-  // раскрывает панель и передаёт контекст панели того профиля, откуда пришёл
-  // запрос. mode задаёт действие над текстом в AgentPage.
+  // Кнопка «Спросить агента» и меню «В чат» в терминале: раскрывает панель
+  // и передаёт контекст панели того профиля, чей терминал прислал запрос
+  // (терминал — активного). mode задаёт действие над текстом в AgentPage.
   const handleAskAgent = useCallback(
-    (text: string, mode: AgentAskMode = 'explain', source?: string) => {
+    (text: string, mode: AgentAskMode = 'explain') => {
       setAgentOpen(true);
-      setAgentRequest({ id: Date.now(), text, profileId: activeProfileId, mode, source });
+      setAgentRequest({ id: Date.now(), text, profileId: activeProfileId, mode });
     },
     [activeProfileId],
   );
-
-  // «→ SQL» на sql-блоке в чате агента: вставить в редактор консоли профиля
-  // и вернуться на вкладку «Базы данных» (DatabasesPage расходует sqlInsert).
-  const handleSqlInsert = useCallback((profileId: string, sql: string) => {
-    setActiveProfileId(profileId);
-    setTab('databases');
-    setSqlInsert({ id: Date.now(), sql });
-  }, []);
 
   // Drag-разделитель панели агента: ширина считается от правого края окна.
   const onResizerMouseDown = useCallback(
@@ -438,17 +424,6 @@ export default function App() {
                     }}
                   />
                 </div>
-                <div className={`tab-page ${tab === 'databases' ? '' : 'hidden'}`}>
-                  <DatabasesPage
-                    key={activeProfile.id}
-                    profile={activeProfile}
-                    showError={showError}
-                    visible={tab === 'databases'}
-                    onAskAgent={handleAskAgent}
-                    sqlInsert={sqlInsert}
-                    onSqlInsertConsumed={() => setSqlInsert(null)}
-                  />
-                </div>
                 <div className={`tab-page ${tab === 'ports' ? '' : 'hidden'}`}>
                   <PortsPage
                     key={activeProfile.id}
@@ -501,7 +476,6 @@ export default function App() {
                       agentRequest={agentRequest?.profileId === id ? agentRequest : null}
                       onAgentRequestConsumed={() => setAgentRequest(null)}
                       onActivity={handleAgentActivity}
-                      onSqlInsert={handleSqlInsert}
                     />
                   </div>
                 );

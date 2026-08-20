@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
-import { EditorView, keymap } from '@codemirror/view';
-import { Prec } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
 import { search } from '@codemirror/search';
 import { LanguageDescription } from '@codemirror/language';
 import { languages } from '@codemirror/language-data';
@@ -13,23 +12,15 @@ interface Props {
   fileName: string;
   onChange: (value: string) => void;
   readOnly?: boolean;
-  /** Ctrl/Cmd+Enter — «выполнить» (SQL-консоль вкладки «Базы данных»). */
-  onRun?: () => void;
 }
 
 function currentThemeIsDark(): boolean {
   return document.documentElement.dataset.theme !== 'light';
 }
 
-export default function CodeEditor({ value, fileName, onChange, readOnly, onRun }: Props) {
+export default function CodeEditor({ value, fileName, onChange, readOnly }: Props) {
   const [dark, setDark] = useState(currentThemeIsDark);
   const [langExtension, setLangExtension] = useState<Extension | null>(null);
-  // Стабильный ref: onRun у SQL-консоли меняет identity на каждый ввод —
-  // иначе keymap пересобирал бы extensions на каждое нажатие клавиши.
-  const onRunRef = useRef(onRun);
-  useEffect(() => {
-    onRunRef.current = onRun;
-  }, [onRun]);;
 
   // Тема редактора синхронизирована с data-theme документа
   useEffect(() => {
@@ -61,25 +52,9 @@ export default function CodeEditor({ value, fileName, onChange, readOnly, onRun 
 
   const extensions = useMemo(() => {
     const exts: Extension[] = [EditorView.lineWrapping, search({ top: true })];
-    // Модификатор никогда не «включается» посреди жизни редактора: FilesPage
-    // не передаёт onRun, DatabasesPage — передаёт всегда.
-    if (onRun !== undefined) {
-      exts.push(
-        Prec.highest(keymap.of([
-          {
-            key: 'Mod-Enter',
-            preventDefault: true,
-            run: () => {
-              onRunRef.current?.();
-              return true;
-            },
-          },
-        ])),
-      );
-    }
     if (langExtension) exts.push(langExtension);
     return exts;
-  }, [langExtension, onRun !== undefined]);
+  }, [langExtension]);
 
   return (
     <div className="code-editor-wrap">
