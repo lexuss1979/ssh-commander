@@ -35,11 +35,16 @@ export function pgDumpArgs(instance: DbInstance, database: string): string[] {
   return ['exec', instance.id, 'sh', '-c', inner];
 }
 
-/** Аргументы `docker exec` дампа MySQL (пароль — из env контейнера). */
+/** Аргументы `docker exec` дампа MySQL (пароль — из env контейнера, если
+ * он там непустой — пустой MYSQL_PWD затирал бы ~/.my.cnf; `user: ''` —
+ * без `-u`, креденшлы возьмёт клиентский конфиг). */
 export function mysqlDumpArgs(instance: DbInstance, database: string): string[] {
-  const pwd = instance.passwordEnv ?? 'MYSQL_ROOT_PASSWORD';
+  const pwdPrefix = instance.passwordEnv
+    ? `[ -n "$${instance.passwordEnv}" ] && MYSQL_PWD="$${instance.passwordEnv}"; `
+    : '';
+  const userArg = instance.user ? ` -u ${shellQuote(instance.user)}` : '';
   const inner =
-    `MYSQL_PWD="$${pwd}" mysqldump -u ${shellQuote(instance.user)} ` +
+    `${pwdPrefix}mysqldump${userArg} ` +
     `--single-transaction --default-character-set=utf8mb4 ${shellQuote(database)} | gzip`;
   return ['exec', instance.id, 'sh', '-c', inner];
 }

@@ -14,6 +14,9 @@ import {
   fetchDbDatabases,
   fetchDbOverview,
   fetchDbTables,
+  isAccessDenied,
+  invalidateDbCredentials,
+  resolveDbCredentials,
   runDbQuery,
 } from '../services/db-query.js';
 import { dumpFileName, openDumpChannel, EMPTY_GZIP_MAX_BYTES } from '../services/db-dump.js';
@@ -31,7 +34,11 @@ function instanceFromQuery(req: { query: Record<string, unknown> }): Promise<{ p
   if (!instanceId) {
     throw new Error('Укажите instanceId');
   }
-  return requireDbInstance(profile, instanceId).then((instance) => ({ profile, instance }));
+  // Креденшалы из env могли протухнуть — резолвер перебирает варианты
+  // (root/без пароля/конфиг клиента) и возвращает рабочий.
+  return requireDbInstance(profile, instanceId)
+    .then((instance) => resolveDbCredentials(profile, instance))
+    .then((instance) => ({ profile, instance }));
 }
 
 // Имя базы — только идентификатор: latin/цифры/подчёркивания (без кавычек
@@ -156,7 +163,8 @@ dbRouter.post('/query', async (req, res) => {
     return;
   }
   try {
-    const instance = await requireDbInstance(profile, q.instanceId);
+    const base = await requireDbInstance(profile, q.instanceId);
+    const instance = await resolveDbCredentials(profile, base);
     const result = await runDbQuery(profile, instance, q.database, q.sql, q.readOnly);
     res.json(result);
   } catch (err) {
@@ -182,7 +190,7 @@ dbRouter.get('/dump', async (req, res) => {
     profile = profileFromQuery(req);
     const instanceId = String(req.query.instanceId ?? '');
     if (!instanceId) throw new Error('Укажите instanceId');
-    instance = await requireDbInstance(profile, instanceId);
+    instance = await resolveDbCredentials(profile, await requireDbInstance(profile, instanceId));
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
     return;
@@ -232,6 +240,9 @@ dbRouter.get('/dump', async (req, res) => {
         // stderr отделяют его от настоящего дампа.
         const emptyDump = received < EMPTY_GZIP_MAX_BYTES && stderr.trim() !== '';
         if (code !== 0 || emptyDump) {
+          // Протухший пароль: кэш креденшалов сбросим — следующий дамп
+          // перепробует варианты подключения.
+          if (isAccessDenied(stderr)) invalidateDbCredentials(profile.id, instance.id);
           res
             .status(500)
             .json({ error: stderr.trim() || `dump exited with code ${code ?? 'unknown'}` });

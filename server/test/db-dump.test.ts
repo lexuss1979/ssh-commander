@@ -48,13 +48,20 @@ describe('mysqlDumpArgs', () => {
   it('expands password inside container and uses single transaction', () => {
     expect(mysqlDumpArgs(MYSQL, 'shop')).toEqual([
       'exec', 'def456', 'sh', '-c',
-      `MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump -u 'root' ` +
+      `[ -n "$MYSQL_ROOT_PASSWORD" ] && MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; mysqldump -u 'root' ` +
         `--single-transaction --default-character-set=utf8mb4 'shop' | gzip`,
     ]);
   });
 
   it('no password value in argv', () => {
     expect(mysqlDumpArgs(MYSQL, 'shop').join(' ')).not.toContain('secret');
+  });
+
+  it('probe candidate without credentials: no MYSQL_PWD prefix, no -u', () => {
+    const bare = { ...MYSQL, user: '', passwordEnv: undefined };
+    expect(mysqlDumpArgs(bare, 'shop')[4]).toBe(
+      `mysqldump --single-transaction --default-character-set=utf8mb4 'shop' | gzip`,
+    );
   });
 });
 

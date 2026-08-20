@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   buildQueryCommand,
   buildStdinSql,
+  credCandidates,
   ensureTerminator,
+  isAccessDenied,
   mysqlArgs,
   parseCsvTable,
   parseColumnList,
@@ -11,6 +13,7 @@ import {
   parseTsvTable,
   psqlArgs,
   unescapeMysql,
+  withAccessDeniedHint,
   isSystemDatabase,
   type ParsedTable,
 } from '../src/services/db-query.js';
@@ -86,22 +89,36 @@ describe('mysqlArgs / buildQueryCommand (mysql)', () => {
   it('expands password from container env — no password in argv', () => {
     const args = mysqlArgs(MYSQL, 'shop');
     expect(args[0]).toBe('exec');
-    // Пароль — только ссылка на env контейнера, значение не покидает его.
+    // Пароль — только условная ссылка на env контейнера; значение не покидает его.
     expect(args.join(' ')).not.toContain('secret');
-    expect(args[5]).toContain('MYSQL_PWD="$MYSQL_ROOT_PASSWORD"');
+    expect(args[5]).toContain('[ -n "$MYSQL_ROOT_PASSWORD" ] && MYSQL_PWD="$MYSQL_ROOT_PASSWORD"');
   });
 
   it('batch mode with utf8mb4 and double shell escaping', () => {
     expect(buildQueryCommand(PROFILE, MYSQL, 'shop')).toBe(
       "docker 'exec' '-i' 'def456' 'sh' '-c' " +
-      "'MYSQL_PWD=\"$MYSQL_ROOT_PASSWORD\" exec mysql -u '\\''root'\\'' " +
-      "--batch --default-character-set=utf8mb4 '\\''shop'\\'''",
+      "'[ -n \"$MYSQL_ROOT_PASSWORD\" ] && MYSQL_PWD=\"$MYSQL_ROOT_PASSWORD\"; " +
+      "exec mysql -u '\\''root'\\'' --batch --default-character-set=utf8mb4 '\\''shop'\\'''",
     );
+  });
+
+  it('empty password env is not passed — ~/.my.cnf stays in effect', () => {
+    // Пустой MYSQL_PWD отправлял бы «using password: NO» и затирал клиентский
+    // конфиг; кандидат без пароля вообще не подставляет переменную.
+    const bare: DbInstance = { ...MYSQL, passwordEnv: undefined };
+    expect(mysqlArgs(bare, 'shop')[5]).toBe(
+      "exec mysql -u 'root' --batch --default-character-set=utf8mb4 'shop'",
+    );
+  });
+
+  it('probe candidate without user: no -u, client config decides', () => {
+    const anonymous: DbInstance = { ...MYSQL, user: '', passwordEnv: undefined };
+    expect(mysqlArgs(anonymous, null)[5]).toBe('exec mysql --batch --default-character-set=utf8mb4');
   });
 
   it('uses MYSQL_PASSWORD env for dedicated user', () => {
     const instance: DbInstance = { ...MYSQL, user: 'app', passwordEnv: 'MYSQL_PASSWORD' };
-    expect(mysqlArgs(instance, 'shop')[5]).toContain('MYSQL_PWD="$MYSQL_PASSWORD"');
+    expect(mysqlArgs(instance, 'shop')[5]).toContain('[ -n "$MYSQL_PASSWORD" ] && MYSQL_PWD="$MYSQL_PASSWORD"');
   });
 
   it('dedicated user meta connection: no database arg (no default schema)', () => {
@@ -243,6 +260,45 @@ describe('parseCsvTable', () => {
       truncated: false,
       stoppedEarly: false,
     });
+  });
+});
+
+describe('credCandidates / access denied helpers', () => {
+  it('lists credential variants deduplicated, primary first', () => {
+    const dedicated: DbInstance = { ...MYSQL, user: 'app', passwordEnv: 'MYSQL_PASSWORD' };
+    const cands = credCandidates(dedicated);
+    expect(cands.map((c) => [c.user, c.passwordEnv ?? null])).toEqual([
+      ['app', 'MYSQL_PASSWORD'],
+      ['root', 'MYSQL_ROOT_PASSWORD'],
+      ['app', 'MYSQL_ROOT_PASSWORD'],
+      ['app', null],
+      ['root', null],
+      ['', null],
+    ]);
+    // Остальные поля инстанса сохраняются.
+    expect(cands[1]).toMatchObject({ id: MYSQL.id, engine: 'mysql', flavor: 'mysql' });
+  });
+
+  it('deduplicates identical primary/root variants', () => {
+    const cands = credCandidates(MYSQL); // root + MYSQL_ROOT_PASSWORD — первичный
+    expect(cands.map((c) => [c.user, c.passwordEnv ?? null])).toEqual([
+      ['root', 'MYSQL_ROOT_PASSWORD'],
+      ['root', null],
+      ['', null],
+    ]);
+  });
+
+  it('isAccessDenied matches mysql 1045 and pg 28P01', () => {
+    expect(isAccessDenied("ERROR 1045 (28000): Access denied for user 'root'@'localhost'")).toBe(true);
+    expect(isAccessDenied('FATAL: password authentication failed for user "app"')).toBe(true);
+    expect(isAccessDenied('ERROR 1064 (42000): You have an error in your SQL syntax')).toBe(false);
+  });
+
+  it('withAccessDeniedHint appends hint only for access denied', () => {
+    const denied = withAccessDeniedHint('denied', "ERROR 1045: Access denied");
+    expect(denied).toContain('denied');
+    expect(denied).toContain('MYSQL_ROOT_PASSWORD');
+    expect(withAccessDeniedHint('syntax error', 'ERROR 1064')).toBe('syntax error');
   });
 });
 

@@ -57,18 +57,21 @@ export function psqlArgs(instance: DbInstance, database: string): string[] {
 
 /**
  * Аргументы `docker exec` для mysql. Пароль разворачивается из env самого
- * контейнера (`sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql …'`) —
- * в argv на сервере его нет. `--batch` без `--raw`: значения экранируют
- * `\t`/`\n`/`\\`, поэтому TSV остаётся разбираемым (парсер разэкранирует).
+ * контейнера — но только если он там непустой (`[ -n "$VAR" ] &&`): пустой
+ * MYSQL_PWD отправлял бы «using password: NO» и затирал пароль из ~/.my.cnf
+ * контейнера (ручные сетапы хранят креденшлы там). `user: ''` — не
+ * передавать `-u`, клиент возьмёт пользователя из своего конфига.
  * `database: null` — подключение без схемы по умолчанию (служебные запросы):
  * dedicated user без MYSQL_DATABASE не имеет прав на чужую системную базу.
  */
 export function mysqlArgs(instance: DbInstance, database: string | null): string[] {
-  const pwd = instance.passwordEnv ?? 'MYSQL_ROOT_PASSWORD';
+  const pwdPrefix = instance.passwordEnv
+    ? `[ -n "$${instance.passwordEnv}" ] && MYSQL_PWD="$${instance.passwordEnv}"; `
+    : '';
+  const userArg = instance.user ? ` -u ${shellQuote(instance.user)}` : '';
   const dbArg = database ? ` ${shellQuote(database)}` : '';
   const inner =
-    `MYSQL_PWD="$${pwd}" exec mysql -u ${shellQuote(instance.user)} ` +
-    `--batch --default-character-set=utf8mb4${dbArg}`;
+    `${pwdPrefix}exec mysql${userArg} --batch --default-character-set=utf8mb4${dbArg}`;
   return ['exec', '-i', instance.id, 'sh', '-c', inner];
 }
 
@@ -119,6 +122,99 @@ export function buildStdinSql(
 /** Экранирование для внутреннего shell контейнера (`sh -c`). */
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+// ---------------------------------------------------------------------------
+// Креденшалы: env контейнера может протухнуть
+// ---------------------------------------------------------------------------
+
+/**
+ * Пароль в env — снимок на момент создания контейнера: если его потом меняли
+ * в самой БД (ALTER USER, восстановление из дампа), env даёт Access denied
+ * (наблюдено на проде: и dedicated user с «password: YES», и root с
+ * «password: NO», когда пароля в env нет вовсе). Перед первым использованием
+ * инстанса перебираем варианты подключения дешёвым `SELECT 1` и кэшируем
+ * сработавший; при 1045 в реальных запросах кэш сбрасывается и следующий
+ * запрос перепробует снова. Формы ввода пароля в v1 нет сознательно.
+ */
+const credCache = new Map<string, DbInstance>();
+
+export function invalidateDbCredentials(profileId: string, instanceId: string): void {
+  credCache.delete(`${profileId}:${instanceId}`);
+}
+
+/**
+ * Варианты подключения по убыванию правдоподобия: как нашли в env; root с
+ * его паролем (частый случай протухшего app-юзера); смешанные; без пароля
+ * (trust/allow-empty); совсем без аргументов — клиент возьмёт креденшлы из
+ * своего конфига (~/.my.cnf в контейнере).
+ */
+export function credCandidates(instance: DbInstance): DbInstance[] {
+  const out: DbInstance[] = [];
+  const seen = new Set<string>();
+  const add = (user: string, passwordEnv?: string) => {
+    const key = `${user}|${passwordEnv ?? ''}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ ...instance, user, passwordEnv });
+  };
+  add(instance.user, instance.passwordEnv);
+  add('root', 'MYSQL_ROOT_PASSWORD');
+  add(instance.user, 'MYSQL_ROOT_PASSWORD');
+  add(instance.user, undefined);
+  add('root', undefined);
+  add('', undefined);
+  return out;
+}
+
+async function probeCred(profile: Profile, candidate: DbInstance): Promise<boolean> {
+  const result = await exec(profile, buildQueryCommand(profile, candidate, null), {
+    timeoutMs: 15000,
+    stdin: buildStdinSql(candidate.engine, 'SELECT 1', {
+      readOnly: true,
+      flavor: candidate.flavor,
+    }),
+  });
+  return result.code === 0;
+}
+
+/**
+ * Возвращает инстанс с проверенными креденшалами (клон при необходимости).
+ * PG не пробуем: official-образ подключается по локальному сокету без
+ * пароля, вариантов нет. Все кандидаты провалились — возвращаем как есть:
+ * пользователь увидит честный stderr первичного варианта.
+ */
+export async function resolveDbCredentials(
+  profile: Profile,
+  instance: DbInstance,
+): Promise<DbInstance> {
+  if (instance.engine !== 'mysql') return instance;
+  const key = `${profile.id}:${instance.id}`;
+  const cached = credCache.get(key);
+  if (cached) return cached;
+  for (const candidate of credCandidates(instance)) {
+    if (await probeCred(profile, candidate)) {
+      credCache.set(key, candidate);
+      return candidate;
+    }
+  }
+  return instance;
+}
+
+/** Access denied у MySQL (1045) / PG (28P01). */
+export function isAccessDenied(stderr: string): boolean {
+  return /Access denied|ERROR 1045|password authentication failed/i.test(stderr);
+}
+
+export const MYSQL_ACCESS_DENIED_HINT =
+  'Креденшалы консоль берёт из env контейнера (MYSQL_ROOT_PASSWORD / MYSQL_PASSWORD). ' +
+  '«Access denied» — пароль в БД уже другой: его меняли после создания контейнера ' +
+  '(ALTER USER, восстановление из дампа) или он лежит не в env. Сравните env ' +
+  '(docker inspect) с реальным паролем; варианты с root/без пароля уже попробованы.';
+
+/** Дополняет сообщение ошибки подсказкой при Access denied. */
+export function withAccessDeniedHint(message: string, stderr: string): string {
+  return isAccessDenied(stderr) ? `${message}\n\n${MYSQL_ACCESS_DENIED_HINT}` : message;
 }
 
 // ---------------------------------------------------------------------------
@@ -317,7 +413,13 @@ export async function runDbQuery(
   });
   const durationMs = Date.now() - startedAt;
   if (result.code !== 0) {
-    const message = result.stderr.trim() || result.stdout.trim() || `Клиент БД завершился с кодом ${result.code}`;
+    // Протухший пароль из env: кэш креденшалов сбрасываем — следующий
+    // запрос перепробует варианты заново.
+    if (isAccessDenied(result.stderr)) invalidateDbCredentials(profile.id, instance.id);
+    const message = withAccessDeniedHint(
+      result.stderr.trim() || result.stdout.trim() || `Клиент БД завершился с кодом ${result.code}`,
+      result.stderr,
+    );
     throw new DbQueryError(message, result.stderr.trim(), result.code);
   }
 
@@ -498,7 +600,11 @@ export async function runDbMetaQuery(
     stdin: buildStdinSql(instance.engine, sql, { readOnly: true, flavor: instance.flavor }),
   });
   if (result.code !== 0) {
-    const message = result.stderr.trim() || result.stdout.trim() || `Клиент БД завершился с кодом ${result.code}`;
+    if (isAccessDenied(result.stderr)) invalidateDbCredentials(profile.id, instance.id);
+    const message = withAccessDeniedHint(
+      result.stderr.trim() || result.stdout.trim() || `Клиент БД завершился с кодом ${result.code}`,
+      result.stderr,
+    );
     throw new DbQueryError(message, result.stderr.trim(), result.code);
   }
   return instance.engine === 'postgres'
