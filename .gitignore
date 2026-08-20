@@ -9,3 +9,4 @@ keys/*
 !keys/.gitkeep
 *.log
 .DS_Store
+.qwen/
