@@ -2447,6 +2447,10 @@ body.resizing-agent {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* overflow: hidden обнуляет автоматический min-height flex-item'а: без
+     этого строки сжимаются в полоски, когда палитра ограничена max-height,
+     вместо прокрутки списка */
+  flex-shrink: 0;
 }
 
 .history-item.selected {
