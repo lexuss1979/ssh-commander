@@ -7,11 +7,16 @@ import { Modal } from '../components/Modal';
 interface Props {
   profile: Profile;
   showError: (msg: string) => void;
-  /** Одноразовый запрос «Спросить агента» из терминала (расходуется эффектом ниже). */
-  agentRequest?: { id: number; text: string; mode?: AgentAskMode } | null;
+  /** Одноразовый запрос «Спросить агента» (терминал/вкладка БД; расходуется эффектом ниже). */
+  agentRequest?: { id: number; text: string; mode?: AgentAskMode; source?: string } | null;
   onAgentRequestConsumed?: () => void;
   /** Индикатор активности в сайдбаре: 'pending' (ждёт approve) важнее 'running'. */
   onActivity?: (profileId: string, state: 'running' | 'pending' | null) => void;
+  /**
+   * «→ SQL» на sql-блоках ответов (когда активный запрос пришёл со вкладки
+   * «Базы данных»): вставить SQL в редактор консоли и переключить вкладку.
+   */
+  onSqlInsert?: (profileId: string, sql: string) => void;
 }
 
 interface AttachedServer {
@@ -47,7 +52,7 @@ function terminalContextMessage(text: string, serverName: string): string {
   return `Объясни этот вывод терминала (сервер ${serverName}):\n\`\`\`\n${text}\n\`\`\``;
 }
 
-export function AgentPage({ profile, showError, agentRequest, onAgentRequestConsumed, onActivity }: Props) {
+export function AgentPage({ profile, showError, agentRequest, onAgentRequestConsumed, onActivity, onSqlInsert }: Props) {
   const [messages, setMessages] = useState<ChatMessageView[]>([]);
   const [input, setInput] = useState('');
   const [connected, setConnected] = useState(false);
@@ -193,6 +198,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       });
       setDialogues((prev) => [toSummary(dialogue), ...prev]);
       setActiveDialogueId(dialogue.id);
+      setSqlInsertEnabled(false);
       return dialogue.id;
     } catch (err) {
       showError((err as Error).message);
@@ -478,11 +484,20 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   // поток не сломался. Запрос одноразовый: id запоминаем, App сбрасывает стейт.
   // mode: 'explain' (кнопка «Спросить агента») — как выше; 'prefill' — всегда
   // только вставка в поле ввода; 'new-dialogue' — создать диалог и отправить
-  // текст первым сообщением (отложенно, в ws.onopen нового диалога).
+  // текст первым сообщением (отложенно, в ws.onopen нового диалога);
+  // 'send' — текст уже собран отправителем (SQL-консоль вкладки «Базы данных»),
+  // отправляется как есть.
   const lastHandledRequestRef = useRef(0);
+  // «→ SQL» на sql-блоках: активен, пока последний разовый запрос пришёл со
+  // вкладки «Базы данных» (source === 'db'). Пассивный сброс при назначении
+  // диалога (оно бывает поздним — при монтировании панели) не делаем: гасим
+  // флаг только в явных действиях пользователя (новый диалог, выбор из
+  // истории) — контекст запроса к этим моментам точно устарел.
+  const [sqlInsertEnabled, setSqlInsertEnabled] = useState(false);
   useEffect(() => {
     if (!agentRequest || agentRequest.id === lastHandledRequestRef.current) return;
     lastHandledRequestRef.current = agentRequest.id;
+    setSqlInsertEnabled(agentRequest.source === 'db');
     const mode = agentRequest.mode ?? 'explain';
     if (mode === 'prefill') {
       // Цитата без инструкции «объясни» — пользователь допишет свой вопрос;
@@ -512,7 +527,10 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       onAgentRequestConsumed?.();
       return;
     }
-    const content = terminalContextMessage(agentRequest.text, profile.name);
+    // 'explain' и 'send' идут одним путём; 'send' текст не оборачивает.
+    const content = mode === 'send'
+      ? agentRequest.text
+      : terminalContextMessage(agentRequest.text, profile.name);
     if (connectedRef.current && !runningRef.current && activeDialogueIdRef.current) {
       setMessages((prev) => [...prev, { id: nextId++, role: 'user', content }]);
       setPlanReady(false);
@@ -522,6 +540,13 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     }
     onAgentRequestConsumed?.();
   }, [agentRequest, planMode, sendWs, onAgentRequestConsumed, profile.name, showError, startNewDialogue]);
+
+  // «→ SQL» из sql-блока ответа: SQL уходит в редактор консоли нужного
+  // профиля, App переключает на вкладку «Базы данных».
+  const handleSqlInsert = useCallback(
+    (sql: string) => onSqlInsert?.(profile.id, sql),
+    [onSqlInsert, profile.id],
+  );
 
   // Подключённые серверы для чипов и модалки аудита: до события `servers`
   // показываем только домашний профиль.
@@ -641,6 +666,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                       className={`dialogue-item ${d.id === activeDialogueId ? 'active' : ''}`}
                       onClick={() => {
                         setActiveDialogueId(d.id);
+                        setSqlInsertEnabled(false);
                         setHistoryOpen(false);
                       }}
                     >
@@ -798,7 +824,10 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
             <div key={m.id} className={`chat-row ${m.role}`}>
               {m.content && (
                 <div className="bubble">
-                  <Markdown content={m.content} />
+                  <Markdown
+                    content={m.content}
+                    onInsertSql={sqlInsertEnabled && onSqlInsert ? handleSqlInsert : undefined}
+                  />
                 </div>
               )}
               {m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0 && (

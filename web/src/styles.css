@@ -2572,3 +2572,326 @@ body.resizing-agent {
 .pending-bar-details {
   max-height: 200px;
 }
+
+/* === Вкладка «Базы данных» (эпик 12) === */
+
+.db-page {
+  position: relative; /* якорь палитры истории запросов */
+}
+
+.db-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+}
+
+/* Левая колонка: инстансы → базы → таблицы */
+.db-sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 4px;
+}
+
+.db-sidebar .section-title {
+  margin: 12px 0 4px;
+}
+
+.db-sidebar .section-title:first-child {
+  margin-top: 0;
+}
+
+.db-sidebar-empty {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.db-version {
+  font-weight: 400;
+  font-size: 12px;
+}
+
+.db-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.db-item:hover {
+  background: var(--bg-hover);
+}
+
+.db-item.selected {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.db-item-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.db-item-body strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-item-body .muted {
+  font-size: 12px;
+}
+
+.db-engine-badge {
+  flex-shrink: 0;
+  width: 30px;
+  padding: 2px 0;
+  border-radius: 4px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.db-engine-badge.postgres {
+  background: rgba(51, 103, 145, 0.35);
+  color: #6db3f2;
+}
+
+.db-engine-badge.mysql {
+  background: rgba(140, 92, 40, 0.35);
+  color: #e5a06b;
+}
+
+/* Светлая тема: приглушённые заливки и тёмный текст для контраста */
+[data-theme='light'] .db-engine-badge.postgres {
+  background: rgba(51, 103, 145, 0.15);
+  color: #23557e;
+}
+
+[data-theme='light'] .db-engine-badge.mysql {
+  background: rgba(140, 92, 40, 0.15);
+  color: #8a5a1d;
+}
+
+.db-hints {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.db-item-row {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+}
+
+.db-item-row.selected .db-item-db {
+  background: var(--accent-soft);
+}
+
+.db-item-db {
+  flex: 1;
+  min-width: 0;
+}
+
+.db-item-row .btn-mini {
+  align-self: center;
+}
+
+.db-tables {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.db-table-item {
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text);
+  font-family: Menlo, Consolas, "JetBrains Mono", monospace;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-table-item:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+/* Правая колонка: редактор + результат */
+.db-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.db-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.db-readonly-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.db-shortcut {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.db-editor .cm-editor {
+  height: 200px;
+}
+
+/* Ошибка запроса: mono-блок со stderr клиента и exit code */
+.db-query-error {
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.db-query-error pre {
+  max-height: 220px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  background: var(--bg-code);
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.db-result {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.db-result-meta {
+  display: flex;
+  gap: 14px;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.db-grid-wrap {
+  flex: 1;
+  min-height: 200px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.db-grid {
+  width: 100%;
+  border: none;
+}
+
+.db-grid th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-raised);
+  white-space: nowrap;
+}
+
+.db-grid td {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: Menlo, Consolas, "JetBrains Mono", monospace;
+  font-size: 12px;
+}
+
+.db-raw-output summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.db-raw-output pre {
+  max-height: 260px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  background: var(--bg-code);
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 12px;
+}
+
+/* Кнопки code-блоков в чате агента: «Копировать» + опциональная «→ SQL» */
+.code-block-actions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+}
+
+/* Внутри обёртки кнопки позиционирует флекс, а не собственный absolute */
+.code-block-actions .code-copy-btn {
+  position: static;
+  top: auto;
+  right: auto;
+}
+
+.code-insert-btn {
+  width: auto;
+  padding: 1px 6px;
+  font-size: 11px;
+}
+
+/* Узкие экраны: колонки вкладки БД складываются вертикально */
+@media (max-width: 1100px) {
+  .db-layout {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .db-sidebar {
+    width: auto;
+    overflow: visible;
+  }
+
+  .db-grid-wrap {
+    min-height: 260px;
+  }
+}

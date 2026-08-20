@@ -1,5 +1,9 @@
-/** Режим запроса «из терминала в чат агента» (кнопки TerminalPage). */
-export type AgentAskMode = 'explain' | 'new-dialogue' | 'prefill';
+/**
+ * Режим запроса «из терминала/вкладки БД в чат агента».
+ * 'send' — отправить текст как есть (кнопка «Спросить агента» вкладки БД
+ * собирает полный промпт с движком и схемой сама).
+ */
+export type AgentAskMode = 'explain' | 'new-dialogue' | 'prefill' | 'send';
 
 export interface Profile {
   id: string;
