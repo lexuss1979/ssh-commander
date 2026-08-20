@@ -32,6 +32,11 @@ function presetOf(schedule: string): string {
   return PRESETS.some((p) => p.value === schedule && p.value !== '') ? schedule : '';
 }
 
+function matchesFilter(entry: CronEntry, filter: string): boolean {
+  const q = filter.trim().toLowerCase();
+  return q === '' || entry.command.toLowerCase().includes(q);
+}
+
 // Модалка добавления/редактирования задачи
 function CronEntryModal({
   entry,
@@ -134,7 +139,15 @@ function ScheduleCell({ entry }: { entry: CronEntry }) {
 }
 
 // Read-only таблица задач (системные файлы)
-function ReadOnlyCronTable({ entries, showUser }: { entries: CronEntry[]; showUser: boolean }) {
+function ReadOnlyCronTable({
+  entries,
+  showUser,
+  emptyText = 'Задач нет',
+}: {
+  entries: CronEntry[];
+  showUser: boolean;
+  emptyText?: string;
+}) {
   return (
     <table className="data-table">
       <thead>
@@ -163,7 +176,7 @@ function ReadOnlyCronTable({ entries, showUser }: { entries: CronEntry[]; showUs
         {entries.length === 0 && (
           <tr>
             <td colSpan={showUser ? 4 : 3} className="muted">
-              Задач нет
+              {emptyText}
             </td>
           </tr>
         )}
@@ -178,6 +191,7 @@ export function CronPage({ profile, visible, showError }: Props) {
   const [reloadKey, setReloadKey] = useState(0);
   const [modal, setModal] = useState<{ entry?: CronEntry } | null>(null);
   const [busyIndex, setBusyIndex] = useState<number | null>(null);
+  const [filter, setFilter] = useState('');
 
   useEffect(() => {
     if (!visible) return;
@@ -253,8 +267,14 @@ export function CronPage({ profile, visible, showError }: Props) {
     }
   };
 
-  const userEntries = snapshot?.userCrontab?.entries ?? [];
+  const userEntries = (snapshot?.userCrontab?.entries ?? []).filter((e) => matchesFilter(e, filter));
   const userEnv = snapshot?.userCrontab?.env ?? [];
+  const systemEntries = (snapshot?.systemCrontab?.entries ?? []).filter((e) => matchesFilter(e, filter));
+  const cronDFiles = (snapshot?.cronD ?? []).map((f) => ({
+    ...f,
+    entries: f.entries.filter((e) => matchesFilter(e, filter)),
+  }));
+  const filterActive = filter.trim() !== '';
 
   return (
     <div className="page cron-page">
@@ -267,6 +287,12 @@ export function CronPage({ profile, visible, showError }: Props) {
               ? `Обновлено ${new Date(snapshot.timestamp).toLocaleTimeString('ru-RU')}`
               : 'Загрузка…'}
         </span>
+        <input
+          className="search-input"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Фильтр по команде…"
+        />
         <div className="toolbar-actions">
           <button className="btn btn-primary" onClick={() => setModal({})}>
             Добавить задачу
@@ -341,9 +367,11 @@ export function CronPage({ profile, visible, showError }: Props) {
                   {snapshot && userEntries.length === 0 && (
                     <tr>
                       <td colSpan={4} className="muted">
-                        {snapshot.userCrontab === null
-                          ? 'Crontab пользователя отсутствует — добавьте первую задачу'
-                          : 'Задач нет'}
+                        {filterActive
+                          ? 'Ничего не найдено по фильтру'
+                          : snapshot.userCrontab === null
+                            ? 'Crontab пользователя отсутствует — добавьте первую задачу'
+                            : 'Задач нет'}
                       </td>
                     </tr>
                   )}
@@ -371,19 +399,27 @@ export function CronPage({ profile, visible, showError }: Props) {
                 Системный <code>/etc/crontab</code> <span className="muted">(только чтение)</span>
               </h3>
               <div className="ports-scroll">
-                <ReadOnlyCronTable entries={snapshot.systemCrontab.entries} showUser />
+                <ReadOnlyCronTable
+                  entries={systemEntries}
+                  showUser
+                  emptyText={filterActive ? 'Ничего не найдено по фильтру' : undefined}
+                />
               </div>
             </div>
           )}
 
           {/* /etc/cron.d/* — read-only */}
-          {snapshot?.cronD.map((f) => (
+          {cronDFiles.map((f) => (
             <div className="cron-section" key={f.file}>
               <h3 className="section-title">
                 <code>{f.file}</code> <span className="muted">(только чтение)</span>
               </h3>
               <div className="ports-scroll">
-                <ReadOnlyCronTable entries={f.entries} showUser />
+                <ReadOnlyCronTable
+                  entries={f.entries}
+                  showUser
+                  emptyText={filterActive ? 'Ничего не найдено по фильтру' : undefined}
+                />
               </div>
             </div>
           ))}
