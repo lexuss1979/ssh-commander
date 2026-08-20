@@ -1827,13 +1827,6 @@ body.resizing-agent {
   flex-shrink: 0;
 }
 
-.tool-actions-mini {
-  display: flex;
-  gap: 6px;
-  margin-left: auto;
-  flex-shrink: 0;
-}
-
 .tool-details {
   display: flex;
   flex-direction: column;
@@ -2477,4 +2470,58 @@ body.resizing-agent {
 
 .plan-card .btn {
   flex-shrink: 0;
+}
+
+/* Закреплённая плашка подтверждения мутирующего вызова (tool_pending) —
+   единая точка решения, всегда видна у поля ввода, вне скроллируемой ленты.
+   Рамка warn: подтверждение = внимание. Высота строки кнопок фиксированная,
+   чтобы смена pending-вызова в очереди не моргала размерами. */
+.pending-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 12px 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  background: var(--bg-raised);
+}
+
+.pending-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.pending-bar-row .btn {
+  flex-shrink: 0;
+}
+
+.pending-bar-name {
+  flex-shrink: 0;
+  max-width: 40%;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pending-bar-preview {
+  flex: 1;
+  min-width: 0;
+  font-family: Menlo, Consolas, "JetBrains Mono", monospace;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Раскрытый полный аргумент (команда exec целиком и т.п.) — mono-блок
+   со внутренним скроллом, чтобы не раздувать панель. */
+.pending-bar-details {
+  max-height: 200px;
 }

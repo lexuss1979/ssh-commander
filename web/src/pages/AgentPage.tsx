@@ -66,7 +66,12 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   // Dropdown кнопки «+» — профили, которые можно подключить к диалогу.
   const [addOpen, setAddOpen] = useState(false);
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
+  // Решение по мутирующему вызову отправлено (кнопки плашки заблокированы
+  // до tool_result); смена диалога сбрасывает.
+  const [decidedCalls, setDecidedCalls] = useState<Set<string>>(() => new Set());
   const wsRef = useRef<WebSocket | null>(null);
+  // DOM-карточки вызовов в ленте — клик по плашке подтверждения скроллит к карточке.
+  const cardRefs = useRef(new Map<string, HTMLDivElement>());
   const listRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
   const addRef = useRef<HTMLDivElement>(null);
@@ -131,6 +136,29 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   const sendWs = useCallback((msg: Record<string, unknown>) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  }, []);
+
+  const registerCard = useCallback((callId: string, el: HTMLDivElement | null) => {
+    if (el) cardRefs.current.set(callId, el);
+    else cardRefs.current.delete(callId);
+  }, []);
+
+  // Решение по мутирующему вызову: единственная точка — закреплённая плашка
+  // у поля ввода. callId запоминается до tool_result, чтобы кнопки не мигали.
+  const decide = useCallback(
+    (callId: string, action: 'approve' | 'reject') => {
+      setDecidedCalls((prev) => {
+        const next = new Set(prev);
+        next.add(callId);
+        return next;
+      });
+      sendWs({ type: action, callId });
+    },
+    [sendWs],
+  );
+
+  const scrollToCard = useCallback((callId: string) => {
+    cardRefs.current.get(callId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, []);
 
   const refreshDialogues = useCallback(async () => {
@@ -227,6 +255,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     setMessages([]);
     setRunning(false);
     setPlanReady(false);
+    setDecidedCalls(new Set());
 
     void api<{ dialogue: Dialogue }>(`/api/ai/dialogues/${encodeURIComponent(activeDialogueId)}`)
       .then(({ dialogue }) => {
@@ -241,8 +270,17 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     );
     wsRef.current = ws;
     ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
-    ws.onerror = () => setConnected(false);
+    // Обрыв WS между кликом и tool_result: результат уже не придёт, снимаем
+    // блокировку, чтобы плашка не зависала навсегда в «выполняется…»
+    // (перезагрузка диалога пересоздаст сессию и состояние в любом случае).
+    ws.onclose = () => {
+      setConnected(false);
+      setDecidedCalls(new Set());
+    };
+    ws.onerror = () => {
+      setConnected(false);
+      setDecidedCalls(new Set());
+    };
     ws.onmessage = (e) => {
       let msg: Record<string, unknown>;
       try {
@@ -286,11 +324,18 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           break;
         }
         case 'tool_result': {
+          const callId = String(msg.callId ?? '');
           const status = msg.status === 'rejected' ? 'rejected' : msg.status === 'error' ? 'error' : 'ok';
-          updateTool(String(msg.callId ?? ''), {
+          updateTool(callId, {
             status,
             output: String(msg.output ?? ''),
             truncated: Boolean(msg.truncated),
+          });
+          setDecidedCalls((prev) => {
+            if (!prev.has(callId)) return prev;
+            const next = new Set(prev);
+            next.delete(callId);
+            return next;
           });
           break;
         }
@@ -374,9 +419,14 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     };
   }, [addOpen]);
 
+  // Одновременно висит максимум одно подтверждение (сервер обрабатывает
+  // вызовы последовательно) — плашка показывает ровно один pending-вызов.
+  const pendingTool: ToolCallView | null =
+    messages.flatMap((m) => m.toolCalls ?? []).find((t) => t.status === 'pending') ?? null;
+
   // Индикатор активности для сайдбара (App): висящее подтверждение (pending)
   // важнее, чем просто «работает» — без него агент молча ждёт approve в фоне.
-  const hasPending = messages.some((m) => m.toolCalls?.some((t) => t.status === 'pending'));
+  const hasPending = pendingTool !== null;
   useEffect(() => {
     onActivity?.(profile.id, hasPending ? 'pending' : running ? 'running' : null);
   }, [hasPending, running, onActivity, profile.id]);
@@ -648,28 +698,29 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                 «найди, кто занимает порт 8080», «обнови конфиг nginx».
               </p>
               <p className="muted">
-                Команды чтения выполняются автоматически. Действия записи требуют подтверждения — вы увидите
-                их карточкой с кнопками «Подтвердить» и «Отклонить». Диалоги сохраняются автоматически.
+                Команды чтения выполняются автоматически. Действия записи требуют подтверждения — плашка
+                с кнопками «Подтвердить» и «Отклонить» появится у поля ввода. Диалоги сохраняются
+                автоматически.
               </p>
             </div>
           )}
           {messages.map((m) => (
             <div key={m.id} className={`chat-row ${m.role}`}>
+              {m.content && (
+                <div className="bubble">
+                  <Markdown content={m.content} />
+                </div>
+              )}
               {m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0 && (
                 <div className="tool-calls">
                   {m.toolCalls.map((t) => (
                     <ToolCard
                       key={t.callId}
                       tool={t}
-                      onApprove={() => sendWs({ type: 'approve', callId: t.callId })}
-                      onReject={() => sendWs({ type: 'reject', callId: t.callId })}
+                      decided={decidedCalls.has(t.callId)}
+                      registerCard={registerCard}
                     />
                   ))}
-                </div>
-              )}
-              {m.content && (
-                <div className="bubble">
-                  <Markdown content={m.content} />
                 </div>
               )}
             </div>
@@ -678,6 +729,16 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
 
         {planReady && !running && (
           <PlanCard onExecute={() => sendWs({ type: 'approve_plan' })} />
+        )}
+
+        {pendingTool && (
+          <PendingBar
+            tool={pendingTool}
+            decided={decidedCalls.has(pendingTool.callId)}
+            onApprove={() => decide(pendingTool.callId, 'approve')}
+            onReject={() => decide(pendingTool.callId, 'reject')}
+            onScrollToCard={() => scrollToCard(pendingTool.callId)}
+          />
         )}
 
         <div className="agent-input">
@@ -817,50 +878,104 @@ function messagesToViews(messages: DialogueMessage[]): ChatMessageView[] {
   return views;
 }
 
-function ToolCard({ tool, onApprove, onReject }: {
+const TOOL_LABELS: Record<string, string> = {
+  exec: 'Выполнить команду',
+  exec_readonly: 'Команда чтения',
+  read_file: 'Прочитать файл',
+  read_memory: 'Прочитать память',
+  list_dir: 'Список файлов',
+  write_file: 'Записать файл',
+  write_memory: 'Обновить память',
+  docker_ps: 'Список контейнеров',
+  docker_logs: 'Логи контейнера',
+  docker_inspect: 'Inspect Docker',
+  docker_action: 'Действие Docker',
+  security_audit: 'Аудит безопасности',
+  web_search: '🌐 Поиск в интернете',
+  list_servers: 'Список серверов',
+};
+
+// Человекочитаемый лейбл вызова; connect_server — карточка-вопрос про целевой
+// сервер (приходит в поле server события, он ещё не подключён; фолбэк — args.server).
+function toolLabel(tool: ToolCallView): string {
+  if (tool.name === 'connect_server') {
+    const target = tool.server ?? String(tool.args?.server ?? '');
+    return `Подключить «${target}» к диалогу${tool.status === 'pending' ? '?' : ''}`;
+  }
+  return TOOL_LABELS[tool.name] ?? tool.name;
+}
+
+// Главный аргумент вызова (запрос поиска, команда, путь) — видно,
+// чем занят агент или что именно он предлагает выполнить.
+function mainArgPreview(args?: Record<string, unknown>): string {
+  for (const key of ['query', 'command', 'path', 'target', 'containerId']) {
+    const v = args?.[key];
+    if (typeof v === 'string' && v.trim()) return v;
+  }
+  return '';
+}
+
+// Полный главный аргумент для раскрытия в плашке подтверждения:
+// команда exec целиком (многострочная), путь + размер содержимого
+// write_file, сводка write_memory, docker-действие с целью;
+// без главного аргумента — pretty-JSON args (как «Детали» карточки).
+function fullArgText(tool: ToolCallView): string {
+  const args = tool.args ?? {};
+  if (tool.name === 'write_file') {
+    const lines = [`путь: ${typeof args.path === 'string' && args.path ? args.path : '—'}`];
+    if (typeof args.content === 'string') {
+      lines.push(`содержимое: ${args.content.length.toLocaleString('ru-RU')} симв.`);
+    }
+    return lines.join('\n');
+  }
+  if (tool.name === 'write_memory') {
+    const lines: string[] = [];
+    if (typeof args.reason === 'string' && args.reason.trim()) lines.push(`причина: ${args.reason.trim()}`);
+    if (typeof args.content === 'string') {
+      lines.push(`новый текст MEMORY.md: ${args.content.length.toLocaleString('ru-RU')} симв.`);
+    }
+    return lines.join('\n');
+  }
+  if (tool.name === 'docker_action') {
+    const lines = [`действие: ${typeof args.action === 'string' && args.action ? args.action : '—'}`];
+    const parts: Array<[string, string]> = [
+      ['target', 'цель'],
+      ['image', 'образ'],
+      ['name', 'имя'],
+      ['command', 'команда'],
+    ];
+    for (const [key, label] of parts) {
+      const v = args[key];
+      if (typeof v === 'string' && v.trim()) lines.push(`${label}: ${v}`);
+    }
+    return lines.join('\n');
+  }
+  const main = mainArgPreview(args);
+  return main || JSON.stringify(args, null, 2);
+}
+
+function ToolCard({ tool, decided, registerCard }: {
   tool: ToolCallView;
-  onApprove: () => void;
-  onReject: () => void;
+  decided: boolean;
+  registerCard: (callId: string, el: HTMLDivElement | null) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  // Решение отправлено на сервер — блокируем кнопки до смены статуса карточки.
-  const [decided, setDecided] = useState(false);
-  const labels: Record<string, string> = {
-    exec: 'Выполнить команду',
-    exec_readonly: 'Команда чтения',
-    read_file: 'Прочитать файл',
-    read_memory: 'Прочитать память',
-    list_dir: 'Список файлов',
-    write_file: 'Записать файл',
-    write_memory: 'Обновить память',
-    docker_ps: 'Список контейнеров',
-    docker_logs: 'Логи контейнера',
-    docker_inspect: 'Inspect Docker',
-    docker_action: 'Действие Docker',
-    security_audit: 'Аудит безопасности',
-    web_search: '🌐 Поиск в интернете',
-    list_servers: 'Список серверов',
-  };
-  // connect_server — карточка «Подключить <сервер> к диалогу?»: целевой сервер
-  // приходит в поле server события (он ещё не подключён), фолбэк — args.server.
-  const name =
-    tool.name === 'connect_server'
-      ? `Подключить «${tool.server ?? String(tool.args.server ?? '')}» к диалогу${tool.status === 'pending' ? '?' : ''}`
-      : labels[tool.name] ?? tool.name;
-  // Пока инструмент выполняется, вместо вывода показываем его главный аргумент
-  // (запрос поиска, команду, путь) — видно, чем занят агент прямо сейчас.
-  const argPreview = (() => {
-    for (const key of ['query', 'command', 'path', 'target', 'containerId']) {
-      const v = tool.args?.[key];
-      if (typeof v === 'string' && v.trim()) return v;
-    }
-    return '';
-  })();
-  const preview = (tool.status === 'running' ? argPreview : (tool.output ?? '')).replace(/\s+/g, ' ').trim();
+  const name = toolLabel(tool);
+  // Пока инструмент выполняется или ждёт подтверждения, вместо вывода
+  // показываем его главный аргумент (запрос поиска, команду, путь).
+  const argPreview = mainArgPreview(tool.args);
+  const preview = (
+    tool.status === 'running' || tool.status === 'pending' ? argPreview : (tool.output ?? '')
+  )
+    .replace(/\s+/g, ' ')
+    .trim();
   const short = preview.length > 80 ? `${preview.slice(0, 80)}…` : preview;
 
   return (
-    <div className={`tool-card ${tool.status}${tool.name === 'web_search' ? ' web' : ''}`}>
+    <div
+      className={`tool-card ${tool.status}${tool.name === 'web_search' ? ' web' : ''}`}
+      ref={(el) => registerCard(tool.callId, el)}
+    >
       <div className="tool-card-row">
         <span className={`tool-dot ${tool.status}`} />
         <span className="tool-name" title={name}>{name}</span>
@@ -871,29 +986,10 @@ function ToolCard({ tool, onApprove, onReject }: {
         )}
         {tool.status === 'pending' ? (
           <>
-            <span className="tool-status">{decided ? 'отправлено…' : 'ждёт подтверждения'}</span>
-            <span className="tool-actions-mini">
-              <button
-                className="btn btn-mini btn-primary"
-                disabled={decided}
-                onClick={() => {
-                  setDecided(true);
-                  onApprove();
-                }}
-              >
-                Подтвердить
-              </button>
-              <button
-                className="btn btn-mini btn-danger"
-                disabled={decided}
-                onClick={() => {
-                  setDecided(true);
-                  onReject();
-                }}
-              >
-                Отклонить
-              </button>
+            <span className="tool-status">
+              {decided ? 'выполняется…' : 'ждёт подтверждения · кнопки — внизу панели'}
             </span>
+            <span className="tool-preview" title={preview}>{short || '—'}</span>
           </>
         ) : (
           <>
@@ -907,11 +1003,11 @@ function ToolCard({ tool, onApprove, onReject }: {
                     : 'ошибка'}
             </span>
             <span className="tool-preview" title={preview}>{short || '—'}</span>
-            <button className="btn btn-ghost btn-mini tool-toggle" onClick={() => setExpanded((x) => !x)}>
-              {expanded ? 'Скрыть' : 'Детали'}
-            </button>
           </>
         )}
+        <button className="btn btn-ghost btn-mini tool-toggle" onClick={() => setExpanded((x) => !x)}>
+          {expanded ? 'Скрыть' : 'Детали'}
+        </button>
       </div>
       {expanded && (
         <div className="tool-details">
@@ -928,6 +1024,83 @@ function ToolCard({ tool, onApprove, onReject }: {
             </>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// Закреплённая плашка подтверждения мутирующего вызова — единая точка
+// решения (кнопки из карточек в ленте убраны), всегда видна у поля ввода.
+// Клик по строке скроллит ленту к карточке вызова; «Подробнее» раскрывает
+// полный главный аргумент. После клика кнопки блокируются до tool_result.
+function PendingBar({ tool, decided, onApprove, onReject, onScrollToCard }: {
+  tool: ToolCallView;
+  decided: boolean;
+  onApprove: () => void;
+  onReject: () => void;
+  onScrollToCard: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  // Очередь подтверждений: смена вызова мгновенно заменяет содержимое
+  // плашки — раскрытие не переносится на следующий вызов.
+  useEffect(() => {
+    setExpanded(false);
+  }, [tool.callId]);
+  const name = toolLabel(tool);
+  const preview = mainArgPreview(tool.args).replace(/\s+/g, ' ').trim();
+  const short = preview.length > 80 ? `${preview.slice(0, 80)}…` : preview;
+
+  return (
+    <div className="pending-bar">
+      <div
+        className="pending-bar-row"
+        title="Показать карточку вызова в ленте"
+        onClick={onScrollToCard}
+      >
+        <span className={`tool-dot ${decided ? 'running' : 'pending'}`} />
+        <span className="pending-bar-name" title={name}>{name}</span>
+        {tool.server && tool.name !== 'connect_server' && (
+          <span className="tool-server" title={`Сервер: ${tool.server}`}>
+            {tool.server}
+          </span>
+        )}
+        <span className="pending-bar-preview" title={preview}>{short || '—'}</span>
+        <button
+          className="btn btn-ghost btn-mini"
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpanded((x) => !x);
+          }}
+        >
+          {expanded ? 'Скрыть' : 'Подробнее'}
+        </button>
+        {decided ? (
+          <span className="tool-status running">выполняется…</span>
+        ) : (
+          <>
+            <button
+              className="btn btn-primary btn-mini"
+              onClick={(e) => {
+                e.stopPropagation();
+                onApprove();
+              }}
+            >
+              Подтвердить
+            </button>
+            <button
+              className="btn btn-danger btn-mini"
+              onClick={(e) => {
+                e.stopPropagation();
+                onReject();
+              }}
+            >
+              Отклонить
+            </button>
+          </>
+        )}
+      </div>
+      {expanded && (
+        <pre className="args-view pending-bar-details">{fullArgText(tool)}</pre>
       )}
     </div>
   );
