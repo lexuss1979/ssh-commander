@@ -132,6 +132,23 @@ describe('parseSearchResponse', () => {
     });
     expect(parsed.sources).toEqual([{ title: '', url: 'https://example.com' }]);
   });
+
+  it('usage пробрасывается: input/output токены + число поисковых запросов', () => {
+    const parsed = parseSearchResponse(realResponse);
+    expect(parsed.usage).toEqual({
+      promptTokens: 8641,
+      completionTokens: 462,
+      searchRequests: 2,
+    });
+  });
+
+  it('без usage в ответе — usage undefined', () => {
+    expect(parseSearchResponse({ content: [{ type: 'text', text: 'ответ' }] }).usage).toBeUndefined();
+    expect(parseSearchResponse({}).usage).toBeUndefined();
+    expect(
+      parseSearchResponse({ usage: { input_tokens: 'x', output_tokens: -1 } }).usage,
+    ).toBeUndefined();
+  });
 });
 
 describe('formatSearchOutput', () => {

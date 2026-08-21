@@ -15,6 +15,7 @@ import { PortsPage } from './pages/PortsPage';
 import { CronPage } from './pages/CronPage';
 import { ServicesPage } from './pages/ServicesPage';
 import { DatabasesPage } from './pages/DatabasesPage';
+import { AiCostsPage } from './pages/AiCostsPage';
 import { TerminalPage } from './pages/TerminalPage';
 import { FilesPage } from './pages/FilesPage';
 import { DockerPage } from './pages/DockerPage';
@@ -22,7 +23,7 @@ import { AgentPage } from './pages/AgentPage';
 import { ProfileModal } from './components/ProfileModal';
 import { AlertsBell } from './components/AlertsBell';
 
-type Tab = 'servers' | 'overview' | 'terminal' | 'files' | 'docker' | 'databases' | 'ports' | 'cron' | 'services';
+type Tab = 'servers' | 'ai-costs' | 'overview' | 'terminal' | 'files' | 'docker' | 'databases' | 'ports' | 'cron' | 'services';
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'overview', label: 'Обзор' },
@@ -445,6 +446,15 @@ export default function App() {
             <span className="muted">Сводный дашборд</span>
           </button>
 
+          <button
+            type="button"
+            className={`profile-list-item${tab === 'ai-costs' ? ' active' : ''}`}
+            onClick={() => setTab('ai-costs')}
+          >
+            <strong>ИИ-расходы</strong>
+            <span className="muted">Расходы по проектам</span>
+          </button>
+
           <div className="sidebar-divider" />
 
           <label className="sidebar-label">Площадки</label>
@@ -558,7 +568,12 @@ export default function App() {
                 profiles={profiles}
               />
             </div>
-            {!activeProfile && tab !== 'servers' && (
+            {/* Глобальная страница вне таббара профиля (как «Серверы»): расходы
+                AI кросс-профильные, профиль не нужен. */}
+            <div className={`tab-page ${tab === 'ai-costs' ? '' : 'hidden'}`}>
+              <AiCostsPage visible={tab === 'ai-costs'} />
+            </div>
+            {!activeProfile && tab !== 'servers' && tab !== 'ai-costs' && (
               <div className="empty-state">
                 <p>Сначала добавьте SSH-сервер.</p>
                 <button className="btn btn-primary" onClick={() => setShowProfiles(true)}>

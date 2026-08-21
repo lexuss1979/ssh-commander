@@ -14,3 +14,5 @@ keys/*
 .qwen/
 .worktrees/
 .eslintcache
+data/ai-usage.json
+data/ai-usage.json.*

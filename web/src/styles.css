@@ -3887,6 +3887,99 @@ body.resizing-agent {
   .db-grid-wrap {
     min-height: 260px;
   }
+/* ИИ-расходы (docs/ai-costs-plan.md) */
+/* Бейдж стоимости диалога в тулбаре агента */
+.cost-badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ok);
+  border: 1px solid var(--ok-soft-border);
+  background: var(--accent-soft);
+  white-space: nowrap;
+  cursor: help;
+}
+
+/* Карточки итогов периода */
+.cost-cards {
+  display: flex;
+  gap: 12px;
+  padding: 16px 16px 8px;
+  flex-wrap: wrap;
+}
+
+.cost-card {
+  flex: 1;
+  min-width: 160px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-raised);
+}
+
+.cost-card-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.cost-card-value {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.costs-hint {
+  padding: 0 16px;
+  font-size: 12px;
+}
+
+.costs-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 16px 16px;
+  scrollbar-gutter: stable;
+}
+
+.cost-matrix th,
+.cost-matrix td {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.cost-matrix th:first-child,
+.cost-matrix td:first-child {
+  text-align: left;
+}
+
+.cost-matrix th {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cost-matrix tfoot td {
+  font-weight: 600;
+  border-top: 1px solid var(--border);
+  background: var(--bg-raised);
+  position: sticky;
+  bottom: 0;
+}
+
+.cost-date {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.cost-cell {
+  cursor: help;
+  font-variant-numeric: tabular-nums;
+}
+
+.cost-cell-td {
+  font-variant-numeric: tabular-nums;
 }
 
 /* === Вкладка «Службы» (эпик 13): systemd === */

@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, formatRelativeDate } from '../api';
-import type { AgentAskMode, Dialogue, DialogueMessage, DialogueSummary, Profile } from '../types';
+import { api, formatRelativeDate, formatUsd } from '../api';
+import type {
+  AgentAskMode,
+  Dialogue,
+  DialogueMessage,
+  DialogueSummary,
+  DialogueUsageTotals,
+  Profile,
+} from '../types';
 import { Markdown } from '../components/Markdown';
 import { Modal } from '../components/Modal';
 
@@ -79,6 +86,10 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   // Решение по мутирующему вызову отправлено (кнопки плашки заблокированы
   // до tool_result); смена диалога сбрасывает.
   const [decidedCalls, setDecidedCalls] = useState<Set<string>>(() => new Set());
+  // Живые итоги расходов диалога (WS-событие usage): обновляются после каждой
+  // записи в журнал — бейдж двигается во время длинных прогонов, а не только
+  // по done (refreshDialogues). Сбрасываются при смене диалога.
+  const [liveUsage, setLiveUsage] = useState<DialogueUsageTotals | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   // Отложенная отправка первого сообщения в только что созданный диалог
   // ('new-dialogue' из терминала): заполняется после успешного POST, а
@@ -277,6 +288,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     setRunning(false);
     setPlanReady(false);
     setDecidedCalls(new Set());
+    setLiveUsage(null);
 
     void api<{ dialogue: Dialogue }>(`/api/ai/dialogues/${encodeURIComponent(activeDialogueId)}`)
       .then(({ dialogue }) => {
@@ -355,6 +367,12 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
         case 'servers': {
           const attached = Array.isArray(msg.attached) ? (msg.attached as AttachedServer[]) : [];
           setServersInfo({ home: String(msg.home ?? profile.id), attached });
+          break;
+        }
+        case 'usage': {
+          // Кумулятивные итоги диалога после каждой записи в журнал расходов.
+          const totals = msg.totals as DialogueUsageTotals | undefined;
+          if (totals && typeof totals.calls === 'number') setLiveUsage(totals);
           break;
         }
         case 'tool_result': {
@@ -556,6 +574,11 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   const homeServerId = serversInfo?.home ?? profile.id;
   const availableProfiles = allProfiles.filter((p) => !attachedServers.some((s) => s.id === p.id));
 
+  // Итоги расходов текущего диалога: живое WS-значение (во время прогона)
+  // важнее summary-значения из списка (обновляется по done/error).
+  const activeUsage: DialogueUsageTotals | null =
+    liveUsage ?? dialogues.find((d) => d.id === activeDialogueId)?.usage ?? null;
+
   // Кнопка «+»: при открытии подгружаем полный список профилей.
   const toggleAdd = () => {
     const next = !addOpen;
@@ -681,7 +704,10 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                           +{d.extraProfileIds.length}
                         </span>
                       )}
-                      <div className="dialogue-item-meta">{formatRelativeDate(d.updatedAt)}</div>
+                      <div className="dialogue-item-meta">
+                        {formatRelativeDate(d.updatedAt)}
+                        {d.usage && d.usage.calls > 0 ? ` · ${formatUsd(d.usage.costUsd)}` : ''}
+                      </div>
                       <button
                         className="dialogue-delete"
                         title="Удалить диалог"
@@ -726,6 +752,16 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           <span className="status-text">
             {running ? 'выполняется…' : connected ? 'готов' : 'нет соединения'}
           </span>
+          {activeUsage && activeUsage.calls > 0 && (
+            <span
+              className="cost-badge"
+              title={usageTooltip(activeUsage)}
+              data-unpriced={activeUsage.unpricedCalls > 0 ? 'true' : undefined}
+            >
+              {/* Ни один вызов не протарифицирован — $0.0000 врал бы «бесплатно» */}
+              ≈ {activeUsage.costUsd === 0 && activeUsage.unpricedCalls > 0 ? '—' : formatUsd(activeUsage.costUsd)}
+            </span>
+          )}
           <label
             className="plan-toggle"
             title="Сначала составить пошаговый план и показать его на подтверждение — ничего не выполняя"
@@ -946,7 +982,23 @@ function toSummary(d: Dialogue): DialogueSummary {
     createdAt: d.createdAt,
     updatedAt: d.updatedAt,
     extraProfileIds: d.extraProfileIds,
+    usage: d.usage,
   };
+}
+
+// Подсказка бейджа стоимости: вызовы и токены (вход/выход/кэш); при вызовах
+// без цены модели — честная пометка «неполная сумма».
+function usageTooltip(u: DialogueUsageTotals): string {
+  const parts = [
+    `Вызовов: ${u.calls}`,
+    `Вход: ${u.promptTokens.toLocaleString('ru-RU')} токенов`,
+    `Кэш входа: ${u.cachedTokens.toLocaleString('ru-RU')} токенов`,
+    `Выход: ${u.completionTokens.toLocaleString('ru-RU')} токенов`,
+  ];
+  if (u.unpricedCalls > 0) {
+    parts.push(`Неполная сумма: ${u.unpricedCalls} вызовов без цены модели`);
+  }
+  return parts.join('\n');
 }
 
 function parseToolArgs(raw?: string): Record<string, unknown> {

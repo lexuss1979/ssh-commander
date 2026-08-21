@@ -1,12 +1,14 @@
 import type { WebSocket } from 'ws';
 import { config } from '../config.js';
-import { streamChatCompletion, type ChatMessage, type ToolCall } from './client.js';
+import { streamChatCompletion, type ChatMessage, type TokenUsage, type ToolCall } from './client.js';
 import { sanitizeMessages } from './messages.js';
 import { buildPlanRequestMessages, toolsForRequest } from './plan.js';
 import { getToolDefs, READ_ONLY_TOOLS } from './tools.js';
 import { checkReadOnlyCommand } from './guard.js';
 import { readMemory, writeMemory, memoryPromptBlock } from './memory.js';
-import { isSearchConfigured, searchWeb } from './web-search.js';
+import { isSearchConfigured, searchWeb, type WebSearchUsage } from './web-search.js';
+import { computeCostUsd } from './pricing.js';
+import { recordUsage, usageTotalsByDialogue } from './usage.js';
 import { exec, withSftp } from '../ssh/manager.js';
 import {
   readFile as sftpReadFile,
@@ -402,6 +404,71 @@ export class AgentSession {
     }
   }
 
+  /**
+   * Запись usage вызова чата/плана (решения 3, 5, 6, 8): стоимость считается
+   * и фиксируется в момент вызова; после записи сессия шлёт WS-событие
+   * `{type:'usage', totals}` с кумулятивными итогами диалога — бейдж в тулбаре
+   * двигается во время длинных прогонов. Ошибки журнала не роняют цикл агента
+   * (try/catch + warn, как у save()).
+   */
+  private recordChatUsage(kind: 'chat' | 'plan', model: string, usage: TokenUsage): void {
+    try {
+      recordUsage({
+        ts: Date.now(),
+        profileId: this.homeProfile.id,
+        dialogueId: this.dialogueId,
+        kind,
+        model,
+        promptTokens: usage.promptTokens ?? 0,
+        cachedTokens: usage.cachedTokens ?? 0,
+        completionTokens: usage.completionTokens ?? 0,
+        reasoningTokens: usage.reasoningTokens ?? 0,
+        costUsd: computeCostUsd(model, {
+          promptTokens: usage.promptTokens,
+          cachedTokens: usage.cachedTokens,
+          completionTokens: usage.completionTokens,
+        }),
+      });
+      this.sendUsageTotals();
+    } catch (err) {
+      console.warn(`Failed to record usage for dialogue ${this.dialogueId}:`, err);
+    }
+  }
+
+  /** Запись usage вызова web_search (решение 5) — отдельный kind. */
+  private recordSearchUsage(model: string, usage: WebSearchUsage): void {
+    try {
+      recordUsage({
+        ts: Date.now(),
+        profileId: this.homeProfile.id,
+        dialogueId: this.dialogueId,
+        kind: 'web_search',
+        model,
+        promptTokens: usage.promptTokens ?? 0,
+        cachedTokens: 0,
+        completionTokens: usage.completionTokens ?? 0,
+        reasoningTokens: 0,
+        searchRequests: usage.searchRequests ?? 0,
+        costUsd: computeCostUsd(model, {
+          promptTokens: usage.promptTokens,
+          completionTokens: usage.completionTokens,
+          searchRequests: usage.searchRequests,
+        }),
+      });
+      this.sendUsageTotals();
+    } catch (err) {
+      console.warn(`Failed to record web_search usage for dialogue ${this.dialogueId}:`, err);
+    }
+  }
+
+  /** WS-событие `usage`: кумулятивные итоги диалога для живого бейджа. */
+  private sendUsageTotals(): void {
+    const totals = usageTotalsByDialogue().get(this.dialogueId);
+    if (totals) {
+      this.send({ type: 'usage', totals });
+    }
+  }
+
   private waitDecision(callId: string): Promise<'approved' | 'rejected' | 'aborted'> {
     return new Promise((resolve) => {
       this.pending.set(callId, { callId, resolve });
@@ -430,12 +497,17 @@ export class AgentSession {
       this.loopAbort = new AbortController();
       let assistant: ChatMessage;
       try {
-        assistant = await streamChatCompletion({
+        const result = await streamChatCompletion({
           messages: buildPlanRequestMessages(sanitizeMessages(this.messages)),
           tools: toolsForRequest(true),
           signal: this.loopAbort.signal,
           onToken: (token) => this.send({ type: 'token', content: token }),
         });
+        assistant = result.message;
+        // Шаг планирования — тоже платный вызов: учитываем в журнале.
+        if (result.usage) {
+          this.recordChatUsage('plan', config.ai.model, result.usage);
+        }
       } catch (err) {
         if (this.stopRequested) {
           this.send({ type: 'done', stopped: true, note: 'Агент остановлен пользователем.' });
@@ -482,12 +554,17 @@ export class AgentSession {
 
         let assistant: ChatMessage;
         try {
-          assistant = await streamChatCompletion({
+          const result = await streamChatCompletion({
             messages: sanitizeMessages(this.messages),
             tools: getToolDefs(),
             signal: this.loopAbort.signal,
             onToken: (token) => this.send({ type: 'token', content: token }),
           });
+          assistant = result.message;
+          // Каждый вызов чата — платная запись в журнале (решения 5, 6).
+          if (result.usage) {
+            this.recordChatUsage('chat', config.ai.model, result.usage);
+          }
         } catch (err) {
           if (this.stopRequested) {
             this.send({ type: 'done', stopped: true, note: 'Агент остановлен пользователем.' });
@@ -705,6 +782,9 @@ export class AgentSession {
           };
         }
         const result = await searchWeb(String(args.query ?? ''));
+        if (result.usage) {
+          this.recordSearchUsage(config.ai.searchModel, result.usage);
+        }
         return { status: result.ok ? 'ok' : 'error', ...this.truncate(result.output) };
       }
       // Остальные инструменты адресуются серверу: параметр `server` (имя

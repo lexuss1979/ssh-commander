@@ -12,6 +12,17 @@ export const MAX_USES_PER_CALL = 3;
 export interface WebSearchResult {
   ok: boolean;
   output: string;
+  /** Токены вызова поиска (docs/ai-costs-plan.md, решение 5): заполняется
+   * только при успешном ответе с usage в теле. */
+  usage?: WebSearchUsage;
+}
+
+/** Usage Anthropic-совместимого ответа: input/output токены и число реальных
+ * поисковых запросов (server_tool_use.web_search_requests). */
+export interface WebSearchUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+  searchRequests?: number;
 }
 
 export function isSearchConfigured(): boolean {
@@ -57,12 +68,20 @@ export interface ParsedSearchResponse {
   text: string;
   queries: string[];
   sources: SearchSource[];
+  /** Usage из ответа; отсутствует, если провайдер его не вернул. */
+  usage?: WebSearchUsage;
+}
+
+function nonnegInt(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : undefined;
 }
 
 /**
  * Разбор ответа Messages API: текстовые блоки — ответ, server_tool_use —
  * выполненные поисковые запросы, web_search_tool_result — источники
  * (encrypted_content не извлекаем — он прозрачен только для модели).
+ * Usage: input_tokens → promptTokens, output_tokens → completionTokens,
+ * server_tool_use.web_search_requests → searchRequests.
  */
 export function parseSearchResponse(data: Record<string, unknown>): ParsedSearchResponse {
   const blocks = (data.content as Array<Record<string, unknown>> | undefined) ?? [];
@@ -86,7 +105,21 @@ export function parseSearchResponse(data: Record<string, unknown>): ParsedSearch
       }
     }
   }
-  return { text: textParts.join('\n\n'), queries, sources };
+  let usage: WebSearchUsage | undefined;
+  const rawUsage = data.usage as Record<string, unknown> | undefined;
+  if (rawUsage && typeof rawUsage === 'object') {
+    const toolUse = rawUsage.server_tool_use as Record<string, unknown> | undefined;
+    const promptTokens = nonnegInt(rawUsage.input_tokens);
+    const completionTokens = nonnegInt(rawUsage.output_tokens);
+    const searchRequests = nonnegInt(toolUse?.web_search_requests);
+    if (promptTokens !== undefined || completionTokens !== undefined || searchRequests !== undefined) {
+      usage = {};
+      if (promptTokens !== undefined) usage.promptTokens = promptTokens;
+      if (completionTokens !== undefined) usage.completionTokens = completionTokens;
+      if (searchRequests !== undefined) usage.searchRequests = searchRequests;
+    }
+  }
+  return { text: textParts.join('\n\n'), queries, sources, usage };
 }
 
 /** Форматирование результатов для tool-вывода агенту. */

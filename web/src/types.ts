@@ -100,6 +100,17 @@ export interface DialogueMessage {
   name?: string;
 }
 
+/** Кумулятивные итоги расходов AI по диалогу (enrichment / WS-событие usage).
+ * costUsd неполна при unpricedCalls > 0 (часть вызовов без цены модели). */
+export interface DialogueUsageTotals {
+  calls: number;
+  promptTokens: number;
+  cachedTokens: number;
+  completionTokens: number;
+  costUsd: number;
+  unpricedCalls: number;
+}
+
 export interface DialogueSummary {
   id: string;
   title: string;
@@ -109,6 +120,8 @@ export interface DialogueSummary {
   updatedAt: number;
   /** Дополнительные серверы, подключённые к диалогу (мульти-серверный режим). */
   extraProfileIds?: string[];
+  /** Расходы диалога; null — записей usage нет. */
+  usage?: DialogueUsageTotals | null;
 }
 
 export interface Dialogue extends DialogueSummary {

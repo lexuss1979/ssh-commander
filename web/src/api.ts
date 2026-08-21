@@ -1014,6 +1014,43 @@ export function fetchDiskUsageFiles(
   return api<DiskUsageFilesResponse>(`/api/disk-usage/files?${params}`, { signal });
 }
 
+// Вкладка «ИИ-расходы» (docs/ai-costs-plan.md)
+/** Агрегат по дню/профилю/итогам: суммы токенов и USD, честный счётчик
+ * вызовов без цены модели (costUsd тогда неполна). */
+export interface AiUsageAgg {
+  calls: number;
+  promptTokens: number;
+  cachedTokens: number;
+  completionTokens: number;
+  costUsd: number;
+  unpricedCalls: number;
+}
+
+export interface AiUsageDay {
+  /** Локальная дата сервера, YYYY-MM-DD. */
+  date: string;
+  byProfile: Record<string, AiUsageAgg>;
+  total: AiUsageAgg;
+}
+
+export interface AiUsageReport {
+  profiles: Array<{ id: string; name: string }>;
+  days: AiUsageDay[];
+  totals: AiUsageAgg;
+}
+
+/** Отчёт по расходам AI за период (days — число дней или 'all'). */
+export function fetchAiUsage(days: number | 'all'): Promise<AiUsageReport> {
+  const params = new URLSearchParams({ days: String(days) });
+  return api<AiUsageReport>(`/api/ai/usage?${params}`);
+}
+
+/** USD: меньше $1 — 4 знака (типичная стоимость вызова), иначе 2. */
+export function formatUsd(v: number | null | undefined): string {
+  if (v === null || v === undefined || !Number.isFinite(v)) return '—';
+  return v < 1 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`;
+}
+
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} Б`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;

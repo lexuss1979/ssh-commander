@@ -39,7 +39,7 @@ bash scripts/install-hooks.sh             # ставит pre-commit
 - `Dockerfile` — multi-stage (`web-builder` → `server-builder` → `server-deps` → runtime `node:20-alpine`).
 - `docker-compose.yml` — публикация `127.0.0.1:8080:8080`, volumes `./data:/data` и `./keys:/keys`. `docker-compose.dev.yml` + `scripts/docker-dev.sh` — dev-режим с hot-reload; изменение зависимостей (package.json/lock) требует пересборки dev-стадии через `scripts/docker-dev.sh up`.
 - `docs/roadmap.md` — план развития (эпики); перед каждым эпиком — детальное планирование. `docs/architecture.md` — детали реализации.
-- `data/` — volume: `profiles.json` (профили, пароли открытым текстом), `db-connections.json` (подключения БД, пароли открытым текстом), `snippets.json` (сохранённые команды), `ai-dialogues.json` (диалоги агента), `memory/<profileId>/MEMORY.md` (память агента).
+- `data/` — volume: `profiles.json` (профили, пароли открытым текстом), `db-connections.json` (подключения БД, пароли открытым текстом), `snippets.json` (сохранённые команды), `ai-dialogues.json` (диалоги агента), `ai-usage.json` (журнал расходов AI: токены и стоимость каждого вызова), `ai-prices.json` (опциональный оверрайд цен моделей — справочник, битый файл не блокирует запись), `memory/<profileId>/MEMORY.md` (память агента).
 - `keys/` — SSH-ключи, монтируются в контейнер в `/keys` (в образ не копируются); импорт через UI сохраняет с правами 0600.
 - `server/test/` — unit-тесты (vitest) и ручные сценарии (`*.manual.mjs` / `*.manual.ts`).
 
@@ -89,6 +89,7 @@ bash scripts/install-hooks.sh             # ставит pre-commit
 - Мульти-серверный режим: диалог привязан к домашнему профилю, остальные серверы подключаются (`attach_server` от пользователя или `connect_server` через approve, хранятся в `extraProfileIds`). Инструменты выполняются только на подключённых серверах (`resolveServer` в `agent.ts`); память и sudo-пароли — per-profile. Подробности — `docs/architecture.md`.
 - `security_audit` — детерминированный белый список read-only команд (`src/services/security-audit.ts`), произвольный shell не принимает. Sudo-пароль приходит через WS `sudo_credentials`, хранится только в памяти сессии, не логируется, не сохраняется и не передаётся модели.
 - Режим планирования (`planMode`, `src/ai/plan.ts`): запрос к API идёт без tools, модель возвращает текст плана (`plan_ready`), `approve_plan` запускает обычный цикл с инструментами; шаги планирования не расходуют `AI_MAX_STEPS`.
+- Учёт расходов: каждый платный вызов (`chat`/`plan`/`web_search`) с usage пишется в журнал `data/ai-usage.json` (`src/ai/usage.ts`); привязка — домашний профиль диалога + дата вызова. После каждой записи сессия шлёт WS-событие `{type:'usage', totals}`. Ошибки журнала не роняют цикл агента (try/catch + warn, как у `save()`). Цены — `src/ai/pricing.ts` (дефолты + оверрайд `data/ai-prices.json`). Подробности — `docs/architecture.md` (раздел «Учёт расходов AI»).
 
 ### Память агента (MEMORY.md)
 
@@ -99,7 +100,8 @@ bash scripts/install-hooks.sh             # ставит pre-commit
 
 ## Неочевидные инварианты
 
-- Хранилища JSON (`profiles.ts`, `db-connections.ts`, `ai/dialogues.ts`): zod-валидация, атомарная запись tmp+rename. Битый JSON переименовывается в `*.corrupt-<timestamp>`, persist отказывается перезаписывать файл до рестарта — молчаливого затирания нет.
+- Хранилища JSON (`profiles.ts`, `db-connections.ts`, `ai/dialogues.ts`): zod-валидация, атомарная запись tmp+rename. Битый JSON переименовывается в `*.corrupt-<timestamp>`, persist отказывается перезаписывать файл до рестарта — молчаливого затирания нет. То же у журнала расходов (`ai/usage.ts`), но НЕ у цен (`ai/pricing.ts`): `ai-prices.json` — справочник, битый файл → warn + дефолты.
+- Учёт расходов AI: стоимость фиксируется в момент вызова (смена цен не переписывает историю, токены в записи позволяют пересчитать); цены — дефолты в `src/ai/pricing.ts` + оверрайд `data/ai-prices.json` (мерж по имени модели); `usage` НЕ кладётся в `ChatMessage` (иначе попадёт в persisted-диалог) — составной возврат `{message, usage?}`; привязка затрат — домашний профиль диалога + локальная дата сервера; WS-событие `usage` шлётся после каждой записи; прерванный стрим (без финального usage-чанка) не учитывается — итоги занижены на прерванные вызовы.
 - SFTP — только promise-обёртки из `src/ssh/sftp.ts`, не сырые callback-методы ssh2.
 - `src/ssh/manager.ts` — постоянные SSH-подключения на профиль с авто-переподключением; параллельные `getClient` делят один connect. `exec`: timeout 60 c, лимит вывода 2 МБ, опциональный `stdin` (подача пароля в `sudo -S`). `execStream`: `handle.code` резолвится на всех терминальных путях (ошибка exec, close до открытия канала, отказ подключения, close/error канала) — потребитель может безопасно вешать `.then` сразу (до правки follow docker-логов отдавал пустое тело); опциональный `stdin` — пишется в канал с EOF (тот же инвариант пароля, что у `exec`).
 - Docker по SSH (`src/services/docker.ts`): команда собирается из `dockerCommand` профиля + `shq`-экранирование аргументов; команда контейнера в `run` оборачивается в `sh -c` (многословная команда = shell-строка). Compose — только v2 (`docker compose`), standalone v1 отклоняется.

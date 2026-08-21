@@ -656,6 +656,80 @@ encrypted_content в выводе), форматирование, гейтинг
 
 ---
 
+## Эпик 12. Учёт расходов AI — стоимость диалогов, страница «ИИ-расходы»
+
+**Цель:** видеть, сколько стоил каждый диалог агента (бейдж в панели агента и
+в истории) и иметь отчёт по дням и проектам (глобальная страница «ИИ-расходы»
+в сайдбаре под «Серверы»). Оба API (чат и веб-поиск) уже возвращают `usage`
+с токенами — код его отбрасывал; теперь он захватывается, тарифицируется и
+пишется в журнал. Подробный план — `docs/ai-costs-plan.md`, детали —
+`docs/architecture.md` (раздел «Учёт расходов AI»).
+
+**Backend:**
+
+- `src/ai/client.ts`: `stream_options: { include_usage: true }`, usage
+  читается из SSE независимо от `choices` (финальный usage-чанк — с пустым
+  `choices`) и из non-stream `data.usage`; возврат `{ message, usage? }`
+  (`TokenUsage` — prompt/cached/completion/reasoning, числа только конечные
+  ≥ 0, инварианты cached ⊂ prompt и reasoning ⊂ completion держатся клампом).
+- `src/ai/pricing.ts` (новый): дефолтная таблица цен USD за 1M токенов
+  (gpt-4.1/-mini/-nano, gpt-4o/-mini, deepseek-chat/-reasoner, DeepSeek V4 —
+  deepseek-v4-flash 0.22/0.007/0.66 и deepseek-v4-pro 0.66/0.022/1.98,
+  off-peak; пик ×2) + оверрайд `data/ai-prices.json` (мерж по имени модели;
+  битый файл — warn + дефолты, без corrupt-guard: это справочник; модель
+  без уверенной цены — честный unpriced). Формула:
+  `(prompt − cached)·input + cached·cachedInput + completion·output +
+  searchRequests·webSearchPerRequestUsd`; без `cachedInput` кэш — по цене
+  `input`; слагаемое поиска только при заданном тарифе — у DeepSeek поиск
+  оплачивается токенами модели поиска (отдельной цены за запрос нет).
+- `src/ai/usage.ts` (новый): журнал `data/ai-usage.json` (zod + tmp/rename +
+  corrupt-guard, образец `db-connections.ts`), запись — на один вызов API
+  (`recordUsage`), стоимость фиксируется в момент вызова (смена цен историю
+  не переписывает); `usageTotalsByDialogue()` — для enrichment и WS-бейджа;
+  `usageReport(days | 'all')` — агрегация по (локальная дата, profileId).
+- `src/ai/agent.ts`: `recordUsage` после каждого `streamChatCompletion`
+  (`kind: 'chat' | 'plan'`) и после `searchWeb` (`kind: 'web_search'` с
+  `searchRequests`); привязка — домашний профиль диалога + дата вызова;
+  после каждой записи — WS-событие `{type:'usage', totals}` (кумулятивные
+  итоги диалога); ошибки журнала не роняют цикл (try/catch + warn).
+- `src/routes/ai.ts`: summaries и деталь диалога обогащаются `usage` (join
+  на уровне роута); `GET /api/ai/usage?days=30` (`days=all` — всё,
+  zod-валидация) — `{profiles, days: [{date, byProfile, total}], totals}`,
+  имена профилей join'ятся, удалённый — `<id> (удалён)`, дни desc.
+
+**Frontend:** `formatUsd` (< $1 — 4 знака), `fetchAiUsage(days)` в `api.ts`;
+бейдж `≈ $0.0423` в тулбаре AgentPage (tooltip — вызовы и токены вход/выход/
+кэш; `unpricedCalls > 0` — пометка «неполная сумма»), стоимость в истории
+диалогов; живое обновление по WS `usage`; страница `AiCostsPage` (карточки
+итогов периода, матрица дней × профилей со sticky thead и футером-итогами,
+polling 60 с), кнопка «ИИ-расходы» в сайдбаре под «Серверами», слот в
+`App.tsx` вне таббара профиля.
+
+**Тесты:** `pricing.test.ts` (формула: кэш-вычитание, cachedInput, reasoning
+не добавляется, поиск отдельным слагаемым, неизвестная модель → null,
+оверрайд-файл, битый файл → warn + дефолты), `ai-usage.test.ts` (round-trip,
+corrupt-store, отчёт по дням/профилям, `unpricedCalls`, `days='all'`,
+`usageTotalsByDialogue` со смесью priced/unpriced), `client.test.ts` (SSE с
+финальным usage-чанком, non-stream usage, отсутствие usage, мусор в числах),
+расширение `web-search.test.ts` (usage пробрасывается), `agent-usage.test.ts` (запись usage из цикла агента на моках client/search); ручной сценарий
+`agent.manual.mjs` — мок шлёт usage, проверка `data/ai-usage.json`,
+enriched summaries и отчёта.
+
+**Риски:** прерванный стрим не учитывается (usage-чанк не приходит — итоги
+занижены на прерванные вызовы); провайдер без `include_usage` — записи нет
+(диалог покажет «—»); актуальность дефолтных цен — оверрайд-файл закрывает,
+`unpricedCalls` подсвечивает модели без цены; тарификация серверного
+web_search у DeepSeek проверена — оплачивается токенами модели поиска,
+отдельной цены за запрос нет (тариф `webSearchPerRequestUsd` — для
+провайдеров с поштучной оплатой, напр. Anthropic); часовой пояс дней —
+локальное время контейнера (обычно UTC, при необходимости `TZ` в compose);
+перезапись файла журнала на каждый вызов — приемлемо для v1 (единицы МБ),
+при росте — батчить persist.
+
+**Оценка:** ~2 дня.
+
+---
+
 ## Порядок выполнения
 
 | # | Эпик | Оценка | Зачем в этом месте |
@@ -672,6 +746,7 @@ encrypted_content в выводе), форматирование, гейтинг
 | 9 | Аудит безопасности (baseline + diff) | 2 д | Отдельная вкладка; использует готовые паттерны сервис→роут→вкладка и agentRequest |
 | 10 | Порты контейнеров + SSH-туннели | 2–2.5 д | Естественное расширение вкладки «Порты» (10a независимо); туннели переиспользуют SSH-менеджер и docker-данные из 10a |
 | 11 | Веб-поиск для агента (DeepSeek) | 0.5 д | Read-only инструмент поверх Anthropic-endpoint'а DeepSeek; ядро агента не меняется |
+| 12 | Учёт расходов AI | 2 д | Захват usage (оба API уже отдают токены), журнал `ai-usage.json`, страница «ИИ-расходы» |
 
 Заметка по эпику 7: после эпика 0 кнопка «Спросить агента» не переключает
 вкладку, а просто раскрывает правую панель — сценарий становится ещё

@@ -1,8 +1,15 @@
 // Тест цикла AI-агента против мокового OpenAI-совместимого endpoint'а:
 // 1) read-only инструмент выполняется автоматически,
 // 2) мутирующий инструмент ждёт подтверждения и выполняется после approve,
-// 3) агент завершает цикл.
+// 3) агент завершает цикл,
+// 4) usage каждого вызова пишется в журнал расходов (ai-usage.json), сессия
+//    шлёт WS-событие usage, summaries диалогов обогащаются итогами.
+//
+// Запуск: mock-openai-manual.mjs (:8199) + sshd на 127.0.0.1:2222 (user test)
+// и сервер: APP_PASSWORD=test123 AI_API_KEY=x AI_API_BASE=http://127.0.0.1:8199/v1
+// node server/dist/index.js (DATA_DIR по умолчанию — data/ в cwd сервера).
 import WebSocket from 'ws';
+import fs from 'node:fs';
 
 const BASE = 'http://127.0.0.1:8091';
 const PASSWORD = 'test123';
@@ -105,6 +112,14 @@ check('approved tool executed', writeResult.status === 'ok', JSON.stringify(writ
 const done = await waitFor((m) => m.type === 'done');
 check('agent loop finished', done.note === undefined || done.note !== 'Достигнут лимит шагов', JSON.stringify(done));
 
+// Расходы: WS-событие usage с кумулятивными итогами диалога после записи.
+const usageEvent = await waitFor((m) => m.type === 'usage');
+check(
+  'WS usage event carries dialogue totals',
+  usageEvent.totals && usageEvent.totals.calls >= 1 && typeof usageEvent.totals.costUsd === 'number',
+  JSON.stringify(usageEvent.totals),
+);
+
 // Проверяем, что мутирующая команда реально выполнилась на сервере
 const files = await req(`/api/files/list?profileId=${pid}&path=/tmp`, {}, cookie);
 check('approved command had effect', files.entries.some((e) => e.name === 'agent-approved'));
@@ -121,6 +136,41 @@ check(
   full.dialogue.messages.some((m) => m.role === 'user') && full.dialogue.messages.some((m) => m.role === 'assistant'),
   JSON.stringify(full.dialogue.messages.map((m) => m.role)),
 );
+
+// Расходы: summaries обогащены итогами (usage), итоги диалога и отчёт сходятся.
+check(
+  'dialogue summary enriched with usage',
+  saved.usage && saved.usage.calls >= 1 && typeof saved.usage.costUsd === 'number',
+  JSON.stringify(saved.usage),
+);
+check(
+  'dialogue detail enriched with usage',
+  full.dialogue.usage && full.dialogue.usage.calls >= 1,
+  JSON.stringify(full.dialogue.usage),
+);
+
+// Журнал расходов на диске: записи по профилю (DATA_DIR по умолчанию — data/).
+const usagePath = 'data/ai-usage.json';
+if (fs.existsSync(usagePath)) {
+  const store = JSON.parse(fs.readFileSync(usagePath, 'utf8'));
+  const recs = (store.usage ?? []).filter((r) => r.profileId === pid);
+  check(
+    'ai-usage.json contains records for the profile (kind=chat, costUsd computed)',
+    recs.length >= 1 && recs.every((r) => r.kind === 'chat' && typeof r.costUsd === 'number'),
+    JSON.stringify(recs.map((r) => ({ kind: r.kind, tokens: r.promptTokens, costUsd: r.costUsd }))),
+  );
+} else {
+  check(`ai-usage.json exists at ${usagePath}`, false, 'server DATA_DIR не по умолчанию?');
+}
+
+// Отчёт API: профиль и итоги за весь период.
+const report = await req('/api/ai/usage?days=all', {}, cookie);
+check(
+  'usage report API lists the profile and totals',
+  report.profiles.some((p) => p.id === pid) && report.totals.calls >= 1 && typeof report.totals.costUsd === 'number',
+  JSON.stringify(report.totals),
+);
+
 for (const d of dialogues.dialogues) {
   await req(`/api/ai/dialogues/${d.id}`, { method: 'DELETE' }, cookie);
 }
