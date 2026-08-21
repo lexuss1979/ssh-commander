@@ -397,6 +397,116 @@ export function toggleCronEntry(
   );
 }
 
+// Вкладка «Nginx» (docs/nginx-plan.md)
+export interface NginxListen {
+  /** Адрес без порта: '' (все интерфейсы), конкретный IP, '[::]' для IPv6. */
+  addr: string;
+  /** Порт; null — unix-сокет. */
+  port: number | null;
+  /** listen ... ssl. */
+  ssl: boolean;
+  /** listen ... default_server. */
+  defaultServer: boolean;
+}
+
+/** Куда «смотрит» сайт: proxy_pass, root или не распознано. */
+export interface NginxTarget {
+  kind: 'proxy' | 'static' | 'unknown';
+  value: string;
+}
+
+/**
+ * Сертификат сайта: распарсен локально (notAfter ISO, daysLeft — целых дней,
+ * может быть отрицательным) либо файл недоступен/не разобран (error).
+ */
+export type NginxCert =
+  | { path: string; notAfter: string; daysLeft: number }
+  | { path: string; error: string };
+
+/** Сайт (server-блок) в снапшоте. */
+export interface NginxSite {
+  /** Файл из маркера `# configuration file <путь>:`; '' — не определён. */
+  file: string;
+  serverNames: string[];
+  isDefault: boolean;
+  listens: NginxListen[];
+  target: NginxTarget;
+  /** Число верхнеуровневых location-блоков. */
+  locationsCount: number;
+  cert: NginxCert | null;
+}
+
+export interface NginxConfigTest {
+  ok: boolean;
+  output: string;
+}
+
+/** Один источник в снапшоте: бинарь хоста или контейнер. */
+export interface NginxSourceSnapshot {
+  type: 'native' | 'container';
+  containerId?: string;
+  containerName?: string;
+  version: string | null;
+  configTest: NginxConfigTest;
+  sites: NginxSite[];
+  /** Источник целиком не прочитался (nginx -T упал) — причина. */
+  error?: string;
+}
+
+export interface NginxSnapshot {
+  timestamp: number;
+  sources: NginxSourceSnapshot[];
+}
+
+/** Сайты сервера (вкладка «Nginx»), polling 5 с при видимой вкладке. */
+export function fetchNginx(profileId: string): Promise<NginxSnapshot> {
+  return api<NginxSnapshot>(`/api/nginx?profileId=${encodeURIComponent(profileId)}`);
+}
+
+/** Ключ источника для test/reload: 'native' | 'container:<id>'. */
+export function nginxSourceKey(source: NginxSourceSnapshot): string {
+  return source.type === 'native' ? 'native' : `container:${source.containerId}`;
+}
+
+/** `nginx -t` по источнику: `{ok, output}` (вывод — stderr + stdout).
+ * profileId — в query, как у остальных мутаций (конвенция cron). */
+export function testNginx(profileId: string, source: string): Promise<NginxConfigTest> {
+  return api<NginxConfigTest>(`/api/nginx/test?profileId=${encodeURIComponent(profileId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ source }),
+  });
+}
+
+/**
+ * Reload с guard'ом: 409 при красном `nginx -t` — тело `{error, output}`.
+ * output (вывод теста) пробрасывается в ApiError, чтобы UI показал его
+ * mono-блоком. profileId — в query, как у остальных мутаций (конвенция cron).
+ */
+export async function reloadNginx(profileId: string, source: string): Promise<NginxConfigTest> {
+  const res = await fetch(`/api/nginx/reload?profileId=${encodeURIComponent(profileId)}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ source }),
+  });
+  const text = await res.text();
+  let body: Record<string, unknown> = {};
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    body = { error: text.slice(0, 500) };
+  }
+  if (!res.ok) {
+    if (res.status === 401) unauthorizedHandler?.();
+    const err = new ApiError(res.status, (body.error as string) ?? res.statusText) as ApiError & {
+      output?: string;
+    };
+    if (typeof body.output === 'string') err.output = body.output;
+    throw err;
+  }
+  return body as unknown as NginxConfigTest;
+}
+
 export async function fetchTerminalHistory(profileId: string, limit = 100): Promise<string[]> {
   const params = new URLSearchParams({ profileId, limit: String(limit) });
   const data = await api<{ commands: string[] }>(`/api/terminal/history?${params}`);

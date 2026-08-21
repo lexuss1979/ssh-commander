@@ -26,6 +26,7 @@ import { diskUsageRouter } from './routes/disk-usage.js';
 import { snippetsRouter } from './routes/snippets.js';
 import { packagesRouter } from './routes/packages.js';
 import { alertsRouter } from './routes/alerts.js';
+import { nginxRouter } from './routes/nginx.js';
 import { requireProfile } from './profiles.js';
 import { attachTerminal } from './ws/terminal.js';
 import { handleAgentWs } from './ws/agent.js';
@@ -60,6 +61,7 @@ app.use('/api/disk-usage', requireAuth, diskUsageRouter);
 app.use('/api/snippets', requireAuth, snippetsRouter);
 app.use('/api/packages', requireAuth, packagesRouter);
 app.use('/api/alerts', requireAuth, alertsRouter);
+app.use('/api/nginx', requireAuth, nginxRouter);
 
 // SPA static files (built web app).
 if (fs.existsSync(config.webDist)) {

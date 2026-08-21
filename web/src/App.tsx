@@ -14,6 +14,7 @@ import { OverviewPage } from './pages/OverviewPage';
 import { PortsPage } from './pages/PortsPage';
 import { CronPage } from './pages/CronPage';
 import { ServicesPage } from './pages/ServicesPage';
+import { NginxPage } from './pages/NginxPage';
 import { DatabasesPage } from './pages/DatabasesPage';
 import { AiCostsPage } from './pages/AiCostsPage';
 import { TerminalPage } from './pages/TerminalPage';
@@ -23,7 +24,18 @@ import { AgentPage } from './pages/AgentPage';
 import { ProfileModal } from './components/ProfileModal';
 import { AlertsBell } from './components/AlertsBell';
 
-type Tab = 'servers' | 'ai-costs' | 'overview' | 'terminal' | 'files' | 'docker' | 'databases' | 'ports' | 'cron' | 'services';
+type Tab =
+  | 'servers'
+  | 'ai-costs'
+  | 'overview'
+  | 'terminal'
+  | 'files'
+  | 'docker'
+  | 'databases'
+  | 'nginx'
+  | 'ports'
+  | 'cron'
+  | 'services';
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'overview', label: 'Обзор' },
@@ -31,6 +43,7 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'files', label: 'Файлы' },
   { id: 'docker', label: 'Docker' },
   { id: 'databases', label: 'Базы данных' },
+  { id: 'nginx', label: 'Nginx' },
   { id: 'ports', label: 'Порты' },
   { id: 'cron', label: 'Cron' },
   { id: 'services', label: 'Службы' },
@@ -637,6 +650,14 @@ export default function App() {
                     onAskAgent={handleAskAgent}
                     sqlInsert={sqlInsert}
                     onSqlInsertConsumed={() => setSqlInsert(null)}
+                  />
+                </div>
+                <div className={`tab-page ${tab === 'nginx' ? '' : 'hidden'}`}>
+                  <NginxPage
+                    key={activeProfile.id}
+                    profile={activeProfile}
+                    showError={showError}
+                    visible={tab === 'nginx'}
                   />
                 </div>
                 <div className={`tab-page ${tab === 'ports' ? '' : 'hidden'}`}>

@@ -40,7 +40,7 @@ export function dockerCommand(profile: Profile, args: string[]): string {
 export async function dockerExec(
   profile: Profile,
   args: string[],
-  opts?: { timeoutMs?: number },
+  opts?: { timeoutMs?: number; maxOutput?: number },
 ): Promise<ExecResult> {
   return exec(profile, dockerCommand(profile, args), opts);
 }

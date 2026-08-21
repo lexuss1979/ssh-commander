@@ -3887,6 +3887,129 @@ body.resizing-agent {
   .db-grid-wrap {
     min-height: 260px;
   }
+}
+
+/* Вкладка «Nginx»: сайты сервера (docs/nginx-plan.md) */
+.nginx-source-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.nginx-source-header .section-title {
+  margin: 0;
+}
+
+.nginx-version {
+  font-size: 12px;
+  font-weight: 400;
+  margin-left: 8px;
+}
+
+.nginx-source-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Ошибка источника / вывод nginx -t — mono-блок (паттерн db-query-error) */
+.nginx-error-block {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.nginx-error-block pre {
+  max-height: 220px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  background: var(--bg-code);
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+/* Статус сертификата */
+.cert-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.cert-badge.ok {
+  color: var(--ok);
+  border-color: var(--ok-soft-border);
+}
+
+.cert-badge.warn {
+  color: var(--warn);
+  border-color: var(--warn-soft-border);
+}
+
+.cert-badge.crit {
+  color: var(--danger);
+  border-color: var(--danger-soft-border);
+}
+
+.nginx-server-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.nginx-server-name .nginx-sn:not(:last-child)::after {
+  content: ',';
+  color: var(--muted);
+}
+
+.nginx-default-badge {
+  margin-left: 6px;
+}
+
+.nginx-listen code {
+  white-space: nowrap;
+}
+
+.nginx-ssl-mark {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--ok);
+  border: 1px solid var(--ok-soft-border);
+}
+
+.nginx-target {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.nginx-loc-count {
+  display: block;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.nginx-file {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ИИ-расходы (docs/ai-costs-plan.md) */
 /* Бейдж стоимости диалога в тулбаре агента */
 .cost-badge {
