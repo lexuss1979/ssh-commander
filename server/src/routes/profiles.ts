@@ -8,8 +8,10 @@ import {
   updateProfile,
   updateProfileLogPaths,
 } from '../profiles.js';
+import { BootstrapError, bootstrapServer } from '../services/bootstrap.js';
 import { ProfileTransferError, buildExport, importBackup } from '../services/profile-transfer.js';
 import { clearHistory } from '../services/metrics-history.js';
+import { clearNginxCaches } from '../services/nginx.js';
 import { closeProfileConnection, testConnection } from '../ssh/manager.js';
 
 export const profilesRouter = Router();
@@ -90,6 +92,38 @@ profilesRouter.post('/import', (req, res) => {
   }
 });
 
+/**
+ * Bootstrap свежего сервера (root + пароль → ключ): генерирует отдельный
+ * ed25519-ключ, прописывает его на сервере, опционально закрывает парольный
+ * вход SSH и создаёт профиль с authType=key. Запрос живёт десятки секунд
+ * (3 SSH-подключения + exec'и) — таймаутов меньше ~120 с в цепочке нет.
+ * Пароль не логируется и не persist'ится (живёт только в памяти запроса).
+ * Ошибки возвращают {error, steps} с отчётом по шагам.
+ */
+const bootstrapInputSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  host: z.string().min(1, 'Host is required'),
+  port: z.number().int().min(1).max(65535).default(22),
+  username: z.string().min(1, 'Username is required'),
+  password: z.string().min(1, 'Password is required'),
+  disablePasswordAuth: z.boolean().default(true),
+});
+
+profilesRouter.post('/bootstrap', async (req, res) => {
+  try {
+    const result = await bootstrapServer(bootstrapInputSchema.parse(req.body));
+    res.status(201).json(result);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: err.issues.map((issue) => issue.message).join('; ') });
+    } else if (err instanceof BootstrapError) {
+      res.status(err.status).json({ error: err.message, steps: err.steps });
+    } else {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  }
+});
+
 profilesRouter.post('/', (req, res) => {
   try {
     res.status(201).json(createProfile(req.body));
@@ -132,6 +166,7 @@ profilesRouter.delete('/:id', (req, res) => {
   try {
     closeProfileConnection(req.params.id);
     clearHistory(req.params.id);
+    clearNginxCaches(req.params.id);
     deleteProfile(req.params.id);
     res.json({ ok: true });
   } catch (err) {

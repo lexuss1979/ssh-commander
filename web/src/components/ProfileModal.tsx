@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, exportProfilesBackup, importKey, importProfilesBackup, type KeyEntry } from '../api';
+import {
+  ApiError,
+  api,
+  bootstrapServer,
+  exportProfilesBackup,
+  importKey,
+  importProfilesBackup,
+  type BootstrapStep,
+  type KeyEntry,
+} from '../api';
 import type { Profile } from '../types';
 import { Modal } from './Modal';
 
@@ -8,6 +17,8 @@ interface Props {
   onClose: () => void;
   onSaved: () => Promise<void>;
   showError: (msg: string) => void;
+  /** Вызывается после успешного bootstrap — выбрать созданный профиль. */
+  onProfileCreated?: (profileId: string) => void;
 }
 
 interface FormState {
@@ -36,8 +47,34 @@ const emptyForm: FormState = {
   note: '',
 };
 
-export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
+interface BootstrapFormState {
+  name: string;
+  host: string;
+  port: string;
+  username: string;
+  password: string;
+  disablePasswordAuth: boolean;
+}
+
+const emptyBootstrapForm: BootstrapFormState = {
+  name: '',
+  host: '',
+  port: '22',
+  username: 'root',
+  password: '',
+  disablePasswordAuth: true,
+};
+
+type BootstrapPhase =
+  | { phase: 'idle' }
+  | { phase: 'busy' }
+  | { phase: 'done'; steps: BootstrapStep[] }
+  | { phase: 'error'; message: string; steps: BootstrapStep[] };
+
+export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileCreated }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Режим правой панели: обычная форма профиля или bootstrap «root + пароль».
+  const [mode, setMode] = useState<'form' | 'bootstrap'>('form');
   const [form, setForm] = useState<FormState>(emptyForm);
   const [busy, setBusy] = useState(false);
   const [keys, setKeys] = useState<KeyEntry[]>([]);
@@ -92,6 +129,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
 
   const startEdit = (p: Profile) => {
     setEditingId(p.id);
+    setMode('form');
     setTestResult({ phase: 'idle' });
     setForm({
       name: p.name,
@@ -109,6 +147,14 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
 
   const startCreate = () => {
     setEditingId(null);
+    setMode('form');
+    setTestResult({ phase: 'idle' });
+    setForm(emptyForm);
+  };
+
+  const startBootstrap = () => {
+    setEditingId(null);
+    setMode('bootstrap');
     setTestResult({ phase: 'idle' });
     setForm(emptyForm);
   };
@@ -260,6 +306,13 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
           <button className="btn btn-primary btn-block" onClick={startCreate}>
             + Новый сервер
           </button>
+          <button
+            className={`btn btn-block ${mode === 'bootstrap' && !editingId ? 'btn-primary' : ''}`}
+            onClick={startBootstrap}
+            title="Сгенерировать отдельный SSH-ключ, установить его на сервер по паролю и (опционально) закрыть парольный вход"
+          >
+            🔑 Новый сервер (root + пароль)…
+          </button>
           {profiles.map((p) => (
             <div key={p.id} className={`profile-item ${editingId === p.id ? 'active' : ''}`}>
               <button className="profile-item-main" onClick={() => startEdit(p)}>
@@ -316,6 +369,15 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
         </div>
 
         <div className="profile-form">
+          {mode === 'bootstrap' && !editingId ? (
+            <BootstrapPanel
+              showError={showError}
+              onSaved={onSaved}
+              onProfileCreated={onProfileCreated}
+              onBack={() => setMode('form')}
+            />
+          ) : (
+            <>
           <h3>{editingId ? 'Редактирование сервера' : 'Новый сервер'}</h3>
           <div className="form-grid">
             <label>
@@ -458,8 +520,183 @@ export function ProfileModal({ profiles, onClose, onSaved, showError }: Props) {
             <code>keys/</code> с правами <code>0600</code>. Либо положите ключ в <code>keys/</code>{' '}
             вручную и укажите путь внутри контейнера, например <code>/keys/id_rsa</code>.
           </p>
+            </>
+          )}
         </div>
       </div>
     </Modal>
+  );
+}
+
+// --------------------------------------------------------------------------
+// «Новый сервер (root + пароль)» — bootstrap под ключ: отдельный ed25519-ключ
+// на сервер, опциональное закрытие парольного входа, профиль с authType=key.
+// Живого прогресса нет (одиночный запрос, десятки секунд): спиннер во время
+// работы, итоговый отчёт по шагам в конце.
+// --------------------------------------------------------------------------
+
+function BootstrapPanel({
+  showError,
+  onSaved,
+  onProfileCreated,
+  onBack,
+}: {
+  showError: (msg: string) => void;
+  onSaved: () => Promise<void>;
+  onProfileCreated?: (profileId: string) => void;
+  onBack: () => void;
+}) {
+  const [form, setForm] = useState<BootstrapFormState>(emptyBootstrapForm);
+  const [state, setState] = useState<BootstrapPhase>({ phase: 'idle' });
+
+  const set = <K extends keyof BootstrapFormState>(key: K, value: BootstrapFormState[K]) =>
+    setForm((f) => ({ ...f, [key]: value }));
+
+  const hardeningAvailable = form.username.trim() === 'root';
+
+  const submit = async () => {
+    if (!form.name.trim() || !form.host.trim() || !form.username.trim() || !form.password) {
+      showError('Заполните имя, хост, пользователя и пароль');
+      return;
+    }
+    const port = Number(form.port) || 22;
+    if (port < 1 || port > 65535) {
+      showError('Порт — число от 1 до 65535');
+      return;
+    }
+    setState({ phase: 'busy' });
+    try {
+      const res = await bootstrapServer({
+        name: form.name.trim(),
+        host: form.host.trim(),
+        port,
+        username: form.username.trim(),
+        password: form.password,
+        disablePasswordAuth: hardeningAvailable && form.disablePasswordAuth,
+      });
+      setState({ phase: 'done', steps: res.steps });
+      await onSaved();
+      onProfileCreated?.(res.profile.id);
+    } catch (err) {
+      showError((err as Error).message);
+      const body = err instanceof ApiError ? (err.body as { steps?: BootstrapStep[] }) : null;
+      setState({ phase: 'error', message: (err as Error).message, steps: body?.steps ?? [] });
+    }
+  };
+
+  const icon = (status: BootstrapStep['status']) =>
+    status === 'ok' ? '✓' : status === 'warn' ? '⚠' : '✕';
+
+  return (
+    <>
+      <h3>Новый сервер (root + пароль)</h3>
+      <p className="field-hint">
+        Сервис сам сгенерирует отдельный ed25519-ключ, пропишет его на сервере, проверит вход
+        ключом и создаст профиль (<code>authType=key</code>). Пароль нигде не сохраняется.
+      </p>
+      {state.phase === 'done' ? (
+        <div className="bootstrap-report">
+          <p className="test-result test-result-ok">Сервер настроен, профиль «{form.name.trim()}» создан и выбран.</p>
+          <div className="bootstrap-steps">
+            {state.steps.map((s, i) => (
+              <div key={i} className={`bootstrap-step bootstrap-step-${s.status}`}>
+                <span className="bootstrap-step-icon">{icon(s.status)}</span>
+                <span className="bootstrap-step-name">{s.name}</span>
+                {s.detail && <span className="bootstrap-step-detail">{s.detail}</span>}
+              </div>
+            ))}
+          </div>
+          <div className="modal-actions">
+            <button className="btn btn-primary" onClick={() => setState({ phase: 'idle' })}>
+              Настроить ещё один
+            </button>
+          </div>
+        </div>
+      ) : state.phase === 'error' ? (
+        <div className="bootstrap-report">
+          <p className="test-result test-result-error">Bootstrap не удался: {state.message}</p>
+          {state.steps.length > 0 && (
+            <div className="bootstrap-steps">
+              {state.steps.map((s, i) => (
+                <div key={i} className={`bootstrap-step bootstrap-step-${s.status}`}>
+                  <span className="bootstrap-step-icon">{icon(s.status)}</span>
+                  <span className="bootstrap-step-name">{s.name}</span>
+                  {s.detail && <span className="bootstrap-step-detail">{s.detail}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+          {/добавьте профиль вручную/.test(state.message) && (
+            <pre className="bootstrap-error-details">{state.message}</pre>
+          )}
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setState({ phase: 'idle' })}>
+              Исправить и повторить
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="form-grid">
+            <label>
+              Имя
+              <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="prod-01" />
+            </label>
+            <label>
+              Хост
+              <input value={form.host} onChange={(e) => set('host', e.target.value)} placeholder="203.0.113.10" />
+            </label>
+            <label>
+              Порт
+              <input type="number" value={form.port} onChange={(e) => set('port', e.target.value)} />
+            </label>
+            <label>
+              Пользователь
+              <input value={form.username} onChange={(e) => set('username', e.target.value)} />
+            </label>
+            <label className="span-2">
+              Пароль
+              <input
+                type="password"
+                value={form.password}
+                onChange={(e) => set('password', e.target.value)}
+                placeholder="••••••••"
+                autoComplete="new-password"
+              />
+            </label>
+            <label className={`transfer-check span-2 ${hardeningAvailable ? '' : 'disabled'}`}>
+              <input
+                type="checkbox"
+                checked={hardeningAvailable && form.disablePasswordAuth}
+                disabled={!hardeningAvailable || state.phase === 'busy'}
+                onChange={(e) => set('disablePasswordAuth', e.target.checked)}
+              />
+              Запретить вход по паролю после настройки (рекомендуется)
+            </label>
+          </div>
+          <p className="field-hint">
+            {hardeningAvailable ? (
+              <>Проверьте, что у вас есть доступ к консоли провайдера — парольный вход SSH будет закрыт.</>
+            ) : (
+              <>Отключение парольного входа доступно только для пользователя root (v1); ключ будет установлен и без этого.</>
+            )}
+          </p>
+          <div className="modal-actions">
+            <button className="btn btn-primary" onClick={() => void submit()} disabled={state.phase === 'busy'}>
+              {state.phase === 'busy' ? 'Настройка…' : 'Настроить сервер'}
+            </button>
+            <button className="btn" onClick={onBack} disabled={state.phase === 'busy'}>
+              Обычная форма
+            </button>
+          </div>
+          {state.phase === 'busy' && (
+            <p className="bootstrap-busy">
+              <span className="bootstrap-busy-dot" aria-hidden />
+              Настраивается, это может занять до минуты…
+            </p>
+          )}
+        </>
+      )}
+    </>
   );
 }

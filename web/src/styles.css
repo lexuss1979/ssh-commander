@@ -1586,6 +1586,84 @@ body.resizing-agent {
   line-height: 1.4;
 }
 
+.transfer-check.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* «Новый сервер (root + пароль)» — форма bootstrap и отчёт по шагам */
+.bootstrap-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+}
+
+.bootstrap-step {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bootstrap-step-icon {
+  flex: none;
+  width: 1.2em;
+  text-align: center;
+}
+
+.bootstrap-step-ok .bootstrap-step-icon {
+  color: #3fb27f;
+}
+
+.bootstrap-step-warn .bootstrap-step-icon {
+  color: #d8a657;
+}
+
+.bootstrap-step-error .bootstrap-step-icon {
+  color: var(--danger);
+}
+
+.bootstrap-step-name {
+  font-weight: 600;
+}
+
+.bootstrap-step-detail {
+  color: var(--muted);
+}
+
+.bootstrap-busy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.bootstrap-busy-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: tool-dot-pulse 1.1s ease-in-out infinite;
+}
+
+.bootstrap-error-details {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-code);
+  font-family: Menlo, Consolas, "JetBrains Mono", "Fira Code", monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
 .transfer-block {
   display: flex;
   flex-direction: column;

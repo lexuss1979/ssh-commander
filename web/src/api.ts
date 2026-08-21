@@ -1,11 +1,14 @@
-import type { AlertsResponse, FileSearchResult } from './types';
+import type { AlertsResponse, FileSearchResult, Profile } from './types';
 
 export class ApiError extends Error {
   status: number;
+  /** Тело ошибочного ответа (например, {error, steps} у bootstrap). */
+  body?: unknown;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, body?: unknown) {
     super(message);
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -29,13 +32,14 @@ export async function api<T>(path: string, opts: RequestInit = {}): Promise<T> {
   if (!res.ok) {
     if (res.status === 401) unauthorizedHandler?.();
     let message = res.statusText;
+    let body: unknown;
     try {
-      const body = await res.json();
-      message = body.error ?? message;
+      body = await res.json();
+      message = (body as { error?: string }).error ?? message;
     } catch {
       /* keep statusText */
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, body);
   }
   // 204 или успешный ответ с пустым телом — res.json() бросил бы SyntaxError.
   const text = await res.text();
@@ -119,6 +123,38 @@ export function importProfilesBackup(
   return api<ProfilesImportSummary>('/api/profiles/import', {
     method: 'POST',
     body: JSON.stringify({ backup, passphrase }),
+  });
+}
+
+/** Один шаг отчёта bootstrap («Новый сервер (root + пароль)»). */
+export interface BootstrapStep {
+  name: string;
+  status: 'ok' | 'warn' | 'error';
+  detail: string;
+}
+
+/** Ответ POST /api/profiles/bootstrap; при ошибке — {error, steps} в ApiError.body. */
+export interface BootstrapResult {
+  profile: Profile;
+  steps: BootstrapStep[];
+}
+
+/**
+ * Bootstrap свежего сервера: генерирует отдельный ключ, ставит его на сервер,
+ * опционально закрывает парольный вход SSH и создаёт профиль authType=key.
+ * Просьба живёт десятки секунд — живого прогресса нет, отчёт приходит в конце.
+ */
+export function bootstrapServer(input: {
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  disablePasswordAuth: boolean;
+}): Promise<BootstrapResult> {
+  return api<BootstrapResult>('/api/profiles/bootstrap', {
+    method: 'POST',
+    body: JSON.stringify(input),
   });
 }
 

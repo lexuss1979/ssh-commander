@@ -742,6 +742,7 @@ export default function App() {
             }
           }}
           showError={showError}
+          onProfileCreated={(id) => setActiveProfileId(id)}
         />
       )}
 
