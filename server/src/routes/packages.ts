@@ -106,7 +106,7 @@ packagesRouter.post('/apply', async (req, res) => {
   // завершения — req close и settle handle.code.
   if (!acquireFollowSlot(profile.id)) {
     res.status(429).json({
-      error: 'Достигнут лимит одновременных журналов на сервер — закройте часть просмотрщиков и повторите',
+      error: 'Достигнут лимит одновременных потоков на сервер — закройте часть просмотрщиков и повторите',
     });
     return;
   }

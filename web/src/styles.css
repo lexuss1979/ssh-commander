@@ -2258,12 +2258,17 @@ body.resizing-agent {
   overflow: hidden;
 }
 
-.packages-section .data-table {
+/* Несколько сотен пакетов не растягивают «Обзор»: таблица живёт в своей
+   скролл-области (scrollbar-gutter: stable — без дёргания layout). */
+.packages-table-wrap {
+  max-height: 360px;
+  overflow: auto;
+  scrollbar-gutter: stable;
   margin: 0 -16px -14px;
   width: calc(100% + 32px);
 }
 
-.packages-section .data-table td code {
+.packages-table-wrap .data-table td code {
   font-size: 12px;
 }
 

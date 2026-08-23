@@ -54,6 +54,13 @@ export type ExecFn = (
 export const PACKAGES_CACHE_TTL_MS = 60000;
 /** Таймаут быстрых exec'ов (детект менеджера). */
 export const PROBE_TIMEOUT_MS = 15000;
+/**
+ * Таймаут снимка списка обновлений: dnf check-update ходит в сеть, dpkg-lock
+ * бывает занят — без явного предела exec висел бы до дефолтных 60 с, держа
+ * SSH-канал. 30 с — компромисс «не мгновенно, но не вечно» (кэш 60 с гасит
+ * повторы).
+ */
+export const SNAPSHOT_TIMEOUT_MS = 30000;
 
 const LIST_CODE_MARKER = '@@LIST_CODE@@';
 const REBOOT_MARKER = '@@REBOOT@@';
@@ -144,14 +151,25 @@ export function parseAptList(text: string): PackageUpdate[] {
  * `dnf -q check-update`: `name.arch version repo` (3 токена). name.arch не
  * расщепляем — колонка «Пакет» и так читается. Текущая версия из
  * check-update недоступна (отклонение от строки roadmap — колонка «— →
- * версия»). Строки короче 3 токенов пропускаются.
+ * версия»). После списка обновлений идёт блок `Obsoleting Packages`: его
+ * заголовок (2 токена) останавливает парсинг, иначе записи блока (та же
+ * форма) завысили бы счётчик. Строки короче 3 токенов до начала списка —
+ * мусор (заголовки), пропускаются.
  */
 export function parseDnfCheckUpdate(text: string): PackageUpdate[] {
   const out: PackageUpdate[] = [];
+  let started = false;
   for (const line of text.split('\n')) {
-    const fields = line.trim().split(/\s+/);
-    if (fields.length < 3) continue;
+    const trimmed = line.trim();
+    const fields = trimmed.split(/\s+/);
+    if (fields.length < 3) {
+      // После первой записи короткая строка — конец списка обновлений
+      // (пустая строка или заголовок «Obsoleting Packages»).
+      if (started || /^obsoleting packages$/i.test(trimmed)) return out;
+      continue;
+    }
     out.push({ name: fields[0], current: null, available: fields[1], source: fields[2] });
+    started = true;
   }
   return out;
 }
@@ -354,7 +372,7 @@ async function buildSnapshot(profile: Profile, execFn: ExecFn): Promise<Packages
       error: 'Менеджер пакетов не найден (apt/dnf/yum/apk)',
     };
   }
-  const result = await execFn(profile, snapshotCommand(pm));
+  const result = await execFn(profile, snapshotCommand(pm), { timeoutMs: SNAPSHOT_TIMEOUT_MS });
   const listCode = parseListCode(result.stdout);
   if (!isUpdatesExitCode(pm, listCode)) {
     const detail = (result.stderr || result.stdout).trim();

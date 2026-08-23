@@ -112,6 +112,22 @@ describe('parseDnfCheckUpdate', () => {
     const raw = ['bash.x86_64 5.2.15-2.fc39 updates', 'garbage line', 'single'].join('\n');
     expect(parseDnfCheckUpdate(raw)).toHaveLength(1);
   });
+
+  it('блок «Obsoleting Packages» не засчитывается в список обновлений', () => {
+    const raw = [
+      'bash.x86_64 5.2.15-2.fc39 updates',
+      'kernel.x86_64 6.5.6-200.fc39 updates',
+      '',
+      'Obsoleting Packages',
+      'oldpkg.x86_64 1.0-1 fedora',
+    ].join('\n');
+    expect(parseDnfCheckUpdate(raw)).toHaveLength(2);
+  });
+
+  it('заголовок «Obsoleting Packages» останавливает парсинг и без обычных обновлений', () => {
+    const raw = ['Obsoleting Packages', 'oldpkg.x86_64 1.0-1 fedora'].join('\n');
+    expect(parseDnfCheckUpdate(raw)).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------

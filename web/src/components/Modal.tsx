@@ -5,11 +5,17 @@ interface Props {
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
+  /**
+   * Закрытие кликом по оверлею. Для модалок, где случайное закрытие дорого
+   * (например, просмотрщик применения обновлений пакетов — клик мимо окна
+   * оборвал бы `apt-get upgrade`), выставляется false.
+   */
+  dismissable?: boolean;
 }
 
-export function Modal({ title, onClose, children, wide }: Props) {
+export function Modal({ title, onClose, children, wide, dismissable = true }: Props) {
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onClick={dismissable ? onClose : undefined}>
       <div className={`modal ${wide ? 'modal-wide' : ''}`} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>{title}</h2>
@@ -22,4 +28,3 @@ export function Modal({ title, onClose, children, wide }: Props) {
     </div>
   );
 }
-

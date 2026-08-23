@@ -4,7 +4,7 @@ import type { HistorySample, PackagesSnapshot, ServerMetrics } from '../api';
 import type { AgentAskMode, Profile } from '../types';
 import { useSortBy, SortableTh } from '../hooks/useSortBy';
 import { LoadChart } from '../components/Sparkline';
-import { LogViewer } from '../components/LogViewer';
+import { LogViewer, type LogViewerStatus } from '../components/LogViewer';
 import { Modal } from '../components/Modal';
 
 interface Props {
@@ -15,6 +15,10 @@ interface Props {
 }
 
 const POLL_INTERVAL_MS = 3000;
+// Обновления пакетов опрашиваются отдельным (медленным) таймером, а не тиком
+// метрик: снимок — это 2 exec'а + SFTP-stat, и раз в минуту он не должен
+// стопорить тик CPU/памяти/дисков. Серверный кэш 60 с гасит повторы.
+const PACKAGES_POLL_MS = 60000;
 
 export function formatBytes(bytes: number | null): string {
   if (bytes === null) return '—';
@@ -160,21 +164,26 @@ export function OverviewPage({ profile, visible, onAskAgent }: Props) {
   const [confirmApply, setConfirmApply] = useState(false);
   const [applyPassword, setApplyPassword] = useState('');
   const [applying, setApplying] = useState(false);
+  // Подтверждение закрытия просмотрщика, пока обновление ещё выполняется.
+  const [confirmCloseApply, setConfirmCloseApply] = useState(false);
+  // Прерывание стрима применения: родительский контроллер — LogViewer в
+  // oneShot-режиме живёт не по `visible`, а по abortSignal.
+  const applyAbortRef = useRef<AbortController | null>(null);
+  // Последний статус стрима — чтобы requestCloseApply знал, нужен ли confirm.
+  const applyStatusRef = useRef<LogViewerStatus>('loading');
 
   // Последовательный polling: следующий запрос только после завершения
   // предыдущего. На скрытой вкладке (keep-alive) опрос полностью остановлен.
   // История нагрузки грузится тем же тиком, но её ошибки тихие — графики
-  // декоративные, при сбое остаётся последнее нарисованное. Обновления
-  // пакетов — там же: снимок кэшируется на сервере 60 с, отдельный тик не нужен.
+  // декоративные, при сбое остаётся последнее нарисованное.
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
     let timer = 0;
     const tick = async () => {
-      const [mRes, hRes, pRes] = await Promise.allSettled([
+      const [mRes, hRes] = await Promise.allSettled([
         fetchMetrics(profile.id),
         fetchMetricsHistory(profile.id),
-        fetchPackages(profile.id),
       ]);
       if (cancelled) return;
       if (mRes.status === 'fulfilled') {
@@ -185,9 +194,6 @@ export function OverviewPage({ profile, visible, onAskAgent }: Props) {
       }
       if (hRes.status === 'fulfilled') {
         setHistory(hRes.value.samples);
-      }
-      if (pRes.status === 'fulfilled') {
-        setPackages(pRes.value);
       }
       if (!cancelled) {
         timer = window.setTimeout(tick, POLL_INTERVAL_MS);
@@ -200,23 +206,66 @@ export function OverviewPage({ profile, visible, onAskAgent }: Props) {
     };
   }, [profile.id, visible, reloadKey]);
 
+  // Обновления пакетов — отдельный медленный таймер (не блокирует тик метрик);
+  // ошибки тихие — карточка остаётся с последним снимком. reloadKey — чтобы
+  // после применения (инвалидации серверного кэша) refetch случился сразу.
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    let timer = 0;
+    const tickPackages = async () => {
+      try {
+        const p = await fetchPackages(profile.id);
+        if (!cancelled) setPackages(p);
+      } catch {
+        /* тихие ошибки */
+      }
+      if (!cancelled) {
+        timer = window.setTimeout(tickPackages, PACKAGES_POLL_MS);
+      }
+    };
+    tickPackages();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [profile.id, visible, reloadKey]);
+
   // Стабильность identity обязательна: LogViewer перезапускает стрим при
   // смене buildRequest, а для oneShot это повторный запуск мутации.
   const buildApplyRequest = useCallback(
-    (_follow: boolean): { url: string; init?: RequestInit } =>
-      packagesApplyRequest(profile.id, applyPassword || undefined),
+    (): { url: string; init?: RequestInit } => packagesApplyRequest(profile.id, applyPassword || undefined),
     [profile.id, applyPassword],
   );
 
   const startApply = () => {
+    applyAbortRef.current = new AbortController();
+    applyStatusRef.current = 'loading';
     setConfirmApply(false);
     setApplying(true);
   };
 
-  const closeApply = () => {
+  const finishApply = () => {
+    // Прерывание идущего стрима (если он ещё жив) и закрытие модалки.
+    applyAbortRef.current?.abort();
+    // Пароль не живёт в стейте дольше модалки — следующее подтверждение
+    // начинается с пустого поля.
+    setApplyPassword('');
     setApplying(false);
+    setConfirmCloseApply(false);
     // Серверный кэш снимка уже сброшен инвалидацией — немедленный refetch.
     setReloadKey((k) => k + 1);
+  };
+
+  // Закрытие просмотрщика: пока стрим выполняется — подтверждение (клик по
+  // оверлею при этом вообще не закрывает: Modal dismissable={false}).
+  const requestCloseApply = () => {
+    const s = applyStatusRef.current;
+    if (s === 'stopped' || s === 'error') {
+      finishApply();
+    } else {
+      setConfirmCloseApply(true);
+    }
   };
 
   const mem = metrics?.memory;
@@ -363,28 +412,30 @@ export function OverviewPage({ profile, visible, onAskAgent }: Props) {
             ) : packages.updates.length === 0 ? (
               <div className="overview-sub">Обновлений нет</div>
             ) : (
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Пакет</th>
-                    <th>Версия (текущая → доступная)</th>
-                    <th>Источник</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {packages.updates.map((u) => (
-                    <tr key={u.name}>
-                      <td>
-                        <code>{u.name}</code>
-                      </td>
-                      <td>
-                        {u.current ?? '—'} → {u.available}
-                      </td>
-                      <td className="muted">{u.source ?? '—'}</td>
+              <div className="packages-table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Пакет</th>
+                      <th>Версия (текущая → доступная)</th>
+                      <th>Источник</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {packages.updates.map((u) => (
+                      <tr key={u.name}>
+                        <td>
+                          <code>{u.name}</code>
+                        </td>
+                        <td>
+                          {u.current ?? '—'} → {u.available}
+                        </td>
+                        <td className="muted">{u.source ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </div>
@@ -425,23 +476,50 @@ export function OverviewPage({ profile, visible, onAskAgent }: Props) {
       )}
 
       {applying && packages?.pm && (
-        <Modal title={`Обновление пакетов (${packages.pm})`} onClose={closeApply} wide>
+        <Modal
+          title={`Обновление пакетов (${packages.pm})`}
+          onClose={requestCloseApply}
+          wide
+          dismissable={false}
+        >
           <LogViewer
+            kind="request"
             title={applyLogLabel(packages.pm)}
             buildRequest={buildApplyRequest}
+            abortSignal={applyAbortRef.current?.signal ?? new AbortController().signal}
             visible={visible}
-            oneShot
             logPath={applyLogLabel(packages.pm)}
             serverName={profile.name}
+            onStatusChange={(s) => {
+              applyStatusRef.current = s;
+            }}
             onAskAgent={(text) => {
-              // Просмотрщик закрываем: панель агента раскрывается под ним.
-              setApplying(false);
+              // Модалку НЕ закрываем: для oneShot закрытие = прерывание
+              // мутации; панель агента раскрывается справа, вывод остаётся.
               onAskAgent?.(text, 'send');
             }}
           />
           <div className="modal-actions">
-            <button className="btn" onClick={closeApply}>
+            <button className="btn" onClick={requestCloseApply}>
               Закрыть
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {confirmCloseApply && (
+        <Modal title="Прервать обновление?" onClose={() => setConfirmCloseApply(false)}>
+          <p>Обновление пакетов ещё выполняется. Прервать его?</p>
+          <p className="critical-warning">
+            ⚠ Незавершённое обновление может оставить пакеты в промежуточном состоянии. Если обновление почти
+            закончилось, лучше дождаться завершения.
+          </p>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setConfirmCloseApply(false)}>
+              Продолжить обновление
+            </button>
+            <button className="btn btn-danger" onClick={finishApply}>
+              Прервать
             </button>
           </div>
         </Modal>
