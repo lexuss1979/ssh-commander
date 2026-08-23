@@ -592,6 +592,51 @@ export function runSnippet(
   return api('/api/snippets/run', { method: 'POST', body: JSON.stringify(params), signal });
 }
 
+// Обновления пакетов (эпик 19)
+export type PackageManager = 'apt' | 'dnf' | 'yum' | 'apk';
+
+export interface PackageUpdate {
+  name: string;
+  current: string | null;
+  available: string;
+  source: string | null;
+}
+
+export interface PackagesSnapshot {
+  timestamp: number;
+  pm: PackageManager | null;
+  updates: PackageUpdate[];
+  rebootRequired: boolean;
+  rebootPackages: string[];
+  indexAgeMs: number | null;
+  error?: string;
+}
+
+/** Снимок обновлений (кэш 60 с на сервере) — карточка и раздел «Обзора». */
+export function fetchPackages(profileId: string): Promise<PackagesSnapshot> {
+  return api<PackagesSnapshot>(`/api/packages/updates?profileId=${encodeURIComponent(profileId)}`);
+}
+
+/**
+ * Запрос применения обновлений: POST-стрим (chunked text/plain) с паролем в
+ * JSON-теле. Возвращается не fetch, а параметры для LogViewer.buildRequest —
+ * вызывающий стабилизирует useCallback (identity пропа перезапускала бы
+ * мутацию).
+ */
+export function packagesApplyRequest(
+  profileId: string,
+  sudoPassword: string | undefined,
+): { url: string; init?: RequestInit } {
+  return {
+    url: `/api/packages/apply?profileId=${encodeURIComponent(profileId)}`,
+    init: {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sudoPassword: sudoPassword || undefined }),
+    },
+  };
+}
+
 // Вкладка «Базы данных» (эпик 12, итерация 2: явные креденшалы)
 export type DbEngine = 'postgres' | 'mysql';
 export type MysqlFlavor = 'mysql' | 'mariadb';

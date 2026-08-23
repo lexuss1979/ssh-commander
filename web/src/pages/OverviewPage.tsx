@@ -1,10 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchMetrics, fetchMetricsHistory, processRenice, processSignal } from '../api';
-import type { HistorySample, ProcessSignal, ServerMetrics } from '../api';
-import type { Profile } from '../types';
+import {
+  fetchMetrics,
+  fetchMetricsHistory,
+  fetchPackages,
+  packagesApplyRequest,
+  processRenice,
+  processSignal,
+} from '../api';
+import type { HistorySample, PackagesSnapshot, ProcessSignal, ServerMetrics } from '../api';
+import type { AgentAskMode, Profile } from '../types';
 import { useSortBy, SortableTh } from '../hooks/useSortBy';
 import { LoadChart } from '../components/Sparkline';
 import { DiskUsageModal } from '../components/DiskUsageModal';
+import { LogViewer, type LogViewerStatus } from '../components/LogViewer';
 import { Modal } from '../components/Modal';
 
 interface Props {
@@ -13,9 +21,14 @@ interface Props {
   visible: boolean;
   /** Переход на путь во вкладке «Файлы» (из навигатора «Что занимает»). */
   onOpenInFiles: (path: string) => void;
+  onAskAgent?: (text: string, mode?: AgentAskMode) => void;
 }
 
 const POLL_INTERVAL_MS = 3000;
+// Обновления пакетов опрашиваются отдельным (медленным) таймером, а не тиком
+// метрик: снимок — это 2 exec'а + SFTP-stat, и раз в минуту он не должен
+// стопорить тик CPU/памяти/дисков. Серверный кэш 60 с гасит повторы.
+const PACKAGES_POLL_MS = 60000;
 
 /** Строка таблицы процессов (элемент `metrics.processes`). */
 type ProcRow = ServerMetrics['processes'][number];
@@ -64,9 +77,99 @@ export function Meter({ percent }: { percent: number | null }) {
   );
 }
 
-export function OverviewPage({ profile, visible, onOpenInFiles }: Props) {
+/** Имя команды применения — для заголовка просмотрщика и контекста «В чат». */
+export function applyLogLabel(pm: 'apt' | 'dnf' | 'yum' | 'apk'): string {
+  switch (pm) {
+    case 'apt':
+      return 'apt-get upgrade';
+    case 'dnf':
+      return 'dnf upgrade';
+    case 'yum':
+      return 'yum upgrade';
+    case 'apk':
+      return 'apk upgrade';
+  }
+}
+
+/** Возраст индекса apt: «индекс не обновлялся» (файла нет) / «N дн назад». */
+function indexAgeText(ms: number | null): string {
+  if (ms === null) return 'индекс не обновлялся';
+  const days = ms / 86400000;
+  if (days >= 1) return `индекс обновлён ${Math.floor(days)} дн назад`;
+  const hours = ms / 3600000;
+  if (hours >= 1) return `индекс обновлён ${Math.floor(hours)} ч назад`;
+  return 'индекс обновлён недавно';
+}
+
+function PackagesCard({
+  packages,
+  onApply,
+  onScrollToList,
+}: {
+  packages: PackagesSnapshot | null;
+  onApply: () => void;
+  onScrollToList: () => void;
+}) {
+  const count = packages?.updates.length ?? 0;
+  const pm = packages?.pm;
+  const reboot = packages?.rebootRequired;
+  return (
+    <div className="overview-card">
+      <div className="overview-card-title">Обновления</div>
+      {!packages ? (
+        <div className="overview-sub">Загрузка…</div>
+      ) : pm === null ? (
+        <div className="overview-sub">Обновления не проверяются</div>
+      ) : (
+        <>
+          <div className="overview-big">
+            {count} {pluralUpdates(count)}
+          </div>
+          <div className="overview-sub">
+            менеджер: <code>{pm}</code>
+            {pm === 'apt' && (
+              <> · {indexAgeText(packages.indexAgeMs)}</>
+            )}
+          </div>
+          {reboot && (
+            <div
+              className="packages-reboot"
+              title={packages.rebootPackages.length > 0 ? packages.rebootPackages.join(', ') : undefined}
+            >
+              ⚠ нужен рестарт сервера
+            </div>
+          )}
+          <div className="packages-actions">
+            <button
+              className="btn btn-danger btn-small"
+              onClick={onApply}
+              disabled={count === 0}
+              title={count === 0 ? 'обновлений нет' : undefined}
+            >
+              Обновить всё
+            </button>
+            <button className="btn btn-ghost btn-small" onClick={onScrollToList}>
+              Список
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function pluralUpdates(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'обновление';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'обновления';
+  return 'обновлений';
+}
+
+export function OverviewPage({ profile, visible, onOpenInFiles, onAskAgent }: Props) {
   const [metrics, setMetrics] = useState<ServerMetrics | null>(null);
   const [history, setHistory] = useState<HistorySample[]>([]);
+  const [packages, setPackages] = useState<PackagesSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   // Навигатор «Что занимает»: точка монтирования выбранной строки диска.
@@ -93,6 +196,18 @@ export function OverviewPage({ profile, visible, onOpenInFiles }: Props) {
       if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
     };
   }, []);
+  const updatesSectionRef = useRef<HTMLDivElement>(null);
+  // Применение обновлений: подтверждение → просмотрщик живого вывода.
+  const [confirmApply, setConfirmApply] = useState(false);
+  const [applyPassword, setApplyPassword] = useState('');
+  const [applying, setApplying] = useState(false);
+  // Подтверждение закрытия просмотрщика, пока обновление ещё выполняется.
+  const [confirmCloseApply, setConfirmCloseApply] = useState(false);
+  // Прерывание стрима применения: родительский контроллер — LogViewer в
+  // oneShot-режиме живёт не по `visible`, а по abortSignal.
+  const applyAbortRef = useRef<AbortController | null>(null);
+  // Последний статус стрима — чтобы requestCloseApply знал, нужен ли confirm.
+  const applyStatusRef = useRef<LogViewerStatus>('loading');
 
   // Последовательный polling: следующий запрос только после завершения
   // предыдущего. На скрытой вкладке (keep-alive) опрос полностью остановлен.
@@ -127,6 +242,68 @@ export function OverviewPage({ profile, visible, onOpenInFiles }: Props) {
       window.clearTimeout(timer);
     };
   }, [profile.id, visible, reloadKey]);
+
+  // Обновления пакетов — отдельный медленный таймер (не блокирует тик метрик);
+  // ошибки тихие — карточка остаётся с последним снимком. reloadKey — чтобы
+  // после применения (инвалидации серверного кэша) refetch случился сразу.
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    let timer = 0;
+    const tickPackages = async () => {
+      try {
+        const p = await fetchPackages(profile.id);
+        if (!cancelled) setPackages(p);
+      } catch {
+        /* тихие ошибки */
+      }
+      if (!cancelled) {
+        timer = window.setTimeout(tickPackages, PACKAGES_POLL_MS);
+      }
+    };
+    tickPackages();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [profile.id, visible, reloadKey]);
+
+  // Стабильность identity обязательна: LogViewer перезапускает стрим при
+  // смене buildRequest, а для oneShot это повторный запуск мутации.
+  const buildApplyRequest = useCallback(
+    (): { url: string; init?: RequestInit } => packagesApplyRequest(profile.id, applyPassword || undefined),
+    [profile.id, applyPassword],
+  );
+
+  const startApply = () => {
+    applyAbortRef.current = new AbortController();
+    applyStatusRef.current = 'loading';
+    setConfirmApply(false);
+    setApplying(true);
+  };
+
+  const finishApply = () => {
+    // Прерывание идущего стрима (если он ещё жив) и закрытие модалки.
+    applyAbortRef.current?.abort();
+    // Пароль не живёт в стейте дольше модалки — следующее подтверждение
+    // начинается с пустого поля.
+    setApplyPassword('');
+    setApplying(false);
+    setConfirmCloseApply(false);
+    // Серверный кэш снимка уже сброшен инвалидацией — немедленный refetch.
+    setReloadKey((k) => k + 1);
+  };
+
+  // Закрытие просмотрщика: пока стрим выполняется — подтверждение (клик по
+  // оверлею при этом вообще не закрывает: Modal dismissable={false}).
+  const requestCloseApply = () => {
+    const s = applyStatusRef.current;
+    if (s === 'stopped' || s === 'error') {
+      finishApply();
+    } else {
+      setConfirmCloseApply(true);
+    }
+  };
 
   const mem = metrics?.memory;
 
@@ -252,6 +429,12 @@ export function OverviewPage({ profile, visible, onOpenInFiles }: Props) {
                 </div>
               ))}
             </div>
+
+            <PackagesCard
+              packages={packages}
+              onApply={() => setConfirmApply(true)}
+              onScrollToList={() => updatesSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            />
           </div>
 
           <div className="overview-card overview-processes">
@@ -301,6 +484,42 @@ export function OverviewPage({ profile, visible, onOpenInFiles }: Props) {
               </tbody>
             </table>
           </div>
+
+          <div className="overview-card packages-section" ref={updatesSectionRef}>
+            <div className="overview-card-title">Доступные обновления</div>
+            {!packages ? (
+              <div className="overview-sub">Загрузка…</div>
+            ) : packages.pm === null ? (
+              <div className="overview-sub">Обновления не проверяются: {packages.error ?? 'менеджер не найден'}</div>
+            ) : packages.updates.length === 0 ? (
+              <div className="overview-sub">Обновлений нет</div>
+            ) : (
+              <div className="packages-table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Пакет</th>
+                      <th>Версия (текущая → доступная)</th>
+                      <th>Источник</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {packages.updates.map((u) => (
+                      <tr key={u.name}>
+                        <td>
+                          <code>{u.name}</code>
+                        </td>
+                        <td>
+                          {u.current ?? '—'} → {u.available}
+                        </td>
+                        <td className="muted">{u.source ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -333,6 +552,89 @@ export function OverviewPage({ profile, visible, onOpenInFiles }: Props) {
       )}
 
       {notice && <div className="toast toast-notice">{notice}</div>}
+      {confirmApply && packages?.pm && (
+        <Modal title="Обновить все пакеты" onClose={() => setConfirmApply(false)} dismissable={false}>
+          <p>
+            Будет выполнено обновление всех доступных пакетов (<code>{applyLogLabel(packages.pm)}</code>,{' '}
+            {packages.updates.length} шт).
+          </p>
+          <p className="critical-warning">
+            ⚠ Обновление может перезапустить службы и оборвать SSH-соединение (sshd/ядро). Закрытие окна вывода
+            прервёт обновление.
+          </p>
+          <label>
+            sudo-пароль (применение требует root)
+            <input
+              type="password"
+              value={applyPassword}
+              onChange={(e) => setApplyPassword(e.target.value)}
+              placeholder="оставьте пустым — команда без sudo, ошибка прав уйдёт в вывод"
+              autoComplete="off"
+            />
+            <span className="muted" style={{ fontSize: 12 }}>
+              {' '}передаётся только на этот запрос, в логи не попадает
+            </span>
+          </label>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setConfirmApply(false)}>
+              Отмена
+            </button>
+            <button className="btn btn-danger" onClick={startApply}>
+              Запустить
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {applying && packages?.pm && (
+        <Modal
+          title={`Обновление пакетов (${packages.pm})`}
+          onClose={requestCloseApply}
+          wide
+          dismissable={false}
+        >
+          <LogViewer
+            kind="request"
+            title={applyLogLabel(packages.pm)}
+            buildRequest={buildApplyRequest}
+            abortSignal={applyAbortRef.current?.signal ?? new AbortController().signal}
+            visible={visible}
+            logPath={applyLogLabel(packages.pm)}
+            serverName={profile.name}
+            onStatusChange={(s) => {
+              applyStatusRef.current = s;
+            }}
+            onAskAgent={(text) => {
+              // Модалку НЕ закрываем: для oneShot закрытие = прерывание
+              // мутации; панель агента раскрывается справа, вывод остаётся.
+              onAskAgent?.(text, 'send');
+            }}
+          />
+          <div className="modal-actions">
+            <button className="btn" onClick={requestCloseApply}>
+              Закрыть
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {confirmCloseApply && (
+        <Modal title="Прервать обновление?" onClose={() => setConfirmCloseApply(false)}>
+          <p>Обновление пакетов ещё выполняется. Прервать его?</p>
+          <p className="critical-warning">
+            ⚠ Незавершённое обновление может оставить пакеты в промежуточном состоянии. Если обновление почти
+            закончилось, лучше дождаться завершения.
+          </p>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setConfirmCloseApply(false)}>
+              Продолжить обновление
+            </button>
+            <button className="btn btn-danger" onClick={finishApply}>
+              Прервать
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

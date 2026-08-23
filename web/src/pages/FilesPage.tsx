@@ -686,6 +686,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
       {tailTarget !== null && (
         <Modal title={tailTarget} onClose={() => setTailTarget(null)} wide>
           <LogViewer
+            kind="url"
             title={tailTarget}
             buildUrl={buildTailUrl}
             visible={visible}

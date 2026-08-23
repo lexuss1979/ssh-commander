@@ -445,6 +445,7 @@ export default function App() {
                     showError={showError}
                     visible={tab === 'overview'}
                     onOpenInFiles={handleOpenInFiles}
+                    onAskAgent={handleAskAgent}
                   />
                 </div>
                 <div className={`tab-page ${tab === 'terminal' ? '' : 'hidden'}`}>

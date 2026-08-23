@@ -3,21 +3,27 @@ import { appendChunk, lastNChars, type LogBufferState } from '../log-buffer';
 
 const MAX_LINES = 5000;
 // Флеш буфера в стейт интервалом, а не на каждый чанк — батчинг против
-// ререндера на каждый кусок стрима.
+// ререндера на каждый кусок стрима. Интервал общий для обоих режимов и живёт
+// вне стрим-эффекта: oneShot-стрим переживает переключение вкладок, и флеш
+// не должен умирать вместе с его эффектом.
 const FLUSH_MS = 250;
 // Контекст для «В чат»: хвост отфильтрованного буфера до 4 КБ.
 const ASK_TAIL_CHARS = 4096;
 // Ручной скролл дальше от дна выключает автоскролл, возврат к дну — включает.
 const AUTOSCROLL_THRESHOLD_PX = 40;
 
-type Status = 'loading' | 'live' | 'stopped' | 'error';
+export type LogViewerStatus = 'loading' | 'live' | 'stopped' | 'error';
 
-interface Props {
+/**
+ * Обычный стрим (tail, journalctl) строится на `buildUrl` (`kind: 'url'`);
+ * мутирующий POST-стрим (эпик 19: применение обновлений) — на
+ * `buildRequest` + `abortSignal` (`kind: 'request'`, по сути oneShot).
+ * Дискриминированное объединение по `kind` делает состояние «не передан ни
+ * один» непредставимым (обязательный литерал — дискриминант).
+ */
+type Props = {
   /** Заголовок источника (для сноски, если не задан logPath). */
   title: string;
-  /** URL стрима; вызывающий стабилизирует useCallback, иначе identity
-   * пропа будет перезапускать стрим. */
-  buildUrl: (follow: boolean) => string;
   visible: boolean;
   onAskAgent?: (text: string) => void;
   /** Слот для дополнительных контролов тулбара (например «★ Закрепить»). */
@@ -25,13 +31,40 @@ interface Props {
   /** Путь файла для сообщения «В чат» — агент знает, что смотрит пользователь. */
   logPath?: string;
   serverName?: string;
-}
+  /** Терминальное состояние стрима — родителю (нужен ли confirm при закрытии). */
+  onStatusChange?: (status: LogViewerStatus) => void;
+} & (
+  | {
+      kind: 'url';
+      /** URL стрима; вызывающий стабилизирует useCallback, иначе identity
+       * пропа будет перезапускать стрим. */
+      buildUrl: (follow: boolean) => string;
+    }
+  | {
+      kind: 'request';
+      /**
+       * POST-стрим мутации (пароль — в теле запроса, не в URL). Обязательно
+       * стабилизировать useCallback с явными зависимостями — смена identity
+       * перезапустила бы стрим, то есть повторно выполнила мутацию.
+       */
+      buildRequest: () => { url: string; init?: RequestInit };
+      /**
+       * Сигнал прерывания: родитель рвёт стрим при закрытии модалки. Стрим
+       * НЕ завязан на `visible` и не рвётся cleanup'ом эффекта — переключение
+       * вкладок и StrictMode-перезапуск эффекта не должны убивать идущую
+       * мутацию (иначе `apt-get upgrade` обрывался бы при смене вкладки).
+       */
+      abortSignal: AbortSignal;
+    }
+);
 
-export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, logPath, serverName }: Props) {
+export function LogViewer(props: Props) {
+  const { title, visible, onAskAgent, toolbarExtra, logPath, serverName, onStatusChange } = props;
+  const oneShot = props.kind === 'request';
   const [follow, setFollow] = useState(true);
   const [autoscroll, setAutoscroll] = useState(true);
   const [filter, setFilter] = useState('');
-  const [status, setStatus] = useState<Status>('loading');
+  const [status, setStatus] = useState<LogViewerStatus>('loading');
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   const [lines, setLines] = useState<string[]>([]);
@@ -39,7 +72,17 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
   // чанка — иначе пустой лог и пометка об обрезке (обе без \n) терялись бы.
   const [pendingLine, setPendingLine] = useState('');
   const bufferRef = useRef<LogBufferState>({ lines: [], pending: '' });
+  const dirtyRef = useRef(false);
   const preRef = useRef<HTMLPreElement>(null);
+  // oneShot: guard «запуск ровно один на монтирование» — StrictMode в dev
+  // монтирует эффекты дважды, без guard'а POST (apt-get upgrade) ушёл бы
+  // двумя запросами. Abort в cleanup нет, поэтому первый (живой) fetch
+  // переживает двойной вызов; новый монтаж (повторное открытие модалки)
+  // получает свежий экземпляр ref.
+  const oneShotStartedRef = useRef(false);
+  // Подавление setState после размонтирования (в т.ч. StrictMode-перезапуск:
+  // эффект с [] переустанавливает флаг в false после двойного вызова).
+  const unmountedRef = useRef(false);
   // Метрики скролла прошлого события/эффекта. Клампинг браузера при сжатии
   // контента (фильтр, вытеснение кольцом) прижимает scrollTop к низу без
   // жеста пользователя — его подпись: упали ОБА, scrollHeight и scrollTop.
@@ -47,26 +90,47 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
   const lastMetricsRef = useRef({ height: 0, top: 0 });
 
   useEffect(() => {
-    // Вкладка скрыта (keep-alive) — стрим на паузе; возврат перезапускает
-    // его с чистым буфером. Рестарт (смена follow, retry) — тоже с чистым.
-    if (!visible) return;
-    const controller = new AbortController();
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+    };
+  }, []);
+
+  // Флеш буфера в стейт интервалом (батчинг против ререндера на каждый чанк).
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!dirtyRef.current) return;
+      dirtyRef.current = false;
+      if (unmountedRef.current) return;
+      setLines(bufferRef.current.lines);
+      setPendingLine(bufferRef.current.pending);
+    }, FLUSH_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const flushNow = () => {
+    if (unmountedRef.current) return;
+    setLines(bufferRef.current.lines);
+    setPendingLine(bufferRef.current.pending);
+  };
+
+  const finish = (nextStatus: LogViewerStatus, errText = '') => {
+    if (unmountedRef.current) return;
+    setStatus(nextStatus);
+    if (errText) setError(errText);
+    onStatusChange?.(nextStatus);
+  };
+
+  // Общий цикл стрима: fetch + reader + кольцевой буфер + статусы. Живёт в
+  // ref'ах и не привязан к идентичности вызова — оба эффекта зовут его
+  // один раз за свой жизненный цикл.
+  const runStream = (opts: { url: string; init?: RequestInit; signal: AbortSignal }) => {
     bufferRef.current = { lines: [], pending: '' };
     setLines([]);
     setPendingLine('');
     setStatus('loading');
     setError('');
-    let cancelled = false;
-    let dirty = false;
-    const flush = () => {
-      if (!dirty) return;
-      dirty = false;
-      setLines(bufferRef.current.lines);
-      setPendingLine(bufferRef.current.pending);
-    };
-    const flushTimer = window.setInterval(flush, FLUSH_MS);
-
-    void fetch(buildUrl(follow), { credentials: 'same-origin', signal: controller.signal })
+    void fetch(opts.url, { credentials: 'same-origin', signal: opts.signal, ...(opts.init ?? {}) })
       .then(async (res) => {
         if (!res.ok || !res.body) {
           let message = res.statusText;
@@ -77,7 +141,7 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
           }
           throw new Error(message);
         }
-        setStatus('live');
+        finish('live');
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         for (;;) {
@@ -85,30 +149,56 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
           if (done) break;
           const buf = bufferRef.current;
           bufferRef.current = appendChunk(buf.lines, buf.pending, decoder.decode(value, { stream: true }), MAX_LINES);
-          dirty = true;
+          dirtyRef.current = true;
         }
-        if (!cancelled) {
+        if (!unmountedRef.current) {
           // Финальный флеш: продолжения не будет, неполная строка — весь
           // остаток вывода (частый случай у follow=0-снимка).
-          dirty = true;
-          flush();
-          setStatus('stopped');
+          dirtyRef.current = true;
+          flushNow();
+          finish('stopped');
         }
       })
       .catch((err) => {
-        if (cancelled || err.name === 'AbortError') return;
-        dirty = true;
-        flush();
-        setStatus('error');
-        setError((err as Error).message);
+        if ((err as Error).name === 'AbortError') return; // родитель закрыл модалку
+        if (unmountedRef.current) return;
+        dirtyRef.current = true;
+        flushNow();
+        finish('error', (err as Error).message);
       });
+  };
 
-    return () => {
-      cancelled = true;
-      controller.abort();
-      window.clearInterval(flushTimer);
-    };
-  }, [buildUrl, follow, visible, retry]);
+  // Сужение дискриминированного пропса до конкретных значений: локальные
+  // переменные проще для TS в массивах зависимостей, чем доступ через union.
+  const buildUrl = props.kind === 'url' ? props.buildUrl : undefined;
+  const buildRequest = props.kind === 'request' ? props.buildRequest : undefined;
+  const abortSignal = props.kind === 'request' ? props.abortSignal : undefined;
+
+  // Обычные стримы: пауза при скрытой вкладке, рестарт при смене
+  // follow/retry/возврате видимости — cleanup рвёт fetch (для follow-стрима
+  // перезапуск безвреден).
+  useEffect(() => {
+    if (!buildUrl) return;
+    if (!visible) return;
+    const controller = new AbortController();
+    runStream({ url: buildUrl(follow), signal: controller.signal });
+    return () => controller.abort();
+    // runStream намеренно не в зависимостях: он пересоздаётся каждый рендер,
+    // а стрим должен жить по своим стабильным пропсам.
+  }, [buildUrl, visible, follow, retry]);
+
+  // kind='request' (мутация): старт ровно один раз на монтирование, жизнь
+  // стрима НЕ зависит от visible и перезапусков эффекта; прерывание — только
+  // по abortSignal родителя (закрытие модалки) или естественному завершению
+  // команды. Cleanup не делает abort: StrictMode-двойной вызов эффекта не
+  // должен рвать первый (живой) POST.
+  useEffect(() => {
+    if (!buildRequest || !abortSignal) return;
+    if (oneShotStartedRef.current) return;
+    oneShotStartedRef.current = true;
+    const { url, init } = buildRequest();
+    runStream({ url, init, signal: abortSignal });
+  }, [buildRequest, abortSignal]);
 
   // Автоскролл после каждого флеша.
   useEffect(() => {
@@ -170,7 +260,9 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
 
   const statusText =
     status === 'stopped'
-      ? 'остановлено'
+      ? oneShot
+        ? 'завершено'
+        : 'остановлено'
       : status === 'error'
         ? error
         : 'подключено…';
@@ -178,10 +270,12 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
   return (
     <div className="log-viewer">
       <div className="logs-toolbar">
-        <label className="check">
-          <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
-          Следовать
-        </label>
+        {!oneShot && (
+          <label className="check">
+            <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
+            Следовать
+          </label>
+        )}
         <label className="check">
           <input type="checkbox" checked={autoscroll} onChange={(e) => setAutoscroll(e.target.checked)} />
           Автоскролл
@@ -198,7 +292,7 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
         {onAskAgent && (
           <button className="btn btn-mini" onClick={ask}>В чат</button>
         )}
-        {(status === 'error' || status === 'stopped') && (
+        {!oneShot && (status === 'error' || status === 'stopped') && (
           <button className="btn btn-mini" onClick={() => setRetry((r) => r + 1)}>Переподключиться</button>
         )}
       </div>

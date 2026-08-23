@@ -4,7 +4,6 @@ import {
   ServiceActionError,
   assertValidUnitName,
   classifyActionFailure,
-  classifySudoProbe,
   clampTail,
   collectServices,
   getServiceDetail,
@@ -19,12 +18,12 @@ import {
   readServiceLogs,
   runServiceAction,
   serviceDetailCommand,
-  sudoProbeCommand,
   sudoSystemctlCommand,
   systemctlCommand,
   unitNameValid,
   type ExecFn,
 } from '../src/services/systemd.js';
+import { classifySudoProbe, sudoProbeCommand } from '../src/services/sudo.js';
 import type { ExecResult, Profile } from '../src/types.js';
 
 const profile: Profile = {

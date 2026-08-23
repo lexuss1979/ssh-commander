@@ -43,6 +43,15 @@ class FakeEmitter {
 export class FakeChannel extends FakeEmitter {
   stderr = new FakeEmitter();
   closeCalls = 0;
+  /** Записанный в канал stdin (для проверок «пароль только в stdin»). */
+  stdinWritten = '';
+  endCalls = 0;
+  write(data: string | Buffer): void {
+    this.stdinWritten += data.toString();
+  }
+  end(): void {
+    this.endCalls++;
+  }
   close(): void {
     this.closeCalls++;
   }
@@ -70,6 +79,13 @@ export class FakeClient extends FakeEmitter {
   static autoCloseNext = false;
   /** Все новые клиенты отдают exec-каналу данные и close (для мульти-профильных тестов). */
   static autoCloseAll = false;
+  /**
+   * Командный маршрутизатор exec (для маршрутных тестов, которым нужен
+   * разный ответ по команде: детект менеджера, зонд sudo, снимок, apply).
+   * Когда задан, вызывается вместо авто-снимка; тест сам эмитит data/close.
+   * Сбрасывается в afterEach.
+   */
+  static execRouter: ((cmd: string, ch: FakeChannel) => void) | null = null;
   channels: FakeChannel[] = [];
   autoClose: boolean;
   constructor() {
@@ -84,11 +100,16 @@ export class FakeClient extends FakeEmitter {
   sftp(cb: (err: null, sftp: FakeSftp) => void): void {
     queueMicrotask(() => cb(null, new FakeSftp()));
   }
-  exec(_cmd: string, cb: (err: null, ch: FakeChannel) => void): void {
+  exec(cmd: string, cb: (err: null, ch: FakeChannel) => void): void {
     const ch = new FakeChannel();
     this.channels.push(ch);
     queueMicrotask(() => {
       cb(null, ch);
+      const router = FakeClient.execRouter;
+      if (router) {
+        router(cmd, ch);
+        return;
+      }
       if (this.autoClose) {
         queueMicrotask(() => {
           ch.emit('data', Buffer.from('snapshot line 1\nsnapshot line 2'));

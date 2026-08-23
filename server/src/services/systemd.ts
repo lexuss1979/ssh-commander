@@ -1,10 +1,6 @@
 import { exec } from '../ssh/manager.js';
 import { shq } from '../util/shell.js';
 import { classifySudoProbe, sudoProbeCommand } from './sudo.js';
-// Реэкспорт sudo-зонда: публичный API systemd.ts не меняется (потребители —
-// routes/services.ts и systemd.test.ts — импортируют отсюда как раньше).
-export { classifySudoProbe, sudoProbeCommand } from './sudo.js';
-export type { SudoProbeResult } from './sudo.js';
 import type { ExecResult, Profile } from '../types.js';
 
 /**
