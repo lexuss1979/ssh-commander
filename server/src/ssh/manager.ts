@@ -157,6 +157,12 @@ export interface ExecStreamHandle {
 
 /**
  * Run a command and stream stdout chunks. Useful for `docker logs -f`.
+ *
+ * Транспорт исправлен (эпик 13, по плану эпика 14): `handle.code` — настоящий
+ * промис с первого момента существования handle (не `Promise.resolve(null)`),
+ * резолвится кодом выхода при закрытии канала. Роут может подписаться на него
+ * до открытия канала — иначе `res.end()` срабатывал бы до первого чанка и
+ * стрим отдавал пустоту.
  */
 export function execStream(
   profile: Profile,
@@ -165,8 +171,13 @@ export function execStream(
 ): ExecStreamHandle {
   let channel: ClientChannel | null = null;
   let closed = false;
+  let resolveCode: (code: number | null) => void = () => {
+    /* set below */
+  };
   const handle: ExecStreamHandle = {
-    code: Promise.resolve(null),
+    code: new Promise<number | null>((resolve) => {
+      resolveCode = resolve;
+    }),
     close: () => {
       closed = true;
       if (channel) {
@@ -184,6 +195,7 @@ export function execStream(
       client.exec(command, (err, ch) => {
         if (err) {
           onChunk(`SSH exec error: ${err.message}\n`, true);
+          resolveCode(null);
           return;
         }
         // close() may have been called while exec() was in flight; kill the
@@ -194,20 +206,22 @@ export function execStream(
           } catch {
             /* noop */
           }
+          resolveCode(null);
           return;
         }
         channel = ch;
         channel.on('data', (d: Buffer) => onChunk(d.toString(), false));
         channel.stderr.on('data', (d: Buffer) => onChunk(d.toString(), true));
-        handle.code = new Promise<number | null>((resolve) => {
-          ch.on('close', (exitCode: number | null) => resolve(exitCode));
-        });
+        ch.on('close', (exitCode: number | null) => resolveCode(exitCode));
         channel.on('error', () => {
           /* handled by close */
         });
       });
     })
-    .catch((e) => onChunk(`${String(e.message ?? e)}\n`, true));
+    .catch((e) => {
+      onChunk(`${String(e.message ?? e)}\n`, true);
+      resolveCode(null);
+    });
 
   return handle;
 }

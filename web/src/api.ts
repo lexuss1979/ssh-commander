@@ -393,6 +393,76 @@ export async function fetchTerminalHistory(profileId: string, limit = 100): Prom
   return data.commands;
 }
 
+// Вкладка «Службы» (эпик 13)
+export interface UnitInfo {
+  /** Имя unit'а с суффиксом: 'nginx.service'. */
+  name: string;
+  description: string | null;
+  /** loaded / not-found / error / null (не загружен). */
+  load: string | null;
+  /** active / inactive / activating / failed / null. */
+  active: string | null;
+  /** running / dead / exited / failed / null. */
+  sub: string | null;
+  /** enabled / disabled / masked / static / indirect / generated / alias / null. */
+  enabled: string | null;
+}
+
+export interface ServicesSnapshot {
+  timestamp: number;
+  available: boolean;
+  /** Причина недоступности systemd — для заглушки UI. */
+  reason?: string;
+  units: UnitInfo[];
+}
+
+export interface ServiceDetail {
+  name: string;
+  /** Raw-вывод `systemctl status` — для человека. */
+  status: string;
+  /** Значения полей `systemctl show`; отсутствующие — null. */
+  show: Record<string, string | null>;
+}
+
+export type ServiceAction = 'start' | 'stop' | 'restart' | 'reload' | 'enable' | 'disable' | 'reset-failed';
+
+/** Снимок служб сервера (вкладка «Службы»). */
+export function fetchServices(profileId: string): Promise<ServicesSnapshot> {
+  return api<ServicesSnapshot>(`/api/services?profileId=${encodeURIComponent(profileId)}`);
+}
+
+/** Деталь unit'а: raw-статус + сводка полей show. */
+export function fetchServiceDetail(profileId: string, unit: string): Promise<ServiceDetail> {
+  return api<ServiceDetail>(
+    `/api/services/${encodeURIComponent(unit)}?profileId=${encodeURIComponent(profileId)}`,
+  );
+}
+
+/**
+ * Действие над unit'ом. Ошибки 400 (текст systemd/пользовательские причины)
+ * показываются как есть; 502 сервер уже отдаёт с текстом «Сервер недоступен:
+ * <детали>» — пробрасываем целиком, чтобы диагностика (в т.ч. таймаут из
+ * п. 2 ревью) не терялась.
+ */
+export async function serviceAction(
+  profileId: string,
+  unit: string,
+  action: ServiceAction,
+  sudoPassword?: string,
+): Promise<{ ok: boolean; output: string }> {
+  return api(`/api/services/${encodeURIComponent(unit)}/action?profileId=${encodeURIComponent(profileId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ action, sudoPassword }),
+  });
+}
+
+/** URL журнала unit'а для просмотрщика (fetch + reader, chunked text/plain). */
+export function serviceLogsUrl(profileId: string, unit: string, tail: number, follow: boolean): string {
+  const params = new URLSearchParams({ profileId, tail: String(tail) });
+  if (follow) params.set('follow', '1');
+  return `/api/services/${encodeURIComponent(unit)}/logs?${params}`;
+}
+
 // Вкладка «Базы данных» (эпик 12, итерация 2: явные креденшалы)
 export type DbEngine = 'postgres' | 'mysql';
 export type MysqlFlavor = 'mysql' | 'mariadb';

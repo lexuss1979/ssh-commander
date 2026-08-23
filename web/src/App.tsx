@@ -6,6 +6,7 @@ import { ServersPage } from './pages/ServersPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { PortsPage } from './pages/PortsPage';
 import { CronPage } from './pages/CronPage';
+import { ServicesPage } from './pages/ServicesPage';
 import { DatabasesPage } from './pages/DatabasesPage';
 import { TerminalPage } from './pages/TerminalPage';
 import { FilesPage } from './pages/FilesPage';
@@ -13,7 +14,7 @@ import { DockerPage } from './pages/DockerPage';
 import { AgentPage } from './pages/AgentPage';
 import { ProfileModal } from './components/ProfileModal';
 
-type Tab = 'servers' | 'overview' | 'terminal' | 'files' | 'docker' | 'databases' | 'ports' | 'cron';
+type Tab = 'servers' | 'overview' | 'terminal' | 'files' | 'docker' | 'databases' | 'ports' | 'cron' | 'services';
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'overview', label: 'Обзор' },
@@ -23,6 +24,7 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'databases', label: 'Базы данных' },
   { id: 'ports', label: 'Порты' },
   { id: 'cron', label: 'Cron' },
+  { id: 'services', label: 'Службы' },
 ];
 
 const AGENT_MIN_WIDTH = 360;
@@ -463,6 +465,14 @@ export default function App() {
                     profile={activeProfile}
                     showError={showError}
                     visible={tab === 'cron'}
+                  />
+                </div>
+                <div className={`tab-page ${tab === 'services' ? '' : 'hidden'}`}>
+                  <ServicesPage
+                    key={activeProfile.id}
+                    profile={activeProfile}
+                    showError={showError}
+                    visible={tab === 'services'}
                   />
                 </div>
               </>

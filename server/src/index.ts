@@ -18,6 +18,7 @@ import { portsRouter } from './routes/ports.js';
 import { tunnelsRouter } from './routes/tunnels.js';
 import { overviewRouter } from './routes/overview.js';
 import { cronRouter } from './routes/cron.js';
+import { servicesRouter } from './routes/services.js';
 import { terminalRouter } from './routes/terminal.js';
 import { dbRouter } from './routes/db.js';
 import { requireProfile } from './profiles.js';
@@ -46,6 +47,7 @@ app.use('/api/ports', requireAuth, portsRouter);
 app.use('/api/tunnels', requireAuth, tunnelsRouter);
 app.use('/api/overview', requireAuth, overviewRouter);
 app.use('/api/cron', requireAuth, cronRouter);
+app.use('/api/services', requireAuth, servicesRouter);
 app.use('/api/terminal', requireAuth, terminalRouter);
 app.use('/api/db', requireAuth, dbRouter);
 

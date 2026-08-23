@@ -359,11 +359,21 @@ button {
   border-bottom: 1px solid var(--border);
   background: var(--bg-raised);
   min-height: 44px;
+  min-width: 0;
 }
 
+/* Вкладок стало много (в т.ч. «Службы») — при открытой панели агента таббар
+   не должен уводить крайние вкладки за экран: скролл вместо обрезки. */
 .topbar-tabs {
   display: flex;
   gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.topbar-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .topbar-tab {
@@ -2906,4 +2916,111 @@ body.resizing-agent {
   .db-grid-wrap {
     min-height: 260px;
   }
+}
+
+/* === Вкладка «Службы» (эпик 13): systemd === */
+
+/* Бейдж статуса unit'а: running — зелёный, failed — красный, остальное нейтральный */
+.status-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.status-badge.running {
+  color: var(--ok);
+  border-color: var(--ok-soft-border);
+}
+
+.status-badge.failed {
+  color: var(--danger);
+  border-color: var(--danger-soft-border);
+}
+
+/* Панель детали unit'а: между тулбаром и таблицей */
+.services-detail {
+  border-bottom: 1px solid var(--border);
+  padding: 12px 16px;
+  background: var(--bg-raised);
+}
+
+.services-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.services-detail-name code {
+  font-size: 13px;
+}
+
+.services-detail-close {
+  margin-left: auto;
+}
+
+.services-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.services-detail-loading {
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+
+/* Сетка полей `systemctl show` детали — мелкими ячейками */
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px 16px;
+  margin: 12px 0;
+}
+
+.detail-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.detail-cell .muted {
+  font-size: 11px;
+}
+
+.detail-value {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: Menlo, Consolas, "JetBrains Mono", "Fira Code", monospace;
+}
+
+/* Raw-вывод `systemctl status` — компактнее общего logs-view */
+.services-status {
+  min-height: 120px;
+  max-height: 260px;
+  margin-top: 4px;
+}
+
+/* Жирное предупреждение для критичных unit'ов в модалке подтверждения */
+.critical-warning {
+  color: var(--danger);
+  font-weight: 600;
+  border: 1px solid var(--danger-soft-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: var(--bg-input);
+}
+
+/* Подсказка про группы журнала под просмотрщиком */
+.services-log-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
 }

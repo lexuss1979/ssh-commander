@@ -272,6 +272,88 @@ esac
     }
   }
 
+  console.log('== services (systemd) ==');
+  // Стенд (linuxserver/openssh-server) обычно без systemd — снимок адаптивный:
+  // проверяем форму ответа; деталь/журнал/действия — только если systemd доступен.
+  const services0 = await req(`/api/services?${P()}`);
+  check(
+    'services snapshot shape',
+    typeof services0.available === 'boolean' &&
+      Array.isArray(services0.units) &&
+      typeof services0.timestamp === 'number',
+    JSON.stringify(services0).slice(0, 200),
+  );
+  if (services0.available) {
+    const unit = services0.units[0];
+    check('services has units', !!unit?.name, JSON.stringify(services0.units).slice(0, 200));
+    if (unit) {
+      const detail = await req(`/api/services/${encodeURIComponent(unit.name)}?${P()}`);
+      check(
+        'services detail',
+        detail.name === unit.name && typeof detail.status === 'string' && !!detail.show,
+        JSON.stringify(detail).slice(0, 200),
+      );
+      const logRes = await fetch(
+        `${BASE}/api/services/${encodeURIComponent(unit.name)}/logs?${P({ tail: '100' })}`,
+        { headers: { cookie } },
+      );
+      const logText = await logRes.text();
+      check('services journal (one-shot)', logRes.status === 200 && typeof logText === 'string', `${logRes.status}: ${logText.slice(0, 120)}`);
+
+      // Действия — только на безопасном тестовом unit'е (sshd на стенде переживает restart).
+      const sshd = services0.units.find((u) => u.name === 'sshd.service' || u.name === 'ssh.service');
+      if (sshd) {
+        const act = await req(`/api/services/${encodeURIComponent(sshd.name)}/action?${P()}`, {
+          method: 'POST',
+          body: JSON.stringify({ action: 'restart' }),
+        });
+        check('services restart sshd', act.ok === true, JSON.stringify(act));
+      } else {
+        console.log('  skip: на стенде нет sshd.service/ssh.service — действие не проверяется');
+      }
+    }
+  } else {
+    check('services unavailable reason', typeof services0.reason === 'string', JSON.stringify(services0));
+  }
+
+  // Отдельный polkit-кейс (Debian/Ubuntu-стенд с пользователем без прав):
+  //   SERVICES_POLKIT=1 node test/integration.manual.mjs
+  // Требует реального systemd и unit'а, который без root не перезапускается.
+  if (process.env.SERVICES_POLKIT === '1' && services0.available) {
+    const target = process.env.SERVICES_UNIT ?? 'nginx.service';
+    try {
+      await req(`/api/services/${encodeURIComponent(target)}/action?${P()}`, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'restart' }),
+      });
+      check('polkit: без sudo-пароля → 400 «укажите sudo-пароль»', false, 'действие прошло без пароля');
+    } catch (err) {
+      check('polkit: без sudo-пароля → 400 «укажите sudo-пароль»', String(err).includes('400'), String(err));
+    }
+    if (process.env.SUDO_PASSWORD) {
+      const ok = await req(`/api/services/${encodeURIComponent(target)}/action?${P()}`, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'restart', sudoPassword: process.env.SUDO_PASSWORD }),
+      });
+      check('polkit: с sudo-паролем → успех', ok.ok === true, JSON.stringify(ok));
+    } else {
+      console.log('  skip: SUDO_PASSWORD не задан — кейс «с паролем» пропущен');
+    }
+    // Несуществующий/masked unit → 400 с текстом systemd (состояние сервиса, не транспорт).
+    const maskedUnit = process.env.SERVICES_MASKED_UNIT ?? 'foo.service';
+    try {
+      await req(`/api/services/${encodeURIComponent(maskedUnit)}/action?${P()}`, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'stop' }),
+      });
+      check('polkit: masked/not-found unit → 400', false, 'stop прошёл');
+    } catch (err) {
+      check('polkit: masked/not-found unit → 400', String(err).includes('400'), String(err));
+    }
+  } else if (process.env.SERVICES_POLKIT === '1') {
+    console.log('  skip: SERVICES_POLKIT=1, но systemd на стенде недоступен');
+  }
+
   console.log('== cleanup ==');
   await req(`/api/profiles/${pid}`, { method: 'DELETE' });
   check('profile deleted', true);
