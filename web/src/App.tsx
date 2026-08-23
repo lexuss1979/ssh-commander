@@ -78,6 +78,9 @@ export default function App() {
   // Обратный ход «→ SQL»: AgentPage просит вставить SQL в редактор консоли,
   // DatabasesPage расходует и сбрасывает через onSqlInsertConsumed.
   const [sqlInsert, setSqlInsert] = useState<{ id: number; sql: string } | null>(null);
+  // «Открыть в файлах» из навигатора «Что занимает» (эпик 16): одноразовый
+  // путь для FilesPage; сбрасывается через onFilesPathConsumed.
+  const [filesOpenPath, setFilesOpenPath] = useState<string | null>(null);
   // Keep-alive панели агента: монтируются для всех посещённых за сессию
   // профилей, неактивные скрываются display:none — WS и чат-стейт живут.
   const [visitedProfileIds, setVisitedProfileIds] = useState<string[]>([]);
@@ -241,6 +244,14 @@ export default function App() {
     setActiveProfileId(profileId);
     setTab('databases');
     setSqlInsert({ id: Date.now(), sql });
+  }, []);
+
+  // «Открыть в файлах» из навигатора «Что занимает»: переход на путь во
+  // вкладке «Файлы» (профиль уже активный — «Обзор» рендерится только для
+  // activeProfile, FilesPage смонтирован keep-alive и реагирует на openPath).
+  const handleOpenInFiles = useCallback((path: string) => {
+    setFilesOpenPath(path);
+    setTab('files');
   }, []);
 
   // Drag-разделитель панели агента: ширина считается от правого края окна.
@@ -418,6 +429,7 @@ export default function App() {
                     profile={activeProfile}
                     showError={showError}
                     visible={tab === 'overview'}
+                    onOpenInFiles={handleOpenInFiles}
                   />
                 </div>
                 <div className={`tab-page ${tab === 'terminal' ? '' : 'hidden'}`}>
@@ -439,6 +451,8 @@ export default function App() {
                     visible={tab === 'files'}
                     onAskAgent={handleAskAgent}
                     onProfilesChanged={handleProfilesChanged}
+                    openPath={filesOpenPath}
+                    onFilesPathConsumed={() => setFilesOpenPath(null)}
                   />
                 </div>
                 <div className={`tab-page ${tab === 'docker' ? '' : 'hidden'}`}>
