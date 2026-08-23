@@ -24,6 +24,10 @@ cd web && npm install && npm run dev      # Vite на :5173, проксируе�
 # Сборка и тесты
 cd server && npm run build && npm test    # tsc + vitest (unit)
 cd web && npm run build                   # tsc && vite build → web/dist
+cd web && npm run lint                    # eslint (react-hooks/rules-of-hooks)
+
+# Хуки git (после clone — каталог .git/hooks не версионируется)
+bash scripts/install-hooks.sh             # ставит pre-commit
 ```
 
 Фронтенд собирается внутри Dockerfile автоматически — вручную собирать его для контейнера не нужно.
@@ -114,10 +118,12 @@ cd web && npm run build                   # tsc && vite build → web/dist
 - Службы systemd (вкладка «Службы», `/api/services`, эпик 13): снимок — один exec с маркерами и `LC_ALL=C`, детект systemd по тексту (не по коду); имя unit'а валидируется regex `^[A-Za-z0-9@._:\-]+$` (плюс запрет `.`/`..`) до всего остального. Sudo для действий — **прямая форма `sudo -S -p '' -- systemctl <action> -- <unit>` без `sh -c`**, пароль первой строкой stdin канала (не в argv/логах, живёт в памяти одного запроса, в UI может удерживаться в стейте вкладки без persist); ретрай по access-denied безопасен (мутация не началась), зонд `sudo -S -p '' -- true` даёт явный 400 («Неверный sudo-пароль» / «нет прав sudo» / «sudo не установлен»; зонд и классификация — общий модуль `services/sudo.ts`). Ошибки действий: 400 — пользовательские причины (нужен пароль, masked/not-found/job-failed — с текстом systemd как есть), 502 — только транспорт. Follow-журналы (`follow=1`) — через общий лимитер на профиль (`services/stream-limits.ts`, сверх лимита 429) и `createChunkGate` (дроп чанков при `res.writableLength > 1 МБ` с маркером «пропущено N байт»); отказ `journalctl` без прав выглядит как пустой вывод с кодом 0, а не ошибка — UI показывает подсказку про группы `adm`/`systemd-journal`. Sudo для журнала в v1 не делается.
 - Обновления пакетов (эпик 19, `/api/packages`): снимок — детект менеджера (`command -v apt-get||dnf||yum||apk`) + один exec с маркерами (код списка — `@@LIST_CODE@@`, не `result.code`: код всей строки принадлежит последней части; у dnf/yum код 100 = есть обновления, не ошибка; таймаут снимка 30 с); признаки рестарта — apt: наличие `/var/run/reboot-required` (+ `.pkgs`), dnf/yum: `needs-restarting -r` код 1; возраст индекса apt — SFTP-stat (ошибка stat → тихий null); кэш 60 с на профиль + инвалидация после применения. `apt-get update` не запускается (мутация индексов). Применение (`POST /api/packages/apply`) — **только стримом с подтверждением**: зонд `probeSudo` до открытия канала (400 при неверном пароле/правах), команда — прямая sudo-форма без `sh -c` (`env DEBIAN_FRONTEND=noninteractive` для apt), пароль первой строкой stdin, слот общего лимитера follow-стримов (429), на settle — инвалидация кэша. Стрим применения (`LogViewer` `kind='request'`) НЕ завязан на `visible` и не рвётся переключением вкладок — прерывание только по явному закрытию просмотрщика (с подтверждением, пока выполняется) или завершению команды; закрытие «В чат» не прерывает. Инструмента агента для пакетов нет (обновления покрыты секцией `updates` аудита); guard «один запуск на монтирование» защищает от повторной мутации (StrictMode).
 - Перед сдачей изменений: `npm run build` в обоих каталогах и `npm test` — зелёные, `npm audit` без уязвимостей.
+- Эти проверки автоматизированы хуком `pre-commit` (`scripts/pre-commit.sh`, ставится `bash scripts/install-hooks.sh`): параллельно гоняет `eslint src` в web, `tsc --noEmit` в server, `vitest run` в server и `npm run build` в web (сборка web включает свой `tsc`, поэтому отдельного typecheck web нет). Падает только на ошибках — `exhaustive-deps` остаются предупреждениями. Пропустить разово: `git commit --no-verify`. Проверяется рабочее дерево, а не индекс.
 
 ## Тестирование
 
 - `cd server && npm test` — unit-тесты vitest, примерно по одному `*.test.ts` на подсистему (полный состав — `docs/architecture.md`).
+- `cd web && npm run lint` — eslint во фронтенде. Заведён ради `react-hooks/rules-of-hooks`: хук, вызванный после раннего `return`, даёт React #310 («Rendered more hooks than during the previous render») уже в браузере — ни `tsc`, ни тесты сервера этот класс не видят (реальный случай: эпик 20, `profileAlerts` в `App.tsx` ниже guard'ов `if (authed === null)`). Тестов у фронтенда нет, линтер — единственная автоматическая защита.
 - Ручные сценарии (требуют инфраструктуры, команды запуска — в `docs/architecture.md` и самих файлах):
   - `server/test/integration.manual.mjs` — нужен запущенный сервер (`APP_PASSWORD=test123`) и тестовый sshd (linuxserver/openssh-server на `127.0.0.1:2222`, user `test`).
   - `server/test/agent.manual.mjs` — цикл агента против мокового OpenAI-совместимого endpoint'а.

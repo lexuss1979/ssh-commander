@@ -13,3 +13,4 @@ keys/*
 .DS_Store
 .qwen/
 .worktrees/
+.eslintcache
