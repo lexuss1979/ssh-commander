@@ -134,7 +134,13 @@ describe('normalizeSections', () => {
 describe('runSecurityAudit', () => {
   it('без пароля root-подсекции пропускаются, остальное выполняется', async () => {
     const { calls, execFn } = fakeExec();
-    const out = await runSecurityAudit(profile, { privileged: true }, { execFn });
+    // listContainersFn обязателен: без него docker-секция ходит в реальный
+    // SSH и зависит от того, слушает ли что-то локальный порт 22.
+    const out = await runSecurityAudit(
+      profile,
+      { privileged: true },
+      { execFn, listContainersFn: async () => [] },
+    );
     expect(out).toContain('root-проверки пропущены');
     expect(out).toContain('пропущено: нет прав (нужен sudo)');
     expect(out).toContain('ok-output');
@@ -214,7 +220,11 @@ describe('runSecurityAudit', () => {
   it('общий вывод ограничен по объёму с подсказкой про sections', async () => {
     const big = 'x'.repeat(4000);
     const { execFn } = fakeExec({ stdout: big });
-    const out = await runSecurityAudit(profile, {}, { execFn });
+    const out = await runSecurityAudit(
+      profile,
+      {},
+      { execFn, listContainersFn: async () => [] },
+    );
     expect(out).toContain('вывод обрезан по объёму');
     expect(out).toContain('параметр sections');
     expect(out.length).toBeLessThan(12000);

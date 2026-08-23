@@ -72,6 +72,18 @@ describe('profile transfer', () => {
     expect(imported?.logPaths).toEqual(['/var/log/syslog', '/var/log/nginx/error.log']);
   });
 
+  it('rejects a backup with an invalid logPaths without writing anything', () => {
+    const backup = JSON.stringify({
+      app: 'ssh-commander-profiles',
+      version: 1,
+      encrypted: false,
+      profiles: [baseInput({ logPaths: ['relative/path'] })],
+      keys: [],
+    });
+    expect(() => importBackup(backup)).toThrow(/Некорректные пути/);
+    expect(profiles.listProfiles()).toHaveLength(0);
+  });
+
   it('rejects a wrong passphrase', () => {
     profiles.createProfile(baseInput());
     const backup = buildExport({ includeSecrets: true, passphrase: 'pw-123' });

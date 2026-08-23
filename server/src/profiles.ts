@@ -104,8 +104,19 @@ export function normalizeLogPaths(input: string[]): string[] {
   return result;
 }
 
+/**
+ * Прогоняет logPaths через normalizeLogPaths после zod: схема допускает любые
+ * непустые строки, а абсолютность/`..`/дедуп нужны на каждом входе (create,
+ * update, импорт бэкапа), иначе относительный путь с импортом станет чипом,
+ * который упадёт на assertSafePath.
+ */
+function withNormalizedLogPaths<T extends { logPaths?: string[] }>(data: T): T {
+  if (!data.logPaths) return data;
+  return { ...data, logPaths: normalizeLogPaths(data.logPaths) };
+}
+
 function validate(input: unknown): Profile {
-  const data = profileInputSchema.parse(input);
+  const data = withNormalizedLogPaths(profileInputSchema.parse(input));
   assertSecret(data);
   return { ...data, id: crypto.randomUUID().slice(0, 8) };
 }
@@ -144,7 +155,7 @@ export function updateProfile(id: string, input: unknown): Profile {
     throw new Error(`Profile ${id} not found`);
   }
   const existing = list[idx];
-  const data = profileInputSchema.parse(input);
+  const data = withNormalizedLogPaths(profileInputSchema.parse(input));
   // Switching the auth type always requires the matching secret; otherwise
   // an omitted secret keeps the stored one (partial update without
   // re-sending the password).
@@ -172,7 +183,7 @@ export function updateProfile(id: string, input: unknown): Profile {
  * imported as-is and the secret is filled in later via the UI.
  */
 export function importProfile(input: unknown): Profile {
-  const data = profileInputSchema.parse(input);
+  const data = withNormalizedLogPaths(profileInputSchema.parse(input));
   const profile: Profile = { ...data, id: crypto.randomUUID().slice(0, 8) };
   const list = listProfiles();
   list.push(profile);

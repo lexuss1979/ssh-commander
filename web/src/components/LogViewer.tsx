@@ -7,7 +7,7 @@ const MAX_LINES = 5000;
 const FLUSH_MS = 250;
 // Контекст для «В чат»: хвост отфильтрованного буфера до 4 КБ.
 const ASK_TAIL_CHARS = 4096;
-// Ручной скролл дальше от дна выключает автоскролл.
+// Ручной скролл дальше от дна выключает автоскролл, возврат к дну — включает.
 const AUTOSCROLL_THRESHOLD_PX = 40;
 
 type Status = 'loading' | 'live' | 'stopped' | 'error';
@@ -35,6 +35,9 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   const [lines, setLines] = useState<string[]>([]);
+  // Неполная хвостовая строка без \n: её видно сразу, а не после следующего
+  // чанка — иначе пустой лог и пометка об обрезке (обе без \n) терялись бы.
+  const [pendingLine, setPendingLine] = useState('');
   const bufferRef = useRef<LogBufferState>({ lines: [], pending: '' });
   const preRef = useRef<HTMLPreElement>(null);
 
@@ -45,15 +48,18 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
     const controller = new AbortController();
     bufferRef.current = { lines: [], pending: '' };
     setLines([]);
+    setPendingLine('');
     setStatus('loading');
     setError('');
     let cancelled = false;
     let dirty = false;
-    const flushTimer = window.setInterval(() => {
+    const flush = () => {
       if (!dirty) return;
       dirty = false;
       setLines(bufferRef.current.lines);
-    }, FLUSH_MS);
+      setPendingLine(bufferRef.current.pending);
+    };
+    const flushTimer = window.setInterval(flush, FLUSH_MS);
 
     void fetch(buildUrl(follow), { credentials: 'same-origin', signal: controller.signal })
       .then(async (res) => {
@@ -76,10 +82,18 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
           bufferRef.current = appendChunk(buf.lines, buf.pending, decoder.decode(value, { stream: true }), MAX_LINES);
           dirty = true;
         }
-        if (!cancelled) setStatus('stopped');
+        if (!cancelled) {
+          // Финальный флеш: продолжения не будет, неполная строка — весь
+          // остаток вывода (частый случай у follow=0-снимка).
+          dirty = true;
+          flush();
+          setStatus('stopped');
+        }
       })
       .catch((err) => {
         if (cancelled || err.name === 'AbortError') return;
+        dirty = true;
+        flush();
         setStatus('error');
         setError((err as Error).message);
       });
@@ -96,24 +110,30 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
     if (autoscroll && preRef.current) {
       preRef.current.scrollTop = preRef.current.scrollHeight;
     }
-  }, [lines, autoscroll]);
+  }, [lines, pendingLine, autoscroll]);
 
   const onScroll = () => {
     const el = preRef.current;
-    if (!el || !autoscroll) return;
+    if (!el) return;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= AUTOSCROLL_THRESHOLD_PX;
-    if (!atBottom) setAutoscroll(false);
+    if (atBottom !== autoscroll) setAutoscroll(atBottom);
   };
 
   const normalizedFilter = filter.trim().toLowerCase();
-  const filtered = useMemo(() => {
-    if (!normalizedFilter) return lines;
-    return lines.filter((l) => l.toLowerCase().includes(normalizedFilter));
-  }, [lines, normalizedFilter]);
+  // Отображаемый буфер: полные строки + неполная хвостовая (если матчится
+  // фильтру) — фильтр, копирование и «В чат» работают по одному набору.
+  const visibleLines = useMemo(() => {
+    const withPending =
+      pendingLine && (!normalizedFilter || pendingLine.toLowerCase().includes(normalizedFilter))
+        ? [...lines, pendingLine]
+        : lines;
+    if (!normalizedFilter) return withPending;
+    return withPending.filter((l) => l.toLowerCase().includes(normalizedFilter));
+  }, [lines, pendingLine, normalizedFilter]);
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(filtered.join('\n'));
+      await navigator.clipboard.writeText(visibleLines.join('\n'));
     } catch {
       /* clipboard может быть недоступен */
     }
@@ -125,7 +145,7 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
     if (!onAskAgent) return;
     const where = logPath ?? title;
     const server = serverName ? ` (сервер ${serverName})` : '';
-    onAskAgent(`Объясни этот вывод лога ${where}${server}:\n\`\`\`\n${lastNChars(filtered, ASK_TAIL_CHARS)}\n\`\`\``);
+    onAskAgent(`Объясни этот вывод лога ${where}${server}:\n\`\`\`\n${lastNChars(visibleLines, ASK_TAIL_CHARS)}\n\`\`\``);
   };
 
   const statusText =
@@ -163,7 +183,7 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
         )}
       </div>
       <pre className="logs-view" ref={preRef} onScroll={onScroll}>
-        {filtered.join('\n')}
+        {visibleLines.join('\n')}
       </pre>
     </div>
   );

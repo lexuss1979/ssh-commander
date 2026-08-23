@@ -114,4 +114,17 @@ describe('execStream', () => {
     const handle = execStream(profile('exec-stream-connect-err'), 'cmd', () => {});
     await expect(handle.code).resolves.toBe(null);
   });
+
+  it('не режет многобайтовый UTF-8 на границе чанков (StringDecoder)', async () => {
+    const chunks: string[] = [];
+    execStream(profile('exec-stream-utf8'), 'cmd', (c) => chunks.push(c));
+    await new Promise((r) => setTimeout(r, 20));
+    const ch = mock.FakeClient.instances.at(-1)?.channels.at(-1);
+    expect(ch).toBeDefined();
+    // Побайтовая доставка: каждый байт — отдельный чанк, как худший случай.
+    const bytes = Buffer.from('привет é🌲');
+    for (const b of bytes) ch!.emit('data', Buffer.from([b]));
+    expect(chunks.join('')).toBe('привет é🌲');
+    ch!.emit('close', 0);
+  });
 });

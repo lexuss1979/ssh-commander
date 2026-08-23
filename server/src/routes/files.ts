@@ -17,13 +17,17 @@ import { requireProfile } from '../profiles.js';
 import {
   buildTailFollowCommand,
   buildTailOnceCommand,
-  createChunkGate,
   precheckTailable,
   TAIL_DEFAULT_LINES,
   TAIL_MAX_LINES,
   TAIL_ONCE_TIMEOUT_MS,
 } from '../services/file-tail.js';
-import { acquireFollowSlot, FOLLOW_LIMIT_MESSAGE, releaseFollowSlot } from '../services/stream-limits.js';
+import {
+  acquireFollowSlot,
+  createChunkGate,
+  FOLLOW_LIMIT_MESSAGE,
+  releaseFollowSlot,
+} from '../services/stream-limits.js';
 import { searchFiles, SEARCH_MAX_RESULTS } from '../services/file-search.js';
 import { buildBatchDownloadCommand, buildTarDownloadCommand, buildTarUploadCommand, tarError } from '../services/transfer.js';
 import { assertSafePath, basename, dirname, joinRemotePath, modeToString } from '../util/path.js';
@@ -349,6 +353,10 @@ filesRouter.get('/tail', async (req, res) => {
     });
     void handle.code.then(() => {
       releaseSlot();
+      // Стрим закончился в состоянии дропа — маркер о потере, иначе
+      // пользователь не узнает о пропущенных байтах.
+      const tail = gate.finish();
+      if (tail !== null && !res.writableEnded) res.write(tail);
       if (!res.writableEnded) res.end();
     });
     req.on('close', () => {

@@ -438,31 +438,31 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
         </div>
       </div>
 
-      {pinnedPaths.length > 0 && (
-        <div className="log-chips">
-          {pinnedPaths.map((p) => (
-            <span key={p} className="log-chip">
-              <button className="log-chip-open" title={`Смотреть ${p}`} onClick={() => setTailTarget(p)}>
-                {p}
-              </button>
-              <button
-                className="log-chip-remove"
-                title="Открепить"
-                onClick={() => void putLogPaths(pinnedPaths.filter((x) => x !== p))}
-              >
-                ✕
-              </button>
-            </span>
-          ))}
-          <button
-            className="log-chip log-chip-add"
-            title="Добавить путь лога"
-            onClick={() => setAddLogOpen(true)}
-          >
-            +
-          </button>
-        </div>
-      )}
+      {/* Ряд чипов закреплённых логов — безусловно: «+» достижим и при
+          пустом logPaths, иначе первый пин ставится только через 👁. */}
+      <div className="log-chips">
+        {pinnedPaths.map((p) => (
+          <span key={p} className="log-chip">
+            <button className="log-chip-open" title={`Смотреть ${p}`} onClick={() => setTailTarget(p)}>
+              {p}
+            </button>
+            <button
+              className="log-chip-remove"
+              title="Открепить"
+              onClick={() => void putLogPaths(pinnedPaths.filter((x) => x !== p))}
+            >
+              ✕
+            </button>
+          </span>
+        ))}
+        <button
+          className="log-chip-add"
+          title="Добавить путь лога"
+          onClick={() => setAddLogOpen(true)}
+        >
+          +
+        </button>
+      </div>
 
       <div className="search-panel">
         <input
@@ -677,7 +677,12 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
             visible={visible}
             logPath={tailTarget}
             serverName={profile.name}
-            onAskAgent={(text) => onAskAgent(text, 'send')}
+            onAskAgent={(text) => {
+              // Модалку закрываем: панель агента раскрывается под ней, и
+              // ответ не виден, пока просмотрщик висит поверх.
+              setTailTarget(null);
+              onAskAgent(text, 'send');
+            }}
             toolbarExtra={
               <button
                 className="btn btn-mini"

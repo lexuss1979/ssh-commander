@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { StringDecoder } from 'node:string_decoder';
 import { Client, ClientChannel, SFTPWrapper } from 'ssh2';
 import type { ExecResult, Profile } from '../types.js';
 
@@ -165,7 +166,7 @@ export function execStream(
 ): ExecStreamHandle {
   let channel: ClientChannel | null = null;
   let closed = false;
-  // Промис создаётся сразу и resolve-функция звается на всех терминальных
+  // Промис создаётся сразу и resolve-функция зовётся на всех терминальных
   // путях: потребитель читает handle.code синхронно после вызова, и присвоение
   // свойства позже (внутри асинхронного колбэка exec) он бы уже не увидел —
   // оставался бы навсегда зарезолвленный заглушкой промис.
@@ -206,8 +207,12 @@ export function execStream(
           return;
         }
         channel = ch;
-        channel.on('data', (d: Buffer) => onChunk(d.toString(), false));
-        channel.stderr.on('data', (d: Buffer) => onChunk(d.toString(), true));
+        // StringDecoder, не toString() по буферу: многобайтовый UTF-8 символ,
+        // разрезанный границей чанков, иначе превращается в � (замена).
+        const outDecoder = new StringDecoder('utf8');
+        const errDecoder = new StringDecoder('utf8');
+        channel.on('data', (d: Buffer) => onChunk(outDecoder.write(d), false));
+        channel.stderr.on('data', (d: Buffer) => onChunk(errDecoder.write(d), true));
         ch.on('close', (exitCode: number | null) => resolveCode(exitCode));
         channel.on('error', () => {
           // close обычно следует за error, но не полагаемся на это.

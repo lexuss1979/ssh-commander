@@ -157,4 +157,20 @@ describe('profile logPaths', () => {
     expect(() => profiles.updateProfileLogPaths('no-such-id', ['/a'])).toThrow(/not found/);
     profiles.deleteProfile(p.id);
   });
+
+  it('createProfile прогоняет logPaths через normalizeLogPaths', () => {
+    const p = profiles.createProfile(baseInput({ logPaths: ['  /var/log/a  ', '/var/log/a'] }));
+    expect(p.logPaths).toEqual(['/var/log/a']);
+    expect(() => profiles.createProfile(baseInput({ logPaths: ['relative/path'] }))).toThrow(
+      /Некорректные пути/,
+    );
+  });
+
+  it('updateProfile прогоняет logPaths через normalizeLogPaths', () => {
+    const p = profiles.createProfile(baseInput());
+    expect(() => profiles.updateProfile(p.id, baseInput({ logPaths: ['/ok', 'oops'] }))).toThrow(
+      /Некорректные пути/,
+    );
+    profiles.deleteProfile(p.id);
+  });
 });

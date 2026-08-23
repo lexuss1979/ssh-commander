@@ -45,3 +45,44 @@ export function acquireFollowSlot(profileId: string): boolean {
 export function releaseFollowSlot(profileId: string): void {
   limiter.release(profileId);
 }
+
+// Backpressure follow-стримов: res.write без проверки drain расширяет буфер
+// Node на быстро растущем источнике. Пауза SSH-канала потребовала бы
+// расширения API execStream наружу — отклонено; вместо этого дроп чанков
+// с подсчётом и маркером при возврате в норму.
+export const GATE_LIMIT_BYTES = 1024 * 1024;
+
+export interface ChunkGate {
+  /**
+   * Пока читатель успевает (bufferedBytes не выше лимита) — чанк как есть.
+   * За лимитом чанк дропается с подсчётом байт; первый чанк после возврата в
+   * норму получает маркер с суммой пропущенного.
+   */
+  push(chunk: string, bufferedBytes: number): string | null;
+  /** Маркер для байтов, дропнутых до самого конца стрима (push их уже не ждёт). */
+  finish(): string | null;
+}
+
+export function createChunkGate(limitBytes = GATE_LIMIT_BYTES): ChunkGate {
+  let skipped = 0;
+  return {
+    push(chunk: string, bufferedBytes: number): string | null {
+      if (bufferedBytes > limitBytes) {
+        skipped += Buffer.byteLength(chunk, 'utf8');
+        return null;
+      }
+      if (skipped > 0) {
+        const marker = `\n… [пропущено ${skipped} байт — читатель не успевает] …\n`;
+        skipped = 0;
+        return marker + chunk;
+      }
+      return chunk;
+    },
+    finish(): string | null {
+      if (skipped === 0) return null;
+      const marker = `\n… [пропущено ${skipped} байт — читатель не успевает] …\n`;
+      skipped = 0;
+      return marker;
+    },
+  };
+}

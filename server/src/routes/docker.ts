@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireProfile } from '../profiles.js';
 import { assertSafePath } from '../util/path.js';
+import { acquireFollowSlot, createChunkGate, FOLLOW_LIMIT_MESSAGE, releaseFollowSlot } from '../services/stream-limits.js';
 import {
   composeDown,
   composePs,
@@ -104,20 +105,41 @@ dockerRouter.get('/containers/:id/logs', async (req, res) => {
     return;
   }
 
+  // Follow-стрим расходует тот же бюджет SSH-каналов профиля, что и tail:
+  // общий лимитер и backpressure-гейт из stream-limits.ts.
+  if (!acquireFollowSlot(profile.id)) {
+    res.status(429).json({ error: FOLLOW_LIMIT_MESSAGE });
+    return;
+  }
+  let slotReleased = false;
+  const releaseSlot = () => {
+    if (!slotReleased) {
+      slotReleased = true;
+      releaseFollowSlot(profile.id);
+    }
+  };
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache');
   res.flushHeaders();
   let closed = false;
+  const gate = createChunkGate();
   const handle = streamContainerLogs(profile, req.params.id, tail, (chunk) => {
-    if (!closed) res.write(chunk);
+    if (closed) return;
+    const out = gate.push(chunk, res.writableLength);
+    if (out !== null) res.write(out);
   });
   void handle.code.then(() => {
+    releaseSlot();
+    const tailMarker = gate.finish();
+    if (!closed && tailMarker !== null) res.write(tailMarker);
     if (!closed) res.end();
   }).catch(() => {
+    releaseSlot();
     if (!closed) res.end();
   });
   req.on('close', () => {
     closed = true;
+    releaseSlot();
     handle.close();
   });
 });

@@ -7,8 +7,6 @@ export const TAIL_DEFAULT_LINES = 500;
 export const TAIL_MAX_LINES = 5000;
 export const TAIL_ONCE_TIMEOUT_MS = 30000;
 export const BINARY_SNIFF_LEN = 512;
-// Backpressure: предел буфера ответа, за которым follow-чанки дропаются.
-export const GATE_LIMIT_BYTES = 1024 * 1024;
 
 export function clampTailLines(n: number): number {
   if (!Number.isFinite(n)) return TAIL_DEFAULT_LINES;
@@ -32,33 +30,6 @@ export function assertNotDirectory(mode: number): void {
 
 export function looksBinary(head: Buffer): boolean {
   return head.includes(0);
-}
-
-export interface ChunkGate {
-  /**
-   * Пока читатель успевает (bufferedBytes не выше лимита) — чанк как есть.
-   * За лимитом чанк дропается с подсчётом байт; первый чанк после возврата в
-   * норму получает маркер с суммой пропущенного.
-   */
-  push(chunk: string, bufferedBytes: number): string | null;
-}
-
-export function createChunkGate(limitBytes = GATE_LIMIT_BYTES): ChunkGate {
-  let skipped = 0;
-  return {
-    push(chunk: string, bufferedBytes: number): string | null {
-      if (bufferedBytes > limitBytes) {
-        skipped += Buffer.byteLength(chunk, 'utf8');
-        return null;
-      }
-      if (skipped > 0) {
-        const marker = `\n… [пропущено ${skipped} байт — читатель не успевает] …\n`;
-        skipped = 0;
-        return marker + chunk;
-      }
-      return chunk;
-    },
-  };
 }
 
 /**
