@@ -463,6 +463,31 @@ export function serviceLogsUrl(profileId: string, unit: string, tail: number, fo
   return `/api/services/${encodeURIComponent(unit)}/logs?${params}`;
 }
 
+// Обновления пакетов (эпик 19)
+export type PackageManager = 'apt' | 'dnf' | 'yum' | 'apk';
+
+export interface PackageUpdate {
+  name: string;
+  current: string | null;
+  available: string;
+  source: string | null;
+}
+
+export interface PackagesSnapshot {
+  timestamp: number;
+  pm: PackageManager | null;
+  updates: PackageUpdate[];
+  rebootRequired: boolean;
+  rebootPackages: string[];
+  indexAgeMs: number | null;
+  error?: string;
+}
+
+/** Снимок обновлений (кэш 60 с на сервере) — карточка и раздел «Обзора». */
+export function fetchPackages(profileId: string): Promise<PackagesSnapshot> {
+  return api<PackagesSnapshot>(`/api/packages/updates?profileId=${encodeURIComponent(profileId)}`);
+}
+
 // Вкладка «Базы данных» (эпик 12, итерация 2: явные креденшалы)
 export type DbEngine = 'postgres' | 'mysql';
 export type MysqlFlavor = 'mysql' | 'mariadb';

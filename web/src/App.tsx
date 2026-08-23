@@ -418,6 +418,7 @@ export default function App() {
                     profile={activeProfile}
                     showError={showError}
                     visible={tab === 'overview'}
+                    onAskAgent={handleAskAgent}
                   />
                 </div>
                 <div className={`tab-page ${tab === 'terminal' ? '' : 'hidden'}`}>

@@ -2234,6 +2234,39 @@ body.resizing-agent {
   font-size: 12px;
 }
 
+/* Обновления пакетов (эпик 19): карточка на «Обзоре» и раздел списка */
+.packages-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.packages-reboot {
+  margin-top: 10px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+}
+
+.packages-section {
+  margin-top: 16px;
+  overflow: hidden;
+}
+
+.packages-section .data-table {
+  margin: 0 -16px -14px;
+  width: calc(100% + 32px);
+}
+
+.packages-section .data-table td code {
+  font-size: 12px;
+}
+
 /* Servers (сводный дашборд всех профилей) */
 .servers-grid {
   display: grid;

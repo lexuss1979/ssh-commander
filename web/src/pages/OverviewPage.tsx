@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
-import { fetchMetrics, fetchMetricsHistory } from '../api';
-import type { HistorySample, ServerMetrics } from '../api';
-import type { Profile } from '../types';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { fetchMetrics, fetchMetricsHistory, fetchPackages } from '../api';
+import type { HistorySample, PackagesSnapshot, ServerMetrics } from '../api';
+import type { AgentAskMode, Profile } from '../types';
 import { useSortBy, SortableTh } from '../hooks/useSortBy';
 import { LoadChart } from '../components/Sparkline';
 
@@ -9,6 +9,7 @@ interface Props {
   profile: Profile;
   showError: (msg: string) => void;
   visible: boolean;
+  onAskAgent?: (text: string, mode?: AgentAskMode) => void;
 }
 
 const POLL_INTERVAL_MS = 3000;
@@ -57,24 +58,93 @@ export function Meter({ percent }: { percent: number | null }) {
   );
 }
 
+/** Возраст индекса apt: «индекс не обновлялся» (файла нет) / «N дн назад». */
+function indexAgeText(ms: number | null): string {
+  if (ms === null) return 'индекс не обновлялся';
+  const days = ms / 86400000;
+  if (days >= 1) return `индекс обновлён ${Math.floor(days)} дн назад`;
+  const hours = ms / 3600000;
+  if (hours >= 1) return `индекс обновлён ${Math.floor(hours)} ч назад`;
+  return 'индекс обновлён недавно';
+}
+
+function PackagesCard({
+  packages,
+  onScrollToList,
+}: {
+  packages: PackagesSnapshot | null;
+  onScrollToList: () => void;
+}) {
+  const count = packages?.updates.length ?? 0;
+  const pm = packages?.pm;
+  const reboot = packages?.rebootRequired;
+  return (
+    <div className="overview-card">
+      <div className="overview-card-title">Обновления</div>
+      {!packages ? (
+        <div className="overview-sub">Загрузка…</div>
+      ) : pm === null ? (
+        <div className="overview-sub">Обновления не проверяются</div>
+      ) : (
+        <>
+          <div className="overview-big">
+            {count} {pluralUpdates(count)}
+          </div>
+          <div className="overview-sub">
+            менеджер: <code>{pm}</code>
+            {pm === 'apt' && packages.indexAgeMs !== null && (
+              <> · {indexAgeText(packages.indexAgeMs)}</>
+            )}
+          </div>
+          {reboot && (
+            <div
+              className="packages-reboot"
+              title={packages.rebootPackages.length > 0 ? packages.rebootPackages.join(', ') : undefined}
+            >
+              ⚠ нужен рестарт сервера
+            </div>
+          )}
+          <div className="packages-actions">
+            <button className="btn btn-ghost btn-small" onClick={onScrollToList}>
+              Список
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function pluralUpdates(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'обновление';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'обновления';
+  return 'обновлений';
+}
+
 export function OverviewPage({ profile, visible }: Props) {
   const [metrics, setMetrics] = useState<ServerMetrics | null>(null);
   const [history, setHistory] = useState<HistorySample[]>([]);
+  const [packages, setPackages] = useState<PackagesSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const updatesSectionRef = useRef<HTMLDivElement>(null);
 
   // Последовательный polling: следующий запрос только после завершения
   // предыдущего. На скрытой вкладке (keep-alive) опрос полностью остановлен.
   // История нагрузки грузится тем же тиком, но её ошибки тихие — графики
-  // декоративные, при сбое остаётся последнее нарисованное.
+  // декоративные, при сбое остаётся последнее нарисованное. Обновления
+  // пакетов — там же: снимок кэшируется на сервере 60 с, отдельный тик не нужен.
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
     let timer = 0;
     const tick = async () => {
-      const [mRes, hRes] = await Promise.allSettled([
+      const [mRes, hRes, pRes] = await Promise.allSettled([
         fetchMetrics(profile.id),
         fetchMetricsHistory(profile.id),
+        fetchPackages(profile.id),
       ]);
       if (cancelled) return;
       if (mRes.status === 'fulfilled') {
@@ -85,6 +155,9 @@ export function OverviewPage({ profile, visible }: Props) {
       }
       if (hRes.status === 'fulfilled') {
         setHistory(hRes.value.samples);
+      }
+      if (pRes.status === 'fulfilled') {
+        setPackages(pRes.value);
       }
       if (!cancelled) {
         timer = window.setTimeout(tick, POLL_INTERVAL_MS);
@@ -189,6 +262,11 @@ export function OverviewPage({ profile, visible }: Props) {
                 </div>
               ))}
             </div>
+
+            <PackagesCard
+              packages={packages}
+              onScrollToList={() => updatesSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            />
           </div>
 
           <div className="overview-card overview-processes">
@@ -224,6 +302,40 @@ export function OverviewPage({ profile, visible }: Props) {
                 )}
               </tbody>
             </table>
+          </div>
+
+          <div className="overview-card packages-section" ref={updatesSectionRef}>
+            <div className="overview-card-title">Доступные обновления</div>
+            {!packages ? (
+              <div className="overview-sub">Загрузка…</div>
+            ) : packages.pm === null ? (
+              <div className="overview-sub">Обновления не проверяются: {packages.error ?? 'менеджер не найден'}</div>
+            ) : packages.updates.length === 0 ? (
+              <div className="overview-sub">Обновлений нет</div>
+            ) : (
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Пакет</th>
+                    <th>Версия (текущая → доступная)</th>
+                    <th>Источник</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {packages.updates.map((u) => (
+                    <tr key={u.name}>
+                      <td>
+                        <code>{u.name}</code>
+                      </td>
+                      <td>
+                        {u.current ?? '—'} → {u.available}
+                      </td>
+                      <td className="muted">{u.source ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
       )}
