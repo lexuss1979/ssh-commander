@@ -134,17 +134,19 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
           <div className="du-list">
             <div className="du-row du-row-total">
               <span className="du-row-name">Всего</span>
-              <span className="du-pct">100%</span>
+              {/* truncated — сумма посчитана по детям, «100%» было бы враньём */}
+              <span className="du-pct">{data.truncated ? '—' : '100%'}</span>
               <span className="du-size">{formatSize(data.totalBytes)}</span>
             </div>
             {data.children.map((child) => (
-              <div
-                key={child.path}
-                className="du-row du-row-dir"
-                onClick={() => setPath(child.path)}
-                title={`Открыть ${child.path}`}
-              >
-                <span className="du-row-name">{child.name}</span>
+              <div key={child.path} className="du-row">
+                <button
+                  className="link-cell du-row-name"
+                  onClick={() => setPath(child.path)}
+                  title={`Открыть ${child.path}`}
+                >
+                  {child.name}
+                </button>
                 <div className="meter du-meter">
                   <div
                     className="meter-fill"

@@ -246,7 +246,12 @@ export function OverviewPage({ profile, visible, onOpenInFiles }: Props) {
           profile={profile}
           initialPath={duTarget}
           onClose={() => setDuTarget(null)}
-          onOpenInFiles={onOpenInFiles}
+          onOpenInFiles={(p) => {
+            // Закрываем навигатор: без этого модалка уезжает вместе со скрытой
+            // вкладкой «Обзора» и встречает пользователя на старом пути.
+            setDuTarget(null);
+            onOpenInFiles(p);
+          }}
         />
       )}
     </div>

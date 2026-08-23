@@ -2289,15 +2289,6 @@ body.resizing-agent {
   border-bottom: none;
 }
 
-.du-row-dir {
-  cursor: pointer;
-  border-radius: 6px;
-}
-
-.du-row-dir:hover {
-  background: var(--bg-hover);
-}
-
 .du-row-total {
   font-weight: 600;
 }

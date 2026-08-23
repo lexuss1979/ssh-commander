@@ -1,8 +1,8 @@
-import { exec, withSftp } from '../ssh/manager.js';
+import { exec, getSftp } from '../ssh/manager.js';
 import { stat as sftpStat } from '../ssh/sftp.js';
 import { shq } from '../util/shell.js';
 import { basename } from '../util/path.js';
-import type { Profile } from '../types.js';
+import type { ExecResult, Profile } from '../types.js';
 
 /**
  * «Что съело диск» — навигатор по du (эпик 16).
@@ -60,10 +60,26 @@ export interface TopFilesResult {
 
 /**
  * Пользовательская ошибка (путь, права, утилиты) — маршрут отвечает 400.
- * Транспортные ошибки (exec reject — SSH недоступен) не оборачиваются —
+ * Транспортные ошибки (exec reject, отказ SSH-соединения) не оборачиваются —
  * маршрут отвечает 502.
  */
 export class DiskUsageError extends Error {}
+
+/** exec-обёртка с инъекцией для тестов (паттерн systemd.ts: `deps.execFn`). */
+export type ExecFn = (
+  profile: Profile,
+  command: string,
+  opts?: { timeoutMs?: number; stdin?: string },
+) => Promise<ExecResult>;
+
+export interface DiskUsageDeps {
+  execFn?: ExecFn;
+  /** Предпроверка директории. Инъекция нужна тестам (без реального SFTP) и
+   * агенту: он проверяет путь один раз на оба вызова (см. skipPrecheck). */
+  precheckFn?: (profile: Profile, path: string) => Promise<void>;
+  /** Пропустить предпроверку — вызывающий уже убедился, что путь — директория. */
+  skipPrecheck?: boolean;
+}
 
 // ---------------------------------------------------------------------------
 // Валидация пути. assertSafePath не годится: он запрещает `/`, а точка
@@ -291,16 +307,45 @@ export function formatAgentDiskUsage(
 // Исполнение
 // ---------------------------------------------------------------------------
 
-/** Предпроверка до тяжёлой команды: путь существует и это директория. */
-async function precheckDir(profile: Profile, path: string): Promise<void> {
+/**
+ * Предпроверка до тяжёлой команды: путь существует и это директория.
+ * Разделение ошибок как в routes/metrics.ts: отказ stat (нет пути, нет прав) —
+ * пользовательская ошибка (400), а отказ getSftp (соединение) пробрасывается
+ * как есть — транспорт (502). Раньше вся ошибка withSftp заворачивалась в
+ * DiskUsageError, и упавший SSH выглядел как «Путь недоступен: …» с кнопкой
+ * «Повторить» вместо честного «Сервер недоступен».
+ */
+export async function precheckNavigableDir(profile: Profile, path: string): Promise<void> {
+  // getSftp вне try: обрыв соединения — транспорт.
+  const sftp = await getSftp(profile);
   let st;
   try {
-    st = await withSftp(profile, (sftp) => sftpStat(sftp, path));
+    st = await sftpStat(sftp, path);
   } catch (err) {
     throw new DiskUsageError(`Путь недоступен: ${(err as Error).message}`);
   }
   if ((st.mode & 0o170000) !== 0o040000) {
     throw new DiskUsageError('Это не директория');
+  }
+}
+
+/**
+ * exec du/find с таймаутом. План называет долгий du риском №1 и обещает
+ * «понятная ошибка „Превышено время ожидания"»: ssh/manager.ts бросает
+ * английское «Command timed out…», которое иначе ушло бы в 502 «Сервер
+ * недоступен» — сервер в порядке, это команда не уложилась. Сюда же попадает
+ * агент: его деградированная строка «крупнейшие файлы недоступны» получила бы
+ * тот же английский текст. Транспорт (не-таймаут) пробрасывается как есть.
+ */
+async function runDuExec(profile: Profile, command: string, execFn: ExecFn): Promise<ExecResult> {
+  try {
+    return await execFn(profile, command, { timeoutMs: DU_TIMEOUT_MS });
+  } catch (err) {
+    const msg = String((err as Error).message ?? err);
+    if (/timed out/i.test(msg)) {
+      throw new DiskUsageError('Превышено время ожидания (60 с) — попробуйте начать с подкаталога');
+    }
+    throw err;
   }
 }
 
@@ -317,16 +362,24 @@ const duCache = new Map<string, CacheEntry>();
  * команда приложения; повторный клик по тому же каталогу не должен гонять
  * её снова. Ошибочный промис из кэша удаляется (паттерн collectMetrics).
  */
-export function diskUsageSnapshot(profile: Profile, path: string): Promise<DiskUsageSnapshot> {
+export function diskUsageSnapshot(
+  profile: Profile,
+  path: string,
+  deps: DiskUsageDeps = {},
+): Promise<DiskUsageSnapshot> {
   const key = `${profile.id}\0${path}`;
   const now = Date.now();
   const hit = duCache.get(key);
   if (hit && now - hit.at < DISK_USAGE_CACHE_TTL_MS) {
     return hit.promise;
   }
+  const execFn = deps.execFn ?? exec;
+  const precheckFn = deps.precheckFn ?? precheckNavigableDir;
   const promise = (async () => {
-    await precheckDir(profile, path);
-    const result = await exec(profile, buildDuCommand(path), { timeoutMs: DU_TIMEOUT_MS });
+    if (!deps.skipPrecheck) {
+      await precheckFn(profile, path);
+    }
+    const result = await runDuExec(profile, buildDuCommand(path), execFn);
     if (result.code !== 0) {
       // нет прав на сам путь, путь пропал между stat и du
       throw new DiskUsageError(result.stderr.trim() || `du завершился с кодом ${result.code}`);
@@ -353,19 +406,32 @@ export function diskUsageSnapshot(profile: Profile, path: string): Promise<DiskU
  * Топ крупнейших файлов каталога. Стратегия: пробуем `-printf`-вариант;
  * при признаке незнакомой опции (BusyBox) или пустом stdout с непустым
  * stderr (код пайплайна принадлежит head — провал find по коду не виден)
- * повторяем stat-вариантом. Один лишний exec только на BusyBox-серверах,
- * решение не кэшируем — запрос ручной и редкий.
+ * повторяем stat-вариантом. Эвристика «пустой stdout» сужена условием
+ * `countUnreadable === 0`: штатный пустой каталог с отказами доступа в
+ * подкаталогах не должен гонять второй (самый долгий) обход дерева вхолостую.
+ * Один лишний exec только на BusyBox-серверах, решение не кэшируем — запрос
+ * ручной и редкий.
  */
-export async function topFiles(profile: Profile, path: string, limit: number): Promise<TopFilesResult> {
-  await precheckDir(profile, path);
-  let result = await exec(profile, buildTopFilesCommand(path, limit), { timeoutMs: DU_TIMEOUT_MS });
+export async function topFiles(
+  profile: Profile,
+  path: string,
+  limit: number,
+  deps: DiskUsageDeps = {},
+): Promise<TopFilesResult> {
+  const execFn = deps.execFn ?? exec;
+  const precheckFn = deps.precheckFn ?? precheckNavigableDir;
+  if (!deps.skipPrecheck) {
+    await precheckFn(profile, path);
+  }
+  let result = await runDuExec(profile, buildTopFilesCommand(path, limit), execFn);
   if (result.code !== 0 && !needsStatFallback(result.stderr)) {
     throw new DiskUsageError(result.stderr.trim() || `find завершился с кодом ${result.code}`);
   }
-  if (needsStatFallback(result.stderr) || (result.stdout.trim() === '' && result.stderr.trim() !== '')) {
-    const statResult = await exec(profile, buildTopFilesStatCommand(path, limit), {
-      timeoutMs: DU_TIMEOUT_MS,
-    });
+  if (
+    needsStatFallback(result.stderr) ||
+    (result.stdout.trim() === '' && result.stderr.trim() !== '' && countUnreadable(result.stderr) === 0)
+  ) {
+    const statResult = await runDuExec(profile, buildTopFilesStatCommand(path, limit), execFn);
     if (needsStatFallback(statResult.stderr)) {
       // и -exec … + не поддержан (экзотика): режим «Файлы» деградирует с пояснением
       throw new DiskUsageError('find не поддерживает -printf и -exec stat — режим «Файлы» недоступен на этом сервере');

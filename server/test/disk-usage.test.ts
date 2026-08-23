@@ -9,12 +9,16 @@ import {
   clampAgentLimit,
   countUnreadable,
   DiskUsageError,
+  diskUsageSnapshot,
   needsStatFallback,
   normalizeDiskPath,
   parseDuKb,
   parseFindOutput,
   toDuSnapshot,
+  topFiles,
+  type ExecFn,
 } from '../src/services/disk-usage.js';
+import type { ExecResult, Profile } from '../src/types.js';
 
 describe('buildDuCommand', () => {
   it('собирает du -x -d 1 -k с -- перед путём', () => {
@@ -239,5 +243,203 @@ describe('clampAgentLimit', () => {
     expect(clampAgentLimit(51)).toBe(AGENT_MAX_LIMIT);
     expect(clampAgentLimit(500)).toBe(AGENT_MAX_LIMIT);
     expect(clampAgentLimit(12.6)).toBe(13);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Исполнительный слой: deps-инъекция (паттерн systemd.test.ts) — мок exec и
+// предпроверки, реального SSH нет. Кэш du глобальный на файл — пути тестов
+// уникальны.
+// ---------------------------------------------------------------------------
+
+const profile = { id: 'p1' } as Profile;
+const noopPrecheck = async (): Promise<void> => {};
+
+const okExec = (stdout: string, stderr = ''): ExecFn =>
+  async (): Promise<ExecResult> => ({ code: 0, stdout, stderr });
+
+/** Поочередно отдаёт результаты, на исчерпании повторяет последний. */
+function fakeExec(results: Array<() => Promise<ExecResult>>): { calls: string[]; execFn: ExecFn } {
+  const calls: string[] = [];
+  let i = 0;
+  const execFn: ExecFn = async (_p, command) => {
+    calls.push(command);
+    const factory = results[Math.min(i, results.length - 1)];
+    i += 1;
+    return factory();
+  };
+  return { calls, execFn };
+}
+
+describe('diskUsageSnapshot — исполнение', () => {
+  it('собирает снапшот из вывода du и считает incomplete по stderr', async () => {
+    const snap = await diskUsageSnapshot(profile, '/snap-1', {
+      precheckFn: noopPrecheck,
+      execFn: okExec(
+        '4096\t/snap-1/log\n10240\t/snap-1',
+        "du: cannot read directory '/snap-1/secret': Permission denied",
+      ),
+    });
+    expect(snap.totalBytes).toBe(10240 * 1024);
+    expect(snap.children[0]).toMatchObject({ path: '/snap-1/log', bytes: 4096 * 1024 });
+    expect(snap.incomplete).toEqual({ unreadable: 1 });
+    expect(snap.truncated).toBe(false);
+  });
+
+  it('обрезанный вывод (нет суммарной строки) → деградация truncated', async () => {
+    const snap = await diskUsageSnapshot(profile, '/trunc-1', {
+      precheckFn: noopPrecheck,
+      execFn: okExec('4096\t/trunc-1/log\n3072\t/trunc-1/cache'),
+    });
+    expect(snap.truncated).toBe(true);
+    expect(snap.totalBytes).toBe((4096 + 3072) * 1024);
+    expect(snap.directBytes).toBe(0);
+  });
+
+  it('ненулевой код du → DiskUsageError со stderr', async () => {
+    await expect(
+      diskUsageSnapshot(profile, '/err-1', {
+        precheckFn: noopPrecheck,
+        execFn: async () => ({ code: 1, stdout: '', stderr: 'du: cannot access /err-1: No such file' }),
+      }),
+    ).rejects.toThrow('No such file');
+  });
+
+  it('таймаут exec → DiskUsageError с русским текстом (не 502 «Сервер недоступен»)', async () => {
+    await expect(
+      diskUsageSnapshot(profile, '/timeout-1', {
+        precheckFn: noopPrecheck,
+        execFn: async () => {
+          throw new Error('Command timed out after 60000ms');
+        },
+      }),
+    ).rejects.toThrow('Превышено время ожидания (60 с)');
+  });
+
+  it('транспортная ошибка пробрасывается как есть (не DiskUsageError → маршрут 502)', async () => {
+    const err = await diskUsageSnapshot(profile, '/transport-1', {
+      precheckFn: noopPrecheck,
+      execFn: async () => {
+        throw new Error('SSH error: connect ECONNREFUSED 1.2.3.4:22');
+      },
+    }).catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(DiskUsageError);
+    expect(String((err as Error).message)).toContain('SSH error');
+  });
+
+  it('ошибка предпроверки — пользовательская (400)', async () => {
+    await expect(
+      diskUsageSnapshot(profile, '/notdir-1', {
+        precheckFn: async () => {
+          throw new DiskUsageError('Это не директория');
+        },
+        execFn: okExec(''),
+      }),
+    ).rejects.toThrow('Это не директория');
+  });
+
+  it('skipPrecheck пропускает предпроверку (агент: одна проверка на два вызова)', async () => {
+    let prechecked = 0;
+    const deps = {
+      precheckFn: async (): Promise<void> => {
+        prechecked += 1;
+      },
+      execFn: okExec('10240\t/skip-1'),
+    };
+    await diskUsageSnapshot(profile, '/skip-1', { ...deps, skipPrecheck: true });
+    expect(prechecked).toBe(0);
+  });
+
+  it('кэш 2 с: параллельные вызовы одного пути делят один exec', async () => {
+    let calls = 0;
+    const deps = {
+      precheckFn: noopPrecheck,
+      execFn: (async (): Promise<ExecResult> => {
+        calls += 1;
+        return { code: 0, stdout: '10240\t/cache-1', stderr: '' };
+      }) as ExecFn,
+    };
+    const [a, b] = await Promise.all([
+      diskUsageSnapshot(profile, '/cache-1', deps),
+      diskUsageSnapshot(profile, '/cache-1', deps),
+    ]);
+    expect(calls).toBe(1);
+    expect(a.totalBytes).toBe(b.totalBytes);
+  });
+
+  it('ошибочный промис удаляется из кэша — следующий вызов пробует снова', async () => {
+    let calls = 0;
+    const execFn: ExecFn = async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('SSH error: connect ECONNREFUSED');
+      return { code: 0, stdout: '10240\t/cache-2', stderr: '' };
+    };
+    await expect(
+      diskUsageSnapshot(profile, '/cache-2', { precheckFn: noopPrecheck, execFn }),
+    ).rejects.toThrow('SSH error');
+    const snap = await diskUsageSnapshot(profile, '/cache-2', { precheckFn: noopPrecheck, execFn });
+    expect(calls).toBe(2);
+    expect(snap.totalBytes).toBe(10240 * 1024);
+  });
+});
+
+describe('topFiles — фолбэк-матрица', () => {
+  it('незнакомая опция -printf → повтор stat-вариантом, результат из второго exec', async () => {
+    const { calls, execFn } = fakeExec([
+      async () => ({ code: 0, stdout: '', stderr: 'find: unrecognized: -printf' }),
+      async () => ({ code: 0, stdout: '1048576\t/var/big.bin\n', stderr: '' }),
+    ]);
+    const out = await topFiles(profile, '/var', 10, { precheckFn: noopPrecheck, execFn });
+    expect(calls.length).toBe(2);
+    expect(calls[1]).toContain('-exec stat');
+    expect(out.files).toEqual([{ path: '/var/big.bin', bytes: 1048576 }]);
+    expect(out.incomplete).toBeNull();
+  });
+
+  it('пустой stdout с отказами доступа — НЕ фолбэк (штатный пустой каталог, без лишнего обхода)', async () => {
+    const { calls, execFn } = fakeExec([
+      async () => ({
+        code: 0,
+        stdout: '',
+        stderr: "find: cannot read directory '/var/secret': Permission denied",
+      }),
+    ]);
+    const out = await topFiles(profile, '/var', 10, { precheckFn: noopPrecheck, execFn });
+    expect(calls.length).toBe(1);
+    expect(out.files).toEqual([]);
+    expect(out.incomplete).toEqual({ unreadable: 1 });
+  });
+
+  it('пустой stdout с посторонним stderr — фолбэк (второй признак провала find)', async () => {
+    const { calls, execFn } = fakeExec([
+      async () => ({ code: 0, stdout: '', stderr: 'find: something weird happened' }),
+      async () => ({ code: 0, stdout: '512\t/x\n', stderr: '' }),
+    ]);
+    const out = await topFiles(profile, '/var', 10, { precheckFn: noopPrecheck, execFn });
+    expect(calls.length).toBe(2);
+    expect(out.files).toEqual([{ path: '/x', bytes: 512 }]);
+  });
+
+  it('stat-фолбэк тоже не знает опцию → понятная ошибка про режим «Файлы»', async () => {
+    const execFn: ExecFn = async () => ({ code: 0, stdout: '', stderr: 'find: unrecognized: -printf' });
+    await expect(topFiles(profile, '/var', 10, { precheckFn: noopPrecheck, execFn })).rejects.toThrow(
+      'режим «Файлы» недоступен на этом сервере',
+    );
+  });
+
+  it('ненулевой код find → DiskUsageError со stderr', async () => {
+    const execFn: ExecFn = async () => ({ code: 2, stdout: '', stderr: 'find: no such file' });
+    await expect(topFiles(profile, '/var', 10, { precheckFn: noopPrecheck, execFn })).rejects.toThrow(
+      'find: no such file',
+    );
+  });
+
+  it('таймаут find → DiskUsageError с русским текстом', async () => {
+    const execFn: ExecFn = async () => {
+      throw new Error('Command timed out after 60000ms');
+    };
+    await expect(topFiles(profile, '/var', 10, { precheckFn: noopPrecheck, execFn })).rejects.toThrow(
+      'Превышено время ожидания (60 с)',
+    );
   });
 });

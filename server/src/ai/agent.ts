@@ -34,6 +34,7 @@ import {
   diskUsageSnapshot,
   formatAgentDiskUsage,
   normalizeDiskPath,
+  precheckNavigableDir,
   topFiles,
 } from '../services/disk-usage.js';
 import { getProfile, listProfiles } from '../profiles.js';
@@ -816,11 +817,20 @@ export class AgentSession {
             return { status: 'error', output: String((err as Error).message), truncated: false };
           }
           const limit = clampAgentLimit(args.limit);
+          // Одна предпроверка на оба вызова (иначе две независимые SFTP-stat
+          // на каждый вызов инструмента); транспорт/права — обычный tool_result,
+          // цикл не падает.
+          try {
+            await precheckNavigableDir(profile, path);
+          } catch (err) {
+            return { status: 'error', output: String((err as Error).message), truncated: false };
+          }
+          const skipPrecheck = { skipPrecheck: true };
           // Каталоги — основной результат; файлы при отказе (нет find/stat)
           // деградируют в строку-пояснение, не роняя инструмент целиком.
           const [snap, files] = await Promise.allSettled([
-            diskUsageSnapshot(profile, path),
-            topFiles(profile, path, limit),
+            diskUsageSnapshot(profile, path, skipPrecheck),
+            topFiles(profile, path, limit, skipPrecheck),
           ]);
           if (snap.status === 'rejected') {
             return { status: 'error', output: String((snap.reason as Error).message), truncated: false };

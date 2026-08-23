@@ -371,9 +371,10 @@ esac
   const subDir = du1.children.find((c) => c.name === 'sub');
   check('du lists subdir with pct', !!subDir && subDir.pctOfParent >= 0 && subDir.pctOfParent <= 100, JSON.stringify(du1.children));
 
-  // Проваливание кликом: тот же запрос на дочерний каталог.
+  // Проваливание кликом: тот же запрос на дочерний каталог. Дерево известное —
+  // в /tmp/sc-du/sub только файл small.txt, подкаталогов нет.
   const du2 = await req(`/api/disk-usage?${P({ path: '/tmp/sc-du/sub' })}`);
-  check('du descends into subdir', du2.children.length === 0 || du2.totalBytes >= 5, JSON.stringify(du2));
+  check('du descends into subdir', du2.totalBytes >= 5 && du2.children.length === 0, JSON.stringify(du2));
 
   // Повторный запрос того же пути — кэш 2 с: согласованный ответ без падения.
   const du1b = await req(`/api/disk-usage?${P({ path: '/tmp/sc-du' })}`);
