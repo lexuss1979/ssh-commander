@@ -34,6 +34,103 @@ function q(profileId: string): string {
   return `?profileId=${encodeURIComponent(profileId)}`;
 }
 
+// ---------------------------------------------------------------------------
+// Чистые хелперы таблицы контейнеров (парсинг docker-строк) — держим вне
+// компонента, чтобы не ре-создавать на каждый рендер и иметь под тесты.
+// ---------------------------------------------------------------------------
+
+/** Максимум символов отображаемого имени образа до обрезки (полный — в title). */
+const IMAGE_MAX_CHARS = 50;
+
+const UPTIME_UNIT_RU: Record<string, string> = {
+  year: 'г',
+  month: 'мес',
+  week: 'нед',
+  day: 'дн',
+  hour: 'ч',
+  minute: 'мин',
+  second: 'с',
+};
+
+/** Статус контейнера → класс точки. running — зелёная, restarting — жёлтая, иначе нейтральная. */
+function containerDotClass(status: string, running: boolean): string {
+  if (running) return 'running';
+  if (/^Restarting/i.test(status.trim())) return 'pending';
+  return 'stopped';
+}
+
+/** Короткий текст статуса для не-работающего контейнера (вместо аптайма). */
+function containerStatusLabel(status: string): string {
+  const s = status.trim();
+  if (/^Exited/i.test(s)) return 'остановлен';
+  if (/^Restarting/i.test(s)) return 'перезапуск';
+  if (/^Paused/i.test(s)) return 'приостановлен';
+  if (/^Created/i.test(s)) return 'создан';
+  if (/^Dead/i.test(s)) return 'недоступен';
+  return s;
+}
+
+/** «Up 6 months (healthy)» → «6 мес». `About an hour` → «≈1 ч». null — не запущен. */
+function containerUptimeLabel(status: string): string | null {
+  const m = /^Up\s+(.+?)(?:\s*\(.*\))?$/i.exec(status.trim());
+  if (!m) return null;
+  let d = m[1].trim();
+  let approx = false;
+  const about = /^about\s+an?\s+/i.test(d);
+  if (about) {
+    approx = true;
+    d = d.replace(/^about\s+an?\s+/i, '');
+  }
+  const base = d.match(/^(\d+)?\s*([a-z]+)$/i);
+  if (!base) return status;
+  const n = base[1] ?? '1';
+  const ru = UPTIME_UNIT_RU[base[2].toLowerCase().replace(/s$/, '')] ?? base[2];
+  return approx ? `≈${n} ${ru}` : `${n} ${ru}`;
+}
+
+/** Слушающий наружу (не loopback, не wildcard) → public (подсветка warn). */
+function isPublicBind(host: string): boolean {
+  const ip = host.slice(0, host.lastIndexOf(':'));
+  if (ip === '0.0.0.0' || ip === '::' || ip === '[::]') return true;
+  if (ip === '127.0.0.1' || ip === '::1' || ip === '[::1]') return false;
+  return ip !== '';
+}
+
+/** «0.0.0.0:5601->5601/tcp, :::5601->5601/tcp» → чипы. Без `->` — порт только в сети. */
+function parseDockerPorts(ports: string): Array<{ text: string; pub: boolean }> {
+  if (!ports) return [];
+  return ports
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const arrow = part.indexOf('->');
+      if (arrow === -1) return { text: part, pub: false };
+      const host = part.slice(0, arrow).trim();
+      const target = part.slice(arrow + 2).trim();
+      return { text: `${host} → ${target}`, pub: isPublicBind(host) };
+    });
+}
+
+/** Процент → цвет бара (как в метриках «Обзора»): >=90 danger, >=75 warn. */
+function meterClass(pct: number | null): string {
+  if (pct === null) return '';
+  if (pct >= 90) return ' danger';
+  if (pct >= 75) return ' warn';
+  return '';
+}
+
+/** NaN (нет stats) → null, чтобы meterClass не считал его цветным. */
+function numberOrNull(n: number): number | null {
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Ширина бара: NaN/отрицательное → 0, >100 → 100. */
+function pctWidth(n: number): string {
+  const v = Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 0;
+  return `${v}%`;
+}
+
 export function DockerPage({ profile, showError, visible, onExecContainer }: Props) {
   const [section, setSection] = useState<Section>('containers');
   const [containers, setContainers] = useState<DockerEntity[]>([]);
@@ -271,8 +368,6 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
 
   const containerAccessors = useMemo(() => ({
     name: (c: DockerEntity) => String(c.Names ?? c.ID ?? '').replace(/^\//, '').toLowerCase(),
-    image: (c: DockerEntity) => String(c.Image ?? ''),
-    status: (c: DockerEntity) => String(c.Status ?? ''),
     ports: (c: DockerEntity) => String(c.Ports ?? ''),
   }), []);
   const { sort: containerSort, toggle: toggleContainerSort, sorted: sortedContainers } = useSortBy(containers, containerAccessors, { key: 'name', dir: 'asc' });
@@ -342,43 +437,77 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
           <table className="data-table">
             <thead>
               <tr>
-                <th>ID</th>
                 <SortableTh sortKey="name" currentSort={containerSort} onToggle={toggleContainerSort}>Имя</SortableTh>
-                <SortableTh sortKey="image" currentSort={containerSort} onToggle={toggleContainerSort}>Образ</SortableTh>
-                <SortableTh sortKey="status" currentSort={containerSort} onToggle={toggleContainerSort}>Статус</SortableTh>
-                <th>CPU %</th>
-                <th>MEM</th>
+                <th>CPU</th>
+                <th>Память</th>
                 <SortableTh sortKey="ports" currentSort={containerSort} onToggle={toggleContainerSort}>Порты</SortableTh>
                 <th className="col-actions">Действия</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={8} className="muted">Загрузка…</td></tr>}
-              {!loading && sortedContainers.length === 0 && <tr><td colSpan={8} className="muted">Контейнеров нет</td></tr>}
+              {loading && <tr><td colSpan={5} className="muted">Загрузка…</td></tr>}
+              {!loading && sortedContainers.length === 0 && <tr><td colSpan={5} className="muted">Контейнеров нет</td></tr>}
               {sortedContainers.map((c) => {
                 const id = String(c.ID ?? c.ContainerID ?? '');
                 const name = String(c.Names ?? id).replace(/^\//, '');
-                const running = String(c.State ?? '').toLowerCase() === 'running' || /^Up /.test(String(c.Status ?? ''));
+                const status = String(c.Status ?? '');
+                const running = String(c.State ?? '').toLowerCase() === 'running' || /^Up /.test(status);
+                const image = String(c.Image ?? '');
                 const st = stats[name] ?? stats[shortId(id)];
+                const cpuPct = st ? parseFloat(String(st.CPUPerc ?? '')) : NaN;
+                const memPct = st ? parseFloat(String(st.MemPerc ?? '')) : NaN;
+                const ports = parseDockerPorts(String(c.Ports ?? ''));
+                const uptime = running ? containerUptimeLabel(status) : null;
                 return (
                   <tr key={id}>
-                    <td className="mono">{shortId(id)}</td>
-                    <td>{name}</td>
-                    <td>{String(c.Image ?? '')}</td>
                     <td>
-                      <span className={`status-chip ${running ? 'ok' : 'muted'}`}>{String(c.Status ?? '')}</span>
+                      <div className="cell-main">
+                        <div className="cell-top">
+                          <span className={`status-dot ${containerDotClass(status, running)}`} title={status} />
+                          <span className="uptime">{uptime ?? containerStatusLabel(status)}</span>
+                          <span className="cell-id">ID: {shortId(id)}</span>
+                        </div>
+                        <span className="name">{name}</span>
+                        <span className="image" title={image}>
+                          {image.length > IMAGE_MAX_CHARS ? `${image.slice(0, IMAGE_MAX_CHARS)}…` : image}
+                        </span>
+                      </div>
                     </td>
-                    <td className="mono">{st ? String(st.CPUPerc ?? '—') : '—'}</td>
-                    <td className="mono">{st ? String(st.MemUsage ?? st.MemPerc ?? '—') : '—'}</td>
-                    <td className="mono">{String(c.Ports ?? '')}</td>
+                    <td>
+                      <div className="cell-metric">
+                        <span className="num mono">{st ? String(st.CPUPerc ?? '—') : '—'}</span>
+                        <div className="meter">
+                          <div className={`meter-fill${meterClass(numberOrNull(cpuPct))}`} style={{ width: pctWidth(cpuPct) }} />
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="cell-metric">
+                        <span className="num mono">{st ? String(st.MemUsage ?? '—') : '—'}</span>
+                        <div className="meter">
+                          <div className={`meter-fill${meterClass(numberOrNull(memPct))}`} style={{ width: pctWidth(memPct) }} />
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="port-list">
+                        {ports.length === 0 ? (
+                          <span className="muted">—</span>
+                        ) : (
+                          ports.map((p, i) => (
+                            <span key={i} className={`port-chip${p.pub ? ' public' : ''}`}>{p.text}</span>
+                          ))
+                        )}
+                      </div>
+                    </td>
                     <td className="col-actions">
                       <div className="row-actions">
-                        <button className="btn btn-mini" onClick={() => void containerAction(id, 'start', name)} title="Старт">▶</button>
-                        <button className="btn btn-mini" onClick={() => void containerAction(id, 'stop', name)} title="Стоп">■</button>
-                        <button className="btn btn-mini" onClick={() => void containerAction(id, 'restart', name)} title="Рестарт">↻</button>
-                        <button className="btn btn-mini" onClick={() => onExecContainer(id, name)} title="Терминал в контейнере">❯</button>
-                        <button className="btn btn-mini" onClick={() => setLogsTarget({ id, name })} title="Логи">📄</button>
-                        <button className="btn btn-mini btn-danger" onClick={() => void containerAction(id, 'rm', name)} title="Удалить">✕</button>
+                        <button className="btn btn-mini icon-btn btn-primary" onClick={() => void containerAction(id, 'restart', name)} title="Перезапустить">↻</button>
+                        <button className="btn btn-mini icon-btn btn-danger" onClick={() => void containerAction(id, 'stop', name)} title="Остановить">■</button>
+                        <span className="action-sep" />
+                        <button className="btn btn-mini icon-btn btn-ghost" onClick={() => onExecContainer(id, name)} title="Терминал в контейнере">❯</button>
+                        <button className="btn btn-mini icon-btn btn-ghost" onClick={() => setLogsTarget({ id, name })} title="Логи">📄</button>
+                        <button className="btn btn-mini icon-btn btn-ghost" onClick={() => void containerAction(id, 'rm', name)} title="Удалить">✕</button>
                       </div>
                     </td>
                   </tr>

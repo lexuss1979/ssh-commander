@@ -186,6 +186,14 @@ button {
   border-radius: 4px;
 }
 
+/* Кнопка-иконка фиксированной ширины — ровный ряд действий в строке таблицы. */
+.icon-btn {
+  min-width: 25px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .btn-block {
   display: block;
   width: 100%;
@@ -3193,6 +3201,107 @@ body.resizing-agent {
 .compose-controls .compose-path {
   flex: 1;
   min-width: 260px;
+}
+
+/* === Таблица контейнеров (эпик 5): карточка «Имя», CPU/MEM с барами, порты-чипы === */
+
+/* Цвета точки статуса контейнера (переиспользуем .status-dot из сайдбара). */
+.status-dot.running { background: var(--ok); }
+.status-dot.pending { background: var(--warn); }
+.status-dot.stopped { background: var(--muted); }
+
+/* Первая ячейка — самодостаточная карточка: точка+аптайм+ID / имя / образ. */
+.cell-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  max-width: 340px;
+}
+
+.cell-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.cell-top .uptime {
+  color: var(--muted);
+}
+
+.cell-top .cell-id {
+  font-family: Menlo, Consolas, "JetBrains Mono", "Fira Code", monospace;
+}
+
+.cell-main .name {
+  font-weight: 600;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-main .image {
+  font-family: Menlo, Consolas, "JetBrains Mono", "Fira Code", monospace;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: help;
+}
+
+/* CPU / MEM: значение + мини-бар (компактный вариант .meter). */
+.cell-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 96px;
+}
+
+.cell-metric .num {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.cell-metric .meter {
+  height: 5px;
+  margin-top: 0;
+}
+
+/* Порты контейнера — компактными чипами; публично опубликованные подсвечены. */
+.port-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 340px;
+}
+
+.port-chip {
+  font-family: Menlo, Consolas, "JetBrains Mono", "Fira Code", monospace;
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.port-chip.public {
+  color: var(--warn);
+  border-color: var(--warn-soft-border);
+}
+
+/* Разделитель между операционными и разрушающими действиями строки. */
+.action-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border-soft);
+  margin: 0 3px;
 }
 
 /* === Редактор файлов (CodeMirror, эпик 6) === */
