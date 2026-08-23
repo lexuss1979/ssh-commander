@@ -3117,3 +3117,41 @@ body.resizing-agent {
   font-size: 12px;
   line-height: 1.5;
 }
+
+/* Действия над процессами (эпик 17) */
+.process-summary {
+  margin-bottom: 4px;
+}
+
+.process-summary .proc-command {
+  margin-bottom: 4px;
+}
+
+.process-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.process-preview {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  margin: 10px 0;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.process-warnings {
+  margin: 4px 0 10px;
+}
+
+.process-warning {
+  color: var(--warn);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 2px 0;
+}
