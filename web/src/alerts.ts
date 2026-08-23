@@ -110,9 +110,9 @@ export function mergeAlertStates(
           ...existing,
           value: rule.value,
           threshold: rule.threshold,
-          // Гистерезис держит неактивное правило — у него message null,
-          // сохраняем прежний текст.
-          message: rule.message ?? existing.message,
+          // Сервер заполняет message всегда — текст несёт текущее значение,
+          // алерт в зоне гистерезиса не показывает устаревшую цифру.
+          message: rule.message,
         });
       } else {
         resolved.push(existing);
@@ -126,7 +126,7 @@ export function mergeAlertStates(
       kind: rule.kind,
       ...(rule.subject !== undefined ? { subject: rule.subject } : {}),
       severity: rule.severity,
-      message: rule.message ?? '',
+      message: rule.message,
       value: rule.value,
       threshold: rule.threshold,
       since: now,

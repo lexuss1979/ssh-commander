@@ -100,12 +100,18 @@ export default function App() {
   const activeAlertsRef = useRef<Map<string, ActiveAlert>>(new Map());
   const syncedOnceRef = useRef(false);
   const toastTimer = useRef<number | null>(null);
-  // Пороги читаются из ref: в deps эффекта опроса — только тумблер, иначе
-  // каждое изменение числа в модалке пересоздавало бы таймер.
+  // Пороги читаются из ref: в deps эффекта опроса — только тумблеры, иначе
+  // каждое изменение числа в модалке пересоздавало бы таймер. Синхронизация —
+  // эффектом, не в теле рендера; сохранение настроек пишет ref напрямую,
+  // чтобы тик между setState и коммитом не прочитал старые пороги.
   const alertsSettingsRef = useRef(alertsSettings);
-  alertsSettingsRef.current = alertsSettings;
   const profilesRef = useRef(profiles);
-  profilesRef.current = profiles;
+  useEffect(() => {
+    alertsSettingsRef.current = alertsSettings;
+  }, [alertsSettings]);
+  useEffect(() => {
+    profilesRef.current = profiles;
+  }, [profiles]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -173,9 +179,8 @@ export default function App() {
   // Точки доступности серверов в сайдбаре + алерты: один тик — два запроса
   // параллельно (общий кэш overview на сервере 4 с; /api/alerts должен
   // прийти, пока кэш жив, — последовательный вызов порождал бы второй опрос
-  // SSH). При включённых алертах опрос продолжается и в скрытой вкладке
-  // (браузер троттлит таймеры до ~1/мин — честный ритм фоновой проверки
-  // уведомлений), при выключенных — прежняя пауза.
+  // SSH). В скрытой вкладке опрос идёт только когда включены и алерты, и
+  // браузерные уведомления (см. guard эффекта), иначе — прежняя пауза.
   const [pageVisible, setPageVisible] = useState(() => !document.hidden);
   const [serverStatus, setServerStatus] = useState<Record<string, { ok: boolean; error?: string }>>({});
 
@@ -223,7 +228,13 @@ export default function App() {
 
   useEffect(() => {
     if (!authed) return;
-    if (!pageVisible && !alertsSettingsRef.current.enabled) return;
+    // Скрытая вкладка не опрашивает, пока не включены браузерные уведомления
+    // — единственный сценарий, где фоновый опрос что-то даёт (колокольчик в
+    // скрытой вкладке не видно, уведомления по умолчанию выключены — иначе
+    // опрос даром дёргал бы SSH-зонды круглосуточно). Браузер троттлит
+    // скрытые таймеры до ~1/мин — честный ритм фоновой проверки.
+    const s0 = alertsSettingsRef.current;
+    if (!pageVisible && !(s0.enabled && s0.notify)) return;
     let cancelled = false;
     let timer = 0;
     const tick = async () => {
@@ -252,7 +263,7 @@ export default function App() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [authed, pageVisible, alertsSettings.enabled, applyAlertRules]);
+  }, [authed, pageVisible, alertsSettings.enabled, alertsSettings.notify, applyAlertRules]);
 
   // Сохранение настроек алертов — тихий re-baseline: активный набор строится
   // заново на следующем тике с новыми порогами (иначе гистерезис держал бы

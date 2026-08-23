@@ -67,8 +67,8 @@ export interface AlertRuleState {
   value: number;
   /** server-down: 1; disk/mem: %; load: на ядро. */
   threshold: number;
-  /** Только при active=true. */
-  message: string | null;
+  /** Текст о текущем значении — заполняется всегда (свежая цифра у алерта в зоне гистерезиса). */
+  message: string;
 }
 
 export interface AlertsResponse {

@@ -69,7 +69,7 @@ describe('evaluateAlertRules: server-down', () => {
     const r = byKind(rules, 'server-down')[0];
     expect(r.active).toBe(false);
     expect(r.value).toBe(0);
-    expect(r.message).toBeNull();
+    expect(r.message).toBe('Сервер доступен');
   });
 
   it('ok:true без metrics — единственное состояние server-down', () => {
@@ -96,7 +96,7 @@ describe('evaluateAlertRules: disk', () => {
     expect(root.message).toBe('Диск «/» занят на 93.0% (порог 90%)');
     const data = disks.find((r) => r.subject === '/data')!;
     expect(data.active).toBe(false);
-    expect(data.message).toBeNull();
+    expect(data.message).toBe('Диск «/data» занят на 40.0% (порог 90%)');
   });
 
   it('граница включительно: 90.0 при пороге 90 — active', () => {
@@ -156,7 +156,7 @@ describe('evaluateAlertRules: load', () => {
     const r = byKind(rules, 'load')[0];
     expect(r.value).toBe(0.5);
     expect(r.active).toBe(false);
-    expect(r.message).toBeNull();
+    expect(r.message).toBe('Load 2 при 4 ядрах (0.5/ядро, порог 2)');
   });
 
   it('cores null или loadAverage null — состояния нет', () => {

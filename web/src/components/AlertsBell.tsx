@@ -163,6 +163,16 @@ function AlertsSettingsModal({ settings, onClose, onSave, showError }: ModalProp
   const [notify, setNotify] = useState(settings.notify);
   const notifySupported = typeof Notification !== 'undefined';
 
+  // Overlay модалку не закрывает (пороги не теряются случайным кликом),
+  // Escape — закрывает.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
   // Разрешение запрашиваем по клику на тумблер, не при загрузке (roadmap).
   const toggleNotify = async (on: boolean) => {
     if (!on) {
@@ -170,7 +180,10 @@ function AlertsSettingsModal({ settings, onClose, onSave, showError }: ModalProp
       return;
     }
     try {
-      const perm = await Notification.requestPermission();
+      // Legacy-Safari возвращает undefined (callback-API) — оборачиваем
+      // оба варианта в промис.
+      const result: unknown = Notification.requestPermission();
+      const perm = typeof result === 'string' ? result : await result;
       if (perm === 'granted') {
         setNotify(true);
       } else {
@@ -278,8 +291,8 @@ function AlertsSettingsModal({ settings, onClose, onSave, showError }: ModalProp
           <button className="btn btn-primary" onClick={save}>
             Сохранить
           </button>
-          <button className="btn btn-ghost" onClick={resetDefaults}>
-            По умолчанию
+          <button className="btn btn-ghost" onClick={resetDefaults} title="Вернуть пороги 90 / 90 / 2">
+            Сбросить пороги
           </button>
           <button className="btn btn-ghost" onClick={onClose}>
             Отмена

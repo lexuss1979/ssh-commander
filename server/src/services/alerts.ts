@@ -33,8 +33,12 @@ export interface AlertRuleState {
   value: number;
   /** server-down: 1; disk/mem: %; load: на ядро. */
   threshold: number;
-  /** Только при active=true — текст для списка/уведомления. */
-  message: string | null;
+  /**
+   * Текст о текущем значении — заполняется всегда (и для неактивных):
+   * алерт, который держится гистерезисом, показывает свежую цифру,
+   * а не ту, при которой сработал.
+   */
+  message: string;
 }
 
 const round2 = (x: number): number => Math.round(x * 100) / 100;
@@ -67,7 +71,7 @@ export function evaluateAlertRules(
       active: !e.ok,
       value: e.ok ? 0 : 1,
       threshold: 1,
-      message: e.ok ? null : `Сервер недоступен: ${e.error ?? 'нет данных'}`,
+      message: e.ok ? 'Сервер доступен' : `Сервер недоступен: ${e.error ?? 'нет данных'}`,
     });
     const m = e.metrics;
     if (!m) continue;
@@ -81,10 +85,7 @@ export function evaluateAlertRules(
         active: d.usedPercent >= thresholds.diskPercent,
         value: d.usedPercent,
         threshold: thresholds.diskPercent,
-        message:
-          d.usedPercent >= thresholds.diskPercent
-            ? `Диск «${d.mount}» занят на ${d.usedPercent.toFixed(1)}% (порог ${thresholds.diskPercent}%)`
-            : null,
+        message: `Диск «${d.mount}» занят на ${d.usedPercent.toFixed(1)}% (порог ${thresholds.diskPercent}%)`,
       });
     }
     if (m.memory.usedPercent !== null) {
@@ -96,10 +97,7 @@ export function evaluateAlertRules(
         active: used >= thresholds.memPercent,
         value: used,
         threshold: thresholds.memPercent,
-        message:
-          used >= thresholds.memPercent
-            ? `Память занята на ${used.toFixed(1)}% (порог ${thresholds.memPercent}%)`
-            : null,
+        message: `Память занята на ${used.toFixed(1)}% (порог ${thresholds.memPercent}%)`,
       });
     }
     // Делить не на что (ядра неизвестны) — правила нет вовсе.
@@ -113,10 +111,7 @@ export function evaluateAlertRules(
         active: value >= thresholds.loadPerCore,
         value,
         threshold: thresholds.loadPerCore,
-        message:
-          value >= thresholds.loadPerCore
-            ? `Load ${m.loadAverage[0]} при ${cores} ${pluralCoresPrepositional(cores)} (${value}/ядро, порог ${thresholds.loadPerCore})`
-            : null,
+        message: `Load ${m.loadAverage[0]} при ${cores} ${pluralCoresPrepositional(cores)} (${value}/ядро, порог ${thresholds.loadPerCore})`,
       });
     }
   }
