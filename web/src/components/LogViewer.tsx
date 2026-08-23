@@ -40,10 +40,11 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
   const [pendingLine, setPendingLine] = useState('');
   const bufferRef = useRef<LogBufferState>({ lines: [], pending: '' });
   const preRef = useRef<HTMLPreElement>(null);
-  // Метрики скролла прошлого события: сжатие контента (фильтр, вытеснение
-  // кольцом) прижимает scrollTop к низу без участия пользователя — такой
-  // скролл-эвент не должен переармировать автоскролл.
-  const lastScrollHeightRef = useRef(0);
+  // Метрики скролла прошлого события/эффекта. Клампинг браузера при сжатии
+  // контента (фильтр, вытеснение кольцом) прижимает scrollTop к низу без
+  // жеста пользователя — его подпись: упали ОБА, scrollHeight и scrollTop.
+  // Жест вверх роняет только scrollTop, жест к дну scrollTop растит.
+  const lastMetricsRef = useRef({ height: 0, top: 0 });
 
   useEffect(() => {
     // Вкладка скрыта (keep-alive) — стрим на паузе; возврат перезапускает
@@ -111,20 +112,30 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
 
   // Автоскролл после каждого флеша.
   useEffect(() => {
-    if (autoscroll && preRef.current) {
-      preRef.current.scrollTop = preRef.current.scrollHeight;
+    const el = preRef.current;
+    if (!el) return;
+    if (autoscroll) el.scrollTop = el.scrollHeight;
+    // Рост контента без событий скролла (автоскролл выключен) должен
+    // попадать в метрики — иначе сжатие после роста не распознается как
+    // сжатие. При уменьшении метрики НЕ трогаем: пассивный эффект выполняется
+    // раньше события клампинга, и реф, обновлённый здесь, погасил бы
+    // подавление в onScroll.
+    if (autoscroll || el.scrollHeight > lastMetricsRef.current.height) {
+      lastMetricsRef.current = { height: el.scrollHeight, top: el.scrollTop };
     }
   }, [lines, pendingLine, autoscroll]);
 
   const onScroll = () => {
     const el = preRef.current;
     if (!el) return;
-    if (el.scrollHeight !== lastScrollHeightRef.current) {
-      // Перераскладка, а не жест пользователя.
-      lastScrollHeightRef.current = el.scrollHeight;
-      return;
-    }
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= AUTOSCROLL_THRESHOLD_PX;
+    const { height, top } = lastMetricsRef.current;
+    const sh = el.scrollHeight;
+    const st = el.scrollTop;
+    lastMetricsRef.current = { height: sh, top: st };
+    // Оба упали — браузер прижал scrollTop при сжатии контента: жеста не
+    // было, автоскролл не трогаем (пользователь его выключал).
+    if (sh < height && st < top) return;
+    const atBottom = sh - st - el.clientHeight <= AUTOSCROLL_THRESHOLD_PX;
     if (atBottom !== autoscroll) setAutoscroll(atBottom);
   };
 
