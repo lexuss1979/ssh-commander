@@ -442,7 +442,7 @@ export function OverviewPage({ profile, visible, onAskAgent }: Props) {
       )}
 
       {confirmApply && packages?.pm && (
-        <Modal title="Обновить все пакеты" onClose={() => setConfirmApply(false)}>
+        <Modal title="Обновить все пакеты" onClose={() => setConfirmApply(false)} dismissable={false}>
           <p>
             Будет выполнено обновление всех доступных пакетов (<code>{applyLogLabel(packages.pm)}</code>,{' '}
             {packages.updates.length} шт).
