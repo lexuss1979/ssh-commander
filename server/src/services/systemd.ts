@@ -1,5 +1,10 @@
 import { exec } from '../ssh/manager.js';
 import { shq } from '../util/shell.js';
+import { classifySudoProbe, sudoProbeCommand } from './sudo.js';
+// Реэкспорт sudo-зонда: публичный API systemd.ts не меняется (потребители —
+// routes/services.ts и systemd.test.ts — импортируют отсюда как раньше).
+export { classifySudoProbe, sudoProbeCommand } from './sudo.js';
+export type { SudoProbeResult } from './sudo.js';
 import type { ExecResult, Profile } from '../types.js';
 
 /**
@@ -355,11 +360,6 @@ export function sudoSystemctlCommand(action: string, unit: string): string {
   return `sudo -S -p '' -- systemctl ${action} -- ${shq(unit)}`;
 }
 
-/** Зонд sudo-пароля (паттерн security-audit.ts:330). */
-export function sudoProbeCommand(): string {
-  return `sudo -S -p '' -- true`;
-}
-
 /** Команда журнала unit'а; `-f` только для follow-стрима. Имя unit'а — аргумент
  * `-u` (getopt потребляет следующий argv как значение опции), поэтому ведущий
  * `-` в имени не может быть распознан как опция; `--` тут не нужен. */
@@ -375,7 +375,7 @@ export function clampTail(raw: unknown): number {
 }
 
 // ---------------------------------------------------------------------------
-// Классификация ошибок действий и sudo-зонда
+// Классификация ошибок действий
 // ---------------------------------------------------------------------------
 
 export type ActionFailureCategory =
@@ -407,18 +407,6 @@ export function classifyActionFailure(result: ExecResult): ActionFailureCategory
   if (/not found|could not be found/i.test(err)) return 'not-found';
   if (/Job for .* failed/i.test(err)) return 'job-failed';
   return 'transport';
-}
-
-export type SudoProbeResult = 'ok' | 'wrong-password' | 'not-in-sudoers' | 'sudo-not-found' | 'other';
-
-/** Классификация зонда `sudo -S -p '' -- true`: явные причины вместо 502. */
-export function classifySudoProbe(result: ExecResult): SudoProbeResult {
-  if (result.code === 0) return 'ok';
-  const err = `${result.stderr}\n${result.stdout}`;
-  if (/Sorry, try again/.test(err)) return 'wrong-password';
-  if (/is not in the sudoers file|not allowed to execute/.test(err)) return 'not-in-sudoers';
-  if (/not found/.test(err)) return 'sudo-not-found';
-  return 'other';
 }
 
 // ---------------------------------------------------------------------------
