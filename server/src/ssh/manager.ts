@@ -165,8 +165,15 @@ export function execStream(
 ): ExecStreamHandle {
   let channel: ClientChannel | null = null;
   let closed = false;
+  // Промис создаётся сразу и resolve-функция звается на всех терминальных
+  // путях: потребитель читает handle.code синхронно после вызова, и присвоение
+  // свойства позже (внутри асинхронного колбэка exec) он бы уже не увидел —
+  // оставался бы навсегда зарезолвленный заглушкой промис.
+  let resolveCode!: (code: number | null) => void;
   const handle: ExecStreamHandle = {
-    code: Promise.resolve(null),
+    code: new Promise<number | null>((resolve) => {
+      resolveCode = resolve;
+    }),
     close: () => {
       closed = true;
       if (channel) {
@@ -184,6 +191,7 @@ export function execStream(
       client.exec(command, (err, ch) => {
         if (err) {
           onChunk(`SSH exec error: ${err.message}\n`, true);
+          resolveCode(null);
           return;
         }
         // close() may have been called while exec() was in flight; kill the
@@ -194,20 +202,23 @@ export function execStream(
           } catch {
             /* noop */
           }
+          resolveCode(null);
           return;
         }
         channel = ch;
         channel.on('data', (d: Buffer) => onChunk(d.toString(), false));
         channel.stderr.on('data', (d: Buffer) => onChunk(d.toString(), true));
-        handle.code = new Promise<number | null>((resolve) => {
-          ch.on('close', (exitCode: number | null) => resolve(exitCode));
-        });
+        ch.on('close', (exitCode: number | null) => resolveCode(exitCode));
         channel.on('error', () => {
-          /* handled by close */
+          // close обычно следует за error, но не полагаемся на это.
+          resolveCode(null);
         });
       });
     })
-    .catch((e) => onChunk(`${String(e.message ?? e)}\n`, true));
+    .catch((e) => {
+      onChunk(`${String(e.message ?? e)}\n`, true);
+      resolveCode(null);
+    });
 
   return handle;
 }
