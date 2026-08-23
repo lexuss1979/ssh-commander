@@ -77,9 +77,13 @@
   каждый существует — `requireProfile`, при отсутствующих — 400 со списком.
 - Параллельный прогон: `Promise.allSettled(profileIds.map(p => withTimeout(
   exec(p, command, {timeoutMs: RUN_TIMEOUT_MS}), …)))`. `RUN_TIMEOUT_MS =
-  120000` (перезапуск службы дольше дефолтных 60 c). `withTimeout` — тот же
-  локальный хелпер, что в `overview.ts` (guard-таймаут на профиль: мёртвый
-  сервер не вешает весь ответ).
+  120000` (перезапуск службы дольше дефолтных 60 c). `withTimeout` в
+  `overview.ts` — **приватная функция модуля** (`services/overview.ts:100`,
+  не экспортируется): первым шагом эпика выносим её в `src/util/async.ts`
+  и переключаем `overview.ts` на импорт (перенос без изменения логики,
+  существующие тесты остаются зелёными), иначе пришлось бы либо копировать
+  тело, либо тянуть `snippets` за подсистему `overview`. Смысл прежний:
+  guard-таймаут на профиль — мёртвый сервер не вешает весь ответ.
 - **Команда передаётся в `exec` как есть** — shell-строка уровня терминала;
   `shq` НЕ применяется (это не аргумент, а команда). Никакого deny-листа.
 - Маппинг `mapRunResults` (чистая функция под unit-тесты):
@@ -96,13 +100,20 @@
 
 ### 3. Фронтенд: раздел «Команды» на ServersPage
 
-- `App.tsx`: передать в ServersPage проп `onAskAgent={handleAskAgent}`
-  (паттерн TerminalPage/FilesPage).
+- `App.tsx`: передать в ServersPage пропы `onAskAgent={handleAskAgent}`
+  (паттерн TerminalPage/FilesPage) и `profiles={profiles}` (список уже в
+  стейте App).
 - Новый компонент `web/src/components/SnippetsSection.tsx`, пропсы
-  `{showError, onAskAgent, servers: OverviewServerEntry[] | null}` — цели
-  берутся из опрошенного `/api/overview` (`data.servers`: id + name +
-  username@host); недоступные серверы тоже можно выбрать — `exec` честно
-  вернёт ошибку в результатах.
+  `{showError, onAskAgent, profiles: Profile[], servers: OverviewEntry[] |
+  null}`. **Список целей строится из `profiles`, а не из overview**:
+  ServersPage опрашивает `/api/overview` только при `visible` и до первого
+  ответа держит `data === null`, а при недоступном опросе — сколь угодно
+  долго; из overview цели то появлялись бы, то исчезали. Профили в App уже
+  загружены (`App.tsx:55`) — прокидываем проп через ServersPage (тем же
+  путём, что `onAskAgent`). `servers` остаётся необязательным украшением:
+  статус-точка «сервер недоступен» рядом с чекбоксом, когда снимок есть.
+  Недоступные серверы выбирать можно — `exec` честно вернёт ошибку в
+  результатах.
 - Секция под сеткой карточек: список сниппетов (имя + превью команды
   mono-строкой), кнопки «Новый» / «✎» / «🗑» (confirm) / «Выполнить».
 - Форма редактирования (модалка `Modal`): `name`, `command` (textarea mono),
@@ -170,7 +181,9 @@ CSS-переменных.
 - прогон с моком `exec` (`vi.mock('../ssh/manager.js')`, паттерн
   `systemd.test.ts`): параллельный вызов на каждый профиль, команда
   передаётся **как есть** (проверка, что экранирование не применяется),
-  лимит 10 профилей.
+  лимит 10 профилей;
+- `withTimeout` после выноса в `util/async.ts`: резолв до дедлайна, отказ
+  по дедлайну с текстом (тест переезжает вместе с функцией).
 
 Ручной сценарий (стенд: сервер + 2–3 sshd-профиля на :2222/:2223 +
 mock-openai при проверке «В чат»):
@@ -197,6 +210,11 @@ mock-openai при проверке «В чат»):
   AGENTS.md при сдаче.
 - **Профиль удалён между выбором целей и запуском** — сервер валидирует
   все цели до первого exec (400 со списком), ничего не запустится «наполовину».
+- **Бюджет SSH-каналов** — запуск занимает по транзитному каналу на каждый
+  профиль на время выполнения (до 120 c); на профиле это тот же пул, что у
+  терминалов (эпик 15, лимит 4) и follow-стримов (лимит 3). Лимит 10
+  профилей — по одному каналу на профиль, в один сервер упереться нельзя,
+  отдельный лимитер не нужен.
 - **Интерактивные команды (sudo, запрос ввода)** — без stdin выполнение
   завершится ошибкой/зависанием до таймаута 120 c; в v1 без sudo — честная
   ошибка, как в терминале без пароля.
@@ -204,11 +222,13 @@ mock-openai при проверке «В чат»):
 ## Затрагиваемые файлы
 
 - server: новый `src/services/snippets.ts`, новый `src/routes/snippets.ts`,
+  новый `src/util/async.ts` (вынос `withTimeout` из `overview.ts`),
+  `src/services/overview.ts` (импорт вместо локальной функции),
   `src/index.ts` (монтирование);
 - server/test: новый `snippets.test.ts`; расширить `integration.manual.mjs`;
 - web: новый `src/components/SnippetsSection.tsx`,
-  `src/pages/ServersPage.tsx` (проп `onAskAgent` + секция), `src/App.tsx`
-  (проброс `onAskAgent`), `src/api.ts` (типы `Snippet`/`SnippetRunResult` +
+  `src/pages/ServersPage.tsx` (пропы `onAskAgent`/`profiles` + секция),
+  `src/App.tsx` (проброс `onAskAgent` и `profiles`), `src/api.ts` (типы `Snippet`/`SnippetRunResult` +
   fetch-функции), `src/styles.css`;
 - docs по сдаче: `AGENTS.md` (маршруты, стор, инвариант «команда как есть»),
   `docs/architecture.md` (раздел подсистемы), `docs/roadmap.md` (пометка

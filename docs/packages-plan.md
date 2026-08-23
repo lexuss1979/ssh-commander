@@ -65,6 +65,12 @@ if (opts.stdin !== undefined) {
 
 **0b. Общий модуль `server/src/services/sudo.ts`.**
 
+**Если эпик 17 уже сдан — модуль существует, шаг сводится к импорту**:
+`docs/process-actions-plan.md` (шаг 1.1) описывает тот же вынос и заводит
+`probeSudo` сразу, потому что по таблице порядка 17 идёт раньше. Ниже —
+вариант «19 первым»; делает его тот, кто первым дошёл, второй просто
+импортирует.
+
 Перенести из `systemd.ts` зонд и классификацию: `sudoProbeCommand()` +
 `classifySudoProbe` (и типы `SudoProbeResult`) + новая обёртка
 `probeSudo(profile, password): Promise<SudoProbeResult>` (exec
@@ -96,6 +102,13 @@ if (opts.stdin !== undefined) {
 - `isUpdatesExitCode(pm, code)` — **код 100 у dnf/yum = есть обновления,
   не ошибка** (roadmap): `pm === 'dnf' || pm === 'yum'` → `code === 0 ||
   code === 100`; apt/apk → `code === 0`.
+  **Код берётся из маркера, а не из `result.code`.** Снимок — одна команда
+  из двух частей (список + проверка рестарта), и код возврата всей строки
+  принадлежит последней части: `dnf check-update` со своим 100 был бы
+  затёрт нулём от `echo`/`fi`, а реальный отказ менеджера — тоже.
+  Поэтому список запускается как
+  `<listUpdatesCommand>; echo "@@LIST_CODE@@$?"` и `parseListCode(text)`
+  достаёт число из маркера; `isUpdatesExitCode` применяется к нему.
 - Парсеры:
   - `parseAptList(text)` — строки `name/suite version arch [upgradable
     from: current]`: name — до первого `/` (имена могут содержать `+`, `-`,
@@ -117,12 +130,17 @@ if (opts.stdin !== undefined) {
     (roadmap): строка без `<` — продолжение имени предыдущей записи
     (аппендим). Строки без совпадения и без предыдущей записи — пропуск.
 - Признаки рестарта (в том же exec, маркером — паттерн `metrics.ts`):
-  - `rebootCheckSuffix(pm)`:
-    - apt: `echo '@@REBOOT@@'; if [ -f /var/run/reboot-required ]; then cat /var/run/reboot-required.pkgs 2>/dev/null; fi` — маркер печатается **только** при существующем файле;
-    - dnf/yum: `echo '@@REBOOT@@'; if command -v needs-restarting >/dev/null 2>&1; then needs-restarting -r; echo "@@RESTART_CODE@@$?"; fi` — код 1 = нужен рестарт (0 = нет; иное — считаем «нет», вывод остаётся информационным);
+  - `rebootCheckSuffix(pm)` (каждый вариант начинается с `'; '` —
+    склейка с командой списка идёт встык, без разделителя получилась бы
+    `apt list --upgradableecho …`):
+    - apt: `; if [ -f /var/run/reboot-required ]; then echo '@@REBOOT@@'; cat /var/run/reboot-required.pkgs 2>/dev/null; fi` — маркер внутри `if`, печатается **только** при существующем файле (по его наличию и считается `rebootRequired`);
+    - dnf/yum: `; if command -v needs-restarting >/dev/null 2>&1; then echo '@@REBOOT@@'; needs-restarting -r; echo "@@RESTART_CODE@@$?"; fi` — код 1 = нужен рестарт (0 = нет; иное — считаем «нет», вывод остаётся информационным);
     - apk: без суффикса (конвенции нет, `rebootRequired: false`).
-  - Полная команда снимка: `listUpdatesCommand(pm) + rebootCheckSuffix(pm)`
-    (одним exec — детект менеджера отдельным, см. ниже).
+  - Полная команда снимка:
+    `` `${listUpdatesCommand(pm)}; echo "@@LIST_CODE@@$?"${rebootCheckSuffix(pm)}` ``
+    — одним exec (детект менеджера отдельным, см. ниже); маркер кода
+    списка идёт **до** проверки рестарта, чтобы `$?` относился к самому
+    менеджеру.
   - `parseRebootSection(text)` — раздел после `@@REBOOT@@`: `{code: number |
     null, packages: string[]}`; код из `@@RESTART_CODE@@N`; `rebootRequired`
     считается в сборке снимка (apt: раздел есть; dnf/yum: code === 1).
@@ -136,9 +154,10 @@ if (opts.stdin !== undefined) {
 1. `exec(detectPmCommand())` → PM; не определён → снимок
    `{pm: null, error: 'Менеджер пакетов не найден (apt/dnf/yum/apk)',
    updates: [], rebootRequired: false, ...}` — не ошибка (заглушка в UI).
-2. `exec(listUpdatesCommand(pm) + rebootCheckSuffix(pm))` — код по
-   `isUpdatesExitCode`; иначе Error со stderr. Парсинг списка + reboot-секции.
-   Дедуп пакетов по имени (первое вхождение).
+2. `exec(<команда снимка>)` — код списка берётся из `@@LIST_CODE@@` и
+   проверяется `isUpdatesExitCode`; не прошёл → Error со stderr. Парсинг
+   списка (текст до маркера `@@LIST_CODE@@`) + reboot-секции. Дедуп
+   пакетов по имени (первое вхождение).
 3. apt → `withSftp` stat индекса (ошибка stat, кроме ENOENT, → тихий `null`).
 4. Кэш 60 с на профиль (паттерн `collectMetrics`, ошибочный промис из кэша
    удаляется) + `invalidatePackagesCache(profileId)` для вызова после
@@ -204,6 +223,16 @@ interface PackagesSnapshot {
   RequestInit }` — при наличии используется вместо `buildUrl` (fetch с
   `credentials: 'same-origin'` + `signal` + `init`). Нужен для POST-стрима
   применения (пароль — в теле, не в URL).
+  **Стабильность идентичности обязательна**: эффект стрима зависит от
+  `buildUrl` (`LogViewer.tsx:111`), и `buildRequest` войдёт в тот же
+  массив зависимостей — новая функция на каждый рендер OverviewPage
+  перезапускала бы стрим, то есть **повторно запускала `apt-get upgrade`**.
+  Поэтому `buildRequest` — `useCallback` с явными зависимостями
+  (`profile.id`, пароль из стейта модалки), и в самом LogViewer при
+  `oneShot` — ref-guard «запуск ровно один на монтирование»: `StrictMode`
+  включён (`web/src/main.tsx`), в dev эффекты монтирования выполняются
+  дважды, и без guard'а POST ушёл бы двумя запросами. Для GET-стримов
+  (tail, journalctl) двойной запуск безвреден, для мутации — нет.
 - Новый проп `oneShot?: boolean` — для мутирующих разовых стримов:
   чекбокс «Следовать» скрыт (follow принудительно false), кнопка
   «Переподключиться» скрыта (перезапуск = повторное выполнение мутации —
@@ -276,8 +305,11 @@ interface PackagesSnapshot {
   `-r`-суффикса;
 - `isUpdatesExitCode`: dnf 100 → ок, dnf 0 → ок, dnf 1 → нет, apt 0 → ок,
   apt 100 → нет;
-- `parseRebootSection`: маркер есть/нет, `@@RESTART_CODE@@1`, список
-  пакетов `.pkgs`;
+- `parseListCode`: маркер `@@LIST_CODE@@100` → 100, маркера нет (вывод
+  обрезан/команда не дошла) → null → трактуем как отказ; текст списка
+  отрезается по маркеру и не попадает в парсер пакетов;
+- `parseRebootSection`: маркер есть/нет (apt: наличие маркера = нужен
+  рестарт), `@@RESTART_CODE@@1`, список пакетов `.pkgs`;
 - `parsePmDetection`: apt-путь, пустой вывод → null;
 - `buildApplyCommand`: sudo-прямая форма без `sh -c` для всех PM
   (`sudo -S -p '' -- env DEBIAN_FRONTEND=noninteractive apt-get -y
@@ -309,6 +341,9 @@ dnf/alpine):
   статус завершён;
 - закрытие просмотрщика посреди применения прерывает apt-get (канал
   закрыт), повторный запуск возможен;
+- dev-режим (`npm run dev`, StrictMode): открытие модалки применения даёт
+  **один** POST — в выводе один запуск команды, на сервере занят один
+  follow-слот (проверка ref-guard'а и стабильности `buildRequest`);
 - четвёртый одновременный follow-стрим (tail + journalctl + apply) → 429;
 - сервер без менеджера пакетов → карточка «не проверяются», не ошибка.
 
@@ -330,14 +365,21 @@ dnf/alpine):
 - **Долгий вывод применения** — chunk-gate дропает середину с маркером
   при медленном читателе (просмотрщик с кольцевым буфером это переживает);
   полный протокол — в терминале.
+- **Повторный запуск мутации из-за перерисовки** — самый неприятный
+  сценарий расширения LogViewer: нестабильный `buildRequest` или
+  StrictMode-двойное монтирование = второй `apt-get upgrade` поверх
+  первого. Закрыто `useCallback` + ref-guard `oneShot` (шаг 3) и проверяется
+  в ручном сценарии (dev-режим: в выводе один запуск, на сервере один
+  занятый follow-слот).
 - **Применение не живёт без открытого просмотрщика** — закрыл модалку →
   канал закрыт → apt-get прерван; честное поведение v1, как у
   follow-стримов.
 
 ## Затрагиваемые файлы
 
-- server: новый `src/services/packages.ts`, новый `src/services/sudo.ts`
-  (шаг 0b), новый `src/routes/packages.ts`, `src/index.ts` (монтирование),
+- server: новый `src/services/packages.ts`, `src/services/sudo.ts`
+  (шаг 0b — новый, если эпик 17 ещё не сдал его), новый
+  `src/routes/packages.ts`, `src/index.ts` (монтирование),
   `src/ssh/manager.ts` (шаг 0a — `execStream` stdin), `src/services/systemd.ts`
   (шаг 0b — импорт из `sudo.ts`);
 - server/test: новый `packages.test.ts`; расширить `exec-stream.test.ts`;

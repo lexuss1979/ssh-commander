@@ -160,6 +160,12 @@ SSH-вызовов нет), ответ:
   !settings.enabled) return;` — при включённых алертах опрос идёт и в
   скрытой вкладке (троттлится браузером до ~1/мин), при выключенных —
   прежняя пауза.
+- **Зависимости эффекта**: `[authed, pageVisible, settings.enabled]` —
+  только тумблер, не пороги. Сами пороги эффект читает из ref
+  (`settingsRef.current`, обновляется при сохранении): попади они в deps,
+  каждое изменение числа в модалке пересоздавало бы таймер и сбивало
+  ритм тика. Ref-паттерн здесь же закрывает и re-baseline — сохранение
+  настроек пишет ref, чистит `activeRef` и сбрасывает `syncedOnce`.
 - **Тихая первая синхронизация**: ref `syncedOnce`; первый успешный merge
   кладёт активные алерты в список, но `fired` игнорирует (F5 не
   спамит уведомлениями).
@@ -309,7 +315,7 @@ export function mergeAlertStates(prev: Map<string, ActiveAlert>, rules: AlertRul
 - несколько профилей в одном overview — правила всех;
 - `DEFAULT_ALERT_THRESHOLDS` = `{90, 90, 2}`.
 
-`server/test/alerts-route.test.ts` (новий, паттерн `file-tail-route.test.ts`:
+`server/test/alerts-route.test.ts` (новый, паттерн `file-tail-route.test.ts`:
 express-приложение с роутером, `vi.mock('../src/services/overview.js')` на
 фикстуру ответа):
 

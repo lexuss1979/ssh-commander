@@ -63,7 +63,18 @@
 
 - `sudoProbeCommand(): string` → `` `sudo -S -p '' -- true` ``;
 - `type SudoProbeResult = 'ok' | 'wrong-password' | 'not-in-sudoers' | 'sudo-not-found' | 'other'`;
-- `classifySudoProbe(result: ExecResult): SudoProbeResult`.
+- `classifySudoProbe(result: ExecResult): SudoProbeResult`;
+- `probeSudo(profile, password): Promise<SudoProbeResult>` — обёртка
+  «exec зонда со `stdin: password + '\n'` + классификация». Нужна и здесь,
+  и в эпике 19 (применение обновлений, шаг 0b его плана); заводим сразу,
+  чтобы 19 модуль только импортировал.
+
+**Пересечение с эпиком 19.** `docs/packages-plan.md` описывает тот же
+вынос своим шагом 0b — модуль создаёт тот, кто идёт первым (по таблице
+порядка это эпик 17). Если 17 сдан — 19 пропускает шаг 0b и просто
+импортирует `probeSudo`; если порядок поменяется — наоборот, и тогда этот
+шаг 1.1 сводится к импорту. Дважды переносить нечего: реэкспорт из
+`systemd.ts` держит совместимость в обоих случаях.
 
 `systemd.ts` импортирует их из `./sudo.js` и **реэкспортирует** — публичный
 API модуля не меняется, `systemd.test.ts` и `routes/services.ts` не
@@ -104,7 +115,7 @@ export class ProcessActionError extends Error { readonly status: number; /* 400 
   следующий argv как значение опции). Повышение nice (замедление) доступно
   непривилегированному пользователю для своих процессов; понижение
   (ускорение) и чужие процессы — EPERM → sudo-ветка.
-- **`classifyProcessActionFailure(result): 'ok' | 'sudo-needed' | 'gone' | 'transport'`**
+- **`classifyProcessActionFailure(result): 'ok' | 'sudo-needed' | 'gone' | 'no-tool' | 'transport'`**
   по тексту stderr/stdout и коду:
 
   | Категория | Признак |
@@ -112,7 +123,14 @@ export class ProcessActionError extends Error { readonly status: number; /* 400 
   | `ok` | code === 0 |
   | `sudo-needed` | `Operation not permitted`, `Permission denied` (EPERM — чужой процесс, понижение nice, kernel-thread) |
   | `gone` | `No such process` (ESRCH — процесс завершился между снимком и кликом) |
+  | `no-tool` | `command not found` / `not found` / `No such file or directory` для самой утилиты (BusyBox без `renice`, минимальный образ без `/bin/kill` под `sudo --`) → 400 «Команда `renice` недоступна на этом сервере» |
   | `transport` | всё остальное |
+
+  Категория `no-tool` заведена отдельно намеренно: без неё отсутствие
+  `renice` (обычное дело на BusyBox) приезжало бы 502 «Сервер недоступен»
+  — сервер-то в порядке, недоступна утилита, и пользователю нужен другой
+  текст. `sudo`-форма зовёт `/bin/kill`/`/bin/renice` напрямую (без
+  shell), так что промах по бинарнику здесь реален и без экзотики.
 
   Фикстуры обоих формулировок: util-linux `kill: (1234) - Operation not
   permitted` и builtin `bash: line 1: kill: (1234) - Operation not
@@ -221,7 +239,9 @@ export function processRenice(profileId, pid, nice, sudoPassword?): Promise<{ok,
    отрицательный nice не ломает формат.
 5. `classifyProcessActionFailure`: code 0 → ok; обе формулировки EPERM
    (util-linux и bash-builtin) → sudo-needed; renice `Permission denied` →
-   sudo-needed; `No such process` (kill и renice) → gone; мусор → transport.
+   sudo-needed; `No such process` (kill и renice) → gone;
+   `sh: renice: command not found` и `sudo: renice: command not found` →
+   no-tool; мусор → transport.
 6. `runProcessSignal` (матрица): успех без sudo; EPERM без пароля → 400
    «укажите sudo-пароль»; EPERM + пароль → зонд ok → sudo-ретрай ok; зонд
    «Sorry, try again» → 400 «Неверный sudo-пароль»; «not in the sudoers» →
@@ -265,6 +285,9 @@ sudo-паролем.
 - **Гонка «процесс умер между снимком и кликом»** (включая reuse pid другим
   процессом) — категория `gone` с явным 400; окно секунды (polling 3 с),
   принимается как любое kill-UI.
+- **Утилиты может не быть** — `renice` отсутствует на многих минимальных
+  образах, `sudo -- kill` требует бинарника `/bin/kill` (не builtin);
+  категория `no-tool` даёт понятный 400 вместо 502.
 - **EPERM как норма, а не ошибка** — renice вниз и чужие процессы без root
   всегда EPERM: это штатный вход в sudo-ветку, не 502; тексты утилиты
   пробрасываются как есть.
