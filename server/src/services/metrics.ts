@@ -268,3 +268,12 @@ export function collectMetrics(profile: Profile): Promise<ServerMetrics> {
   });
   return promise;
 }
+
+/**
+ * Сброс кэша снимка после мутации (действия над процессами, эпик 17) —
+ * немедленный refetch «Обзора» и сайдбара (`/api/overview`) вернёт свежие
+ * данные, а не кэш 2 с. Паттерн `invalidateServicesCache` из systemd.ts.
+ */
+export function invalidateMetricsCache(profileId: string): void {
+  cache.delete(profileId);
+}
