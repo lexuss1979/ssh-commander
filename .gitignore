@@ -11,3 +11,4 @@ keys/*
 *.log
 .DS_Store
 .qwen/
+.worktrees/
