@@ -354,6 +354,70 @@ esac
     console.log('  skip: SERVICES_POLKIT=1, но systemd на стенде недоступен');
   }
 
+  console.log('== packages (обновления, эпик 19) ==');
+  const pkg0 = await req(`/api/packages/updates?${P()}`);
+  check(
+    'packages snapshot shape',
+    typeof pkg0.timestamp === 'number' &&
+      (pkg0.pm === null || ['apt', 'dnf', 'yum', 'apk'].includes(pkg0.pm)) &&
+      Array.isArray(pkg0.updates) &&
+      typeof pkg0.rebootRequired === 'boolean' &&
+      Array.isArray(pkg0.rebootPackages) &&
+      (typeof pkg0.indexAgeMs === 'number' || pkg0.indexAgeMs === null),
+    JSON.stringify(pkg0).slice(0, 200),
+  );
+  if (pkg0.pm !== null) {
+    // Кэш 60 с: повторный запрос делит тот же промис (timestamp совпадает).
+    const pkg1 = await req(`/api/packages/updates?${P()}`);
+    check(
+      'packages snapshot cached (60 c)',
+      pkg1.pm === pkg0.pm && pkg1.timestamp === pkg0.timestamp,
+      JSON.stringify(pkg1).slice(0, 200),
+    );
+    const entry = pkg0.updates[0];
+    if (entry) {
+      check(
+        'packages update entry shape',
+        typeof entry.name === 'string' && typeof entry.available === 'string' && 'current' in entry && 'source' in entry,
+        JSON.stringify(entry),
+      );
+    } else {
+      console.log('  skip: обновлений на стенде нет — форма записи не проверяется');
+    }
+  } else {
+    console.log(`  skip: менеджера пакетов на стенде нет (${pkg0.error ?? '?'}) — список не проверяется`);
+  }
+
+  // Применение — только по явному флагу: мутация, на стенде может реально
+  // обновить пакеты. PACKAGES_APPLY=1 node test/integration.manual.mjs
+  if (process.env.PACKAGES_APPLY === '1' && pkg0.pm !== null) {
+    const applyRes = await fetch(`${BASE}/api/packages/apply?${P()}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
+      body: JSON.stringify({}),
+    });
+    const applyText = await applyRes.text();
+    check(
+      'packages apply stream (без sudo)',
+      applyRes.status === 200 && typeof applyText === 'string' && applyText.length > 0,
+      `${applyRes.status}: ${applyText.slice(0, 200)}`,
+    );
+    const pkgAfter = await req(`/api/packages/updates?${P()}`);
+    check('packages refetch after apply', pkgAfter.pm === pkg0.pm, JSON.stringify(pkgAfter).slice(0, 200));
+    if (process.env.SUDO_PASSWORD) {
+      const bad = await fetch(`${BASE}/api/packages/apply?${P()}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
+        body: JSON.stringify({ sudoPassword: 'definitely-wrong' }),
+      });
+      check('packages apply wrong sudo → 400 (зонд до стрима)', bad.status === 400, String(bad.status));
+    } else {
+      console.log('  skip: SUDO_PASSWORD не задан — кейс зонда (неверный пароль) пропущен');
+    }
+  } else {
+    console.log('  skip: PACKAGES_APPLY=1 не задан — применение не проверяется');
+  }
+
   console.log('== cleanup ==');
   await req(`/api/profiles/${pid}`, { method: 'DELETE' });
   check('profile deleted', true);
