@@ -1,4 +1,4 @@
-import type { FileSearchResult } from './types';
+import type { AlertsResponse, FileSearchResult } from './types';
 
 export class ApiError extends Error {
   status: number;
@@ -201,6 +201,16 @@ export interface OverviewResponse {
 /** Сводный снимок по всем профилям (вкладка «Серверы»). */
 export function fetchOverview(): Promise<OverviewResponse> {
   return api<OverviewResponse>('/api/overview');
+}
+
+/** Состояния правил алертов всех профилей (эпик 20). Поверх кэша overview. */
+export function fetchAlerts(t: { disk: number; mem: number; load: number }): Promise<AlertsResponse> {
+  const params = new URLSearchParams({
+    disk: String(t.disk),
+    mem: String(t.mem),
+    load: String(t.load),
+  });
+  return api<AlertsResponse>(`/api/alerts?${params}`);
 }
 
 /** Сэмпл истории нагрузки: лёгкий срез снимка метрик. */

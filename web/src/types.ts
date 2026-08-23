@@ -57,6 +57,37 @@ export interface DockerEntity {
   [key: string]: string | number | boolean | null | undefined;
 }
 
+// Алерты по порогам (эпик 20) — зеркала серверных имён полей.
+export type AlertKind = 'server-down' | 'disk' | 'memory' | 'load';
+
+export type AlertSeverity = 'crit' | 'warn';
+
+/**
+ * Состояние одного правила на тик опроса: и неактивные тоже — гистерезис
+ * на клиенте должен видеть значение ниже порога, а не только факт срабатывания.
+ */
+export interface AlertRuleState {
+  profileId: string;
+  kind: AlertKind;
+  /** Точка монтирования (kind='disk'). */
+  subject?: string;
+  severity: AlertSeverity;
+  active: boolean;
+  /** server-down: 0/1; disk/memory: %; load: load1/cores (2 знака). */
+  value: number;
+  /** server-down: 1; disk/mem: %; load: на ядро. */
+  threshold: number;
+  /** Текст о текущем значении — заполняется всегда (свежая цифра у алерта в зоне гистерезиса). */
+  message: string;
+}
+
+export interface AlertsResponse {
+  timestamp: number;
+  /** Эффективные пороги (echo). */
+  thresholds: { diskPercent: number; memPercent: number; loadPerCore: number };
+  rules: AlertRuleState[];
+}
+
 export interface DialogueMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string | null;

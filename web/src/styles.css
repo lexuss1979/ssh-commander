@@ -243,6 +243,229 @@ button {
   letter-spacing: 0.3px;
 }
 
+/* Шапка сайдбара: логотип + колокольчик алертов (эпик 20). */
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  position: relative;
+}
+
+.alerts-bell-root {
+  position: relative;
+}
+
+.alerts-bell {
+  position: relative;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  padding: 4px 7px;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.alerts-bell:hover {
+  background: var(--bg-hover);
+}
+
+/* Алерты выключены — колокольчик приглушён, но остаётся входом в настройки. */
+.alerts-bell.disabled {
+  opacity: 0.45;
+}
+
+.bell-badge {
+  position: absolute;
+  top: -6px;
+  right: -7px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: var(--warn);
+  color: var(--bg);
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bell-badge.crit {
+  background: var(--danger);
+}
+
+.alerts-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 310px;
+  max-width: calc(100vw - 32px);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 48px var(--shadow-lg);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.alerts-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.alerts-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.alerts-gear {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 3px 4px;
+  border-radius: 4px;
+}
+
+.alerts-gear:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.alerts-list {
+  max-height: 340px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.alert-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  background: none;
+  border: none;
+  border-left: 3px solid var(--warn);
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.alert-item:hover {
+  background: var(--bg-hover);
+}
+
+.alert-item.crit {
+  border-left-color: var(--danger);
+}
+
+.alert-item-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.alert-item-head strong {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alert-item-since {
+  color: var(--muted);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.alert-item-message {
+  line-height: 1.35;
+  font-size: 12px;
+}
+
+.alerts-empty {
+  padding: 14px 12px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Чип проблемного профиля рядом с именем в сайдбаре (паттерн agent-dot). */
+.profile-alert-chip {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 8px;
+  border: 1px solid var(--warn-soft-border);
+  color: var(--warn);
+}
+
+.profile-alert-chip.crit {
+  border-color: var(--danger-soft-border);
+  background: var(--danger-soft-bg);
+  color: var(--danger);
+}
+
+/* Настройки алертов (модалка из колокольчика). */
+.alerts-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.alerts-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.alerts-toggle input[type='checkbox'] {
+  width: auto;
+}
+
+.alerts-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+}
+
+.alerts-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.alerts-field input {
+  box-sizing: border-box;
+}
+
 .sidebar-section {
   display: flex;
   flex-direction: column;
