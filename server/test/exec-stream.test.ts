@@ -36,6 +36,14 @@ const mock = vi.hoisted(() => {
   class FakeChannel extends FakeEmitter {
     stderr = new FakeEmitter();
     closeCalls = 0;
+    stdinWritten = '';
+    endCalls = 0;
+    write(data: string | Buffer): void {
+      this.stdinWritten += data.toString();
+    }
+    end(): void {
+      this.endCalls++;
+    }
     close(): void {
       this.closeCalls++;
       this.emit('close', null);
@@ -125,6 +133,32 @@ describe('execStream', () => {
     const bytes = Buffer.from('привет é🌲');
     for (const b of bytes) ch!.emit('data', Buffer.from([b]));
     expect(chunks.join('')).toBe('привет é🌲');
+    ch!.emit('close', 0);
+  });
+
+  it('опциональный stdin пишется в канал и закрывается EOF (пароль sudo -S)', async () => {
+    const chunks: string[] = [];
+    const handle = execStream(profile('exec-stream-stdin'), 'sudo -S -p \'\' -- true', (c) => chunks.push(c), {
+      stdin: 's3cret\n',
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    const ch = mock.FakeClient.instances.at(-1)?.channels.at(-1);
+    expect(ch).toBeDefined();
+    expect(ch!.stdinWritten).toBe('s3cret\n');
+    expect(ch!.endCalls).toBe(1);
+    // stdout-чанки после подачи stdin доходят как раньше.
+    ch!.emit('data', Buffer.from('done\n'));
+    expect(chunks.join('')).toBe('done\n');
+    ch!.emit('close', 0);
+    await expect(handle.code).resolves.toBe(0);
+  });
+
+  it('без stdin канал не трогается (обратная совместимость)', async () => {
+    execStream(profile('exec-stream-no-stdin'), 'cmd', () => {});
+    await new Promise((r) => setTimeout(r, 20));
+    const ch = mock.FakeClient.instances.at(-1)?.channels.at(-1);
+    expect(ch!.stdinWritten).toBe('');
+    expect(ch!.endCalls).toBe(0);
     ch!.emit('close', 0);
   });
 });

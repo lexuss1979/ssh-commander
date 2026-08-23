@@ -169,6 +169,7 @@ export function execStream(
   profile: Profile,
   command: string,
   onChunk: (chunk: string, isStderr: boolean) => void,
+  opts: { stdin?: string } = {},
 ): ExecStreamHandle {
   let channel: ClientChannel | null = null;
   let closed = false;
@@ -219,6 +220,13 @@ export function execStream(
         const errDecoder = new StringDecoder('utf8');
         channel.on('data', (d: Buffer) => onChunk(outDecoder.write(d), false));
         channel.stderr.on('data', (d: Buffer) => onChunk(errDecoder.write(d), true));
+        // Опциональный stdin (пароль для `sudo -S`): пишем в канал и шлём EOF.
+        // Пароль в командную строку не попадает — не виден в ps и логах.
+        // apt-get -y / dnf -y / apk stdin не читают — EOF безопасен.
+        if (opts.stdin !== undefined) {
+          ch.write(opts.stdin);
+          ch.end();
+        }
         ch.on('close', (exitCode: number | null) => resolveCode(exitCode));
         channel.on('error', () => {
           // close обычно следует за error, но не полагаемся на это.
