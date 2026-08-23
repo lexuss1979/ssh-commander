@@ -400,6 +400,8 @@ export default function App() {
                   setActiveProfileId(id);
                   setTab('overview');
                 }}
+                onAskAgent={handleAskAgent}
+                profiles={profiles}
               />
             </div>
             {!activeProfile && tab !== 'servers' && (

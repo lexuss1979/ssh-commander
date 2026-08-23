@@ -68,11 +68,13 @@ export class FakeClient extends FakeEmitter {
   static instances: FakeClient[] = [];
   /** Следующий созданный клиент отдаст exec-каналу данные и close (снимок). */
   static autoCloseNext = false;
+  /** Все новые клиенты отдают exec-каналу данные и close (для мульти-профильных тестов). */
+  static autoCloseAll = false;
   channels: FakeChannel[] = [];
   autoClose: boolean;
   constructor() {
     super();
-    this.autoClose = FakeClient.autoCloseNext;
+    this.autoClose = FakeClient.autoCloseNext || FakeClient.autoCloseAll;
     FakeClient.autoCloseNext = false;
     FakeClient.instances.push(this);
   }

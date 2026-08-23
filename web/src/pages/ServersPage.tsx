@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react';
 import { fetchBulkMetricsHistory, fetchOverview } from '../api';
 import type { HistorySample, OverviewResponse, OverviewServerEntry } from '../api';
+import type { AgentAskMode, Profile } from '../types';
 import { Sparkline } from '../components/Sparkline';
+import { SnippetsSection } from '../components/SnippetsSection';
 import { Meter, formatBytes, formatPct, formatUptime } from './OverviewPage';
 
 interface Props {
   showError: (msg: string) => void;
   visible: boolean;
   onOpenProfile: (profileId: string) => void;
+  onAskAgent: (text: string, mode?: AgentAskMode) => void;
+  /** Профили из стейта App — цели запуска сниппетов (обзор бывает не загружен). */
+  profiles: Profile[];
 }
 
 const POLL_INTERVAL_MS = 5000;
@@ -96,7 +101,7 @@ function ServerCard({
   );
 }
 
-export function ServersPage({ showError, visible, onOpenProfile }: Props) {
+export function ServersPage({ showError, visible, onOpenProfile, onAskAgent, profiles }: Props) {
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [history, setHistory] = useState<Map<string, HistorySample[]>>(new Map());
   const [reloadKey, setReloadKey] = useState(0);
@@ -156,6 +161,13 @@ export function ServersPage({ showError, visible, onOpenProfile }: Props) {
             <ServerCard key={s.id} entry={s} history={history.get(s.id) ?? []} onOpen={onOpenProfile} />
           ))}
         </div>
+
+        <SnippetsSection
+          showError={showError}
+          onAskAgent={onAskAgent}
+          profiles={profiles}
+          servers={data?.servers ?? null}
+        />
       </div>
     </div>
   );

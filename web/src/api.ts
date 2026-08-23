@@ -463,6 +463,72 @@ export function serviceLogsUrl(profileId: string, unit: string, tail: number, fo
   return `/api/services/${encodeURIComponent(unit)}/logs?${params}`;
 }
 
+// Сохранённые команды (эпик 18, раздел «Команды» на странице «Серверы»)
+export interface Snippet {
+  id: string;
+  name: string;
+  command: string;
+  description?: string;
+  /** null — доступен на всех серверах; список id — только на выбранных. */
+  profileIds?: string[] | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type SnippetInput = Omit<Snippet, 'id' | 'createdAt' | 'updatedAt'>;
+
+export interface SnippetRunResult {
+  profileId: string;
+  /** true — только exit code 0. */
+  ok: boolean;
+  /** null — транспортный отказ/таймаут, команда не завершилась. */
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  ms: number;
+  /** Вывод обрезан лимитом ответа (100 КБ на поток). */
+  truncated: boolean;
+  /** Текст транспортного отказа (отсутствует, если команда завершилась). */
+  error?: string;
+}
+
+export interface SnippetRunResponse {
+  /** Что реально выполнялось — эхо для UI и «В чат». */
+  command: string;
+  results: SnippetRunResult[];
+}
+
+export function fetchSnippets(): Promise<Snippet[]> {
+  return api<{ snippets: Snippet[] }>('/api/snippets').then((r) => r.snippets);
+}
+
+export function createSnippet(input: SnippetInput): Promise<Snippet> {
+  return api('/api/snippets', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function updateSnippet(id: string, input: SnippetInput): Promise<Snippet> {
+  return api(`/api/snippets/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteSnippet(id: string): Promise<void> {
+  return api(`/api/snippets/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/**
+ * Параллельный запуск сниппета или разовой команды на выбранных серверах.
+ * Отказ отдельного сервера — не ошибка запроса: элемент results с ok:false.
+ */
+export function runSnippet(params: {
+  snippetId?: string;
+  command?: string;
+  profileIds: string[];
+}): Promise<SnippetRunResponse> {
+  return api('/api/snippets/run', { method: 'POST', body: JSON.stringify(params) });
+}
+
 // Вкладка «Базы данных» (эпик 12, итерация 2: явные креденшалы)
 export type DbEngine = 'postgres' | 'mysql';
 export type MysqlFlavor = 'mysql' | 'mariadb';
