@@ -199,6 +199,26 @@ export const toolDefs: ToolDef[] = [
   {
     type: 'function',
     function: {
+      name: 'disk_usage',
+      description:
+        'Что занимает место на диске: размер каталога, крупнейшие подкаталоги и файлы ' +
+        '(du/find, read-only, выполняется автоматически). path — абсолютный путь, по умолчанию /; ' +
+        'limit — число записей, по умолчанию 10. ' +
+        'Типовой сценарий «почему кончился диск»: начни с /, затем спускайся по крупнейшим подкаталогам.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: str('Абсолютный путь к каталогу (по умолчанию /)'),
+          limit: str('Число записей в списках (по умолчанию 10)'),
+          server: serverParam(),
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'docker_action',
       description:
         'Управляющее действие с Docker: start/stop/restart/rm для контейнера, pull/rmi для образа, run для запуска контейнера. Требует подтверждения пользователя.',
@@ -268,6 +288,7 @@ export const READ_ONLY_TOOLS = new Set([
   'docker_logs',
   'docker_inspect',
   'security_audit',
+  'disk_usage',
   'web_search',
   'list_servers',
 ]);

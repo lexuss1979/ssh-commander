@@ -24,6 +24,9 @@ interface Props {
   visible: boolean;
   onAskAgent: (text: string, mode?: AgentAskMode, source?: string) => void;
   onProfilesChanged: () => void;
+  /** Одноразовый переход на путь (из навигатора «Что занимает»); App сбрасывает через onFilesPathConsumed. */
+  openPath?: string | null;
+  onFilesPathConsumed?: () => void;
 }
 
 function fileQuery(profileId: string, path: string): string {
@@ -31,7 +34,7 @@ function fileQuery(profileId: string, path: string): string {
   return `/api/files/list?${params}`;
 }
 
-export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesChanged }: Props) {
+export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesChanged, openPath, onFilesPathConsumed }: Props) {
   const [path, setPath] = useState('/');
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -80,6 +83,17 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
   useEffect(() => {
     void load();
   }, [load]);
+
+  // «Открыть в файлах» из навигатора «Что занимает» (эпик 16): одноразовый
+  // переход на путь. Страница смонтирована keep-alive — эффект срабатывает
+  // при переключении вкладки; App сбрасывает openPath через onFilesPathConsumed.
+  useEffect(() => {
+    if (!openPath) return;
+    setSelected(new Set());
+    setSearchResults(null);
+    setPath(openPath);
+    onFilesPathConsumed?.();
+  }, [openPath, onFilesPathConsumed]);
 
   const reconnect = async () => {
     try {

@@ -2314,6 +2314,142 @@ body.resizing-agent {
   white-space: nowrap;
 }
 
+/* Навигатор «Что занимает» (эпик 16) */
+.du-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.du-toolbar .breadcrumbs {
+  max-width: none;
+  flex: 1;
+}
+
+.crumb-current {
+  color: var(--text);
+  font-weight: 600;
+  padding: 2px 10px;
+  display: inline-block;
+}
+
+.du-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.du-mode {
+  display: flex;
+}
+
+.du-mode button {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.du-mode button:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.du-mode button:last-child {
+  border-radius: 0 6px 6px 0;
+  margin-left: -1px;
+}
+
+.du-mode button.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft-border);
+  color: var(--accent-hover);
+}
+
+.du-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.du-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 13px;
+}
+
+.du-row:last-child {
+  border-bottom: none;
+}
+
+.du-row-total {
+  font-weight: 600;
+}
+
+.du-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.du-pct {
+  width: 52px;
+  text-align: right;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.du-size {
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.du-meter {
+  flex: 1;
+  max-width: 160px;
+}
+
+.du-meter .meter-fill {
+  transition: none;
+}
+
+.du-muted .du-row-name,
+.du-muted .du-size {
+  font-style: italic;
+}
+
+.du-hint {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 10px 4px;
+}
+
+.du-chip {
+  display: inline-block;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-soft-border);
+  color: var(--accent-hover);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.disk-whats-eating {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .overview-processes {
   margin-top: 16px;
   padding: 0;

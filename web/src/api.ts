@@ -793,6 +793,62 @@ export async function searchFiles(
   return data.results;
 }
 
+// «Что занимает» — навигатор по du (эпик 16)
+export interface DiskUsageChild {
+  name: string;
+  path: string;
+  bytes: number;
+  /** Доля от суммы поддерева каталога (1 знак после запятой). */
+  pctOfParent: number;
+}
+
+export interface DiskUsageSnapshot {
+  timestamp: number;
+  path: string;
+  totalBytes: number;
+  /** Размер файлов прямо в каталоге (du в -d 1 их не печатает). */
+  directBytes: number;
+  children: DiskUsageChild[];
+  /** Отказы доступа при обходе — цифры неполные. */
+  incomplete?: { unreadable: number } | null;
+  /** Вывод du обрезан по лимиту — сумма неполная. */
+  truncated?: boolean;
+}
+
+export interface DiskUsageFile {
+  path: string;
+  bytes: number;
+}
+
+export interface DiskUsageFilesResponse {
+  timestamp: number;
+  path: string;
+  files: DiskUsageFile[];
+  incomplete?: { unreadable: number } | null;
+  truncated: boolean;
+}
+
+/** Снимок du одного каталога: сумма, прямые файлы, подкаталоги с долями. */
+export function fetchDiskUsage(
+  profileId: string,
+  path: string,
+  signal?: AbortSignal,
+): Promise<DiskUsageSnapshot> {
+  const params = new URLSearchParams({ profileId, path });
+  return api<DiskUsageSnapshot>(`/api/disk-usage?${params}`, { signal });
+}
+
+/** Топ крупнейших файлов каталога (режим «Файлы» модалки). */
+export function fetchDiskUsageFiles(
+  profileId: string,
+  path: string,
+  limit = 100,
+  signal?: AbortSignal,
+): Promise<DiskUsageFilesResponse> {
+  const params = new URLSearchParams({ profileId, path, limit: String(limit) });
+  return api<DiskUsageFilesResponse>(`/api/disk-usage/files?${params}`, { signal });
+}
+
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} Б`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;

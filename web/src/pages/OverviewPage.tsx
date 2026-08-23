@@ -4,11 +4,14 @@ import type { HistorySample, ServerMetrics } from '../api';
 import type { Profile } from '../types';
 import { useSortBy, SortableTh } from '../hooks/useSortBy';
 import { LoadChart } from '../components/Sparkline';
+import { DiskUsageModal } from '../components/DiskUsageModal';
 
 interface Props {
   profile: Profile;
   showError: (msg: string) => void;
   visible: boolean;
+  /** Переход на путь во вкладке «Файлы» (из навигатора «Что занимает»). */
+  onOpenInFiles: (path: string) => void;
 }
 
 const POLL_INTERVAL_MS = 3000;
@@ -57,11 +60,13 @@ export function Meter({ percent }: { percent: number | null }) {
   );
 }
 
-export function OverviewPage({ profile, visible }: Props) {
+export function OverviewPage({ profile, visible, onOpenInFiles }: Props) {
   const [metrics, setMetrics] = useState<ServerMetrics | null>(null);
   const [history, setHistory] = useState<HistorySample[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // Навигатор «Что занимает»: точка монтирования выбранной строки диска.
+  const [duTarget, setDuTarget] = useState<string | null>(null);
 
   // Последовательный polling: следующий запрос только после завершения
   // предыдущего. На скрытой вкладке (keep-alive) опрос полностью остановлен.
@@ -181,6 +186,13 @@ export function OverviewPage({ profile, visible }: Props) {
                     <span className="mount" title={d.filesystem}>
                       {d.mount}
                     </span>
+                    <button
+                      className="btn btn-ghost btn-mini disk-whats-eating"
+                      onClick={() => setDuTarget(d.mount)}
+                      title="Что занимает место в этом каталоге"
+                    >
+                      Что занимает
+                    </button>
                     <span className="sizes">
                       {formatBytes(d.usedBytes)} из {formatBytes(d.totalBytes)}
                     </span>
@@ -226,6 +238,21 @@ export function OverviewPage({ profile, visible }: Props) {
             </table>
           </div>
         </div>
+      )}
+
+      {duTarget !== null && (
+        <DiskUsageModal
+          key={duTarget}
+          profile={profile}
+          initialPath={duTarget}
+          onClose={() => setDuTarget(null)}
+          onOpenInFiles={(p) => {
+            // Закрываем навигатор: без этого модалка уезжает вместе со скрытой
+            // вкладкой «Обзора» и встречает пользователя на старом пути.
+            setDuTarget(null);
+            onOpenInFiles(p);
+          }}
+        />
       )}
     </div>
   );

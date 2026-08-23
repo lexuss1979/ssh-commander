@@ -28,6 +28,15 @@ import {
   dockerExec,
 } from '../services/docker.js';
 import { runSecurityAudit } from '../services/security-audit.js';
+import {
+  assertNavigablePath,
+  clampAgentLimit,
+  diskUsageSnapshot,
+  formatAgentDiskUsage,
+  normalizeDiskPath,
+  precheckNavigableDir,
+  topFiles,
+} from '../services/disk-usage.js';
 import { getProfile, listProfiles } from '../profiles.js';
 import {
   attachProfileToDialogue,
@@ -94,13 +103,15 @@ export class AgentSession {
       'Ты — AI-ассистент для администрирования удалённого Linux-сервера ' +
       `${homeProfile.username}@${homeProfile.host}. ` +
       'Ты работаешь только через предоставленные инструменты, не выдумывай результаты. ' +
-      'Инструменты чтения (exec_readonly, read_file, list_dir, docker_ps, docker_logs, docker_inspect, read_memory, security_audit) выполняются автоматически. ' +
+      'Инструменты чтения (exec_readonly, read_file, list_dir, docker_ps, docker_logs, docker_inspect, read_memory, security_audit, disk_usage) выполняются автоматически. ' +
       'Инструменты записи (exec, write_file, docker_action, write_memory) требуют подтверждения пользователя — не пытайся обойти это ограничение, ' +
       'запрашивай подтверждение обычным вызовом инструмента. ' +
       'Отвечай кратко и по делу на русском. Сначала собери факты (проверь состояние), затем предлагай действия. ' +
       'Инструмент security_audit — детерминированный аудит безопасности сервера (фиксированные read-only проверки по секциям). ' +
       'Проанализируй его сырые данные и оформи отчёт с severity (критично / предупреждение / ок) и рекомендациями; ' +
       'после отчёта предложи записать ключевые находки в память через write_memory. ' +
+      'Инструмент disk_usage показывает, что занимает место на диске (размер каталога, крупнейшие подкаталоги и файлы) — ' +
+      'для сценария «почему кончился диск» начни с / и спускайся по крупнейшим подкаталогам. ' +
       'Перед разрушительными действиями предупреждай о последствиях. ' +
       'У профиля есть MEMORY.md — файл заметок для будущих сессий (хранится в каталоге данных приложения, не на сервере). ' +
       'Его содержимое автоматически загружается в контекст в начале каждой сессии — см. блок «Память профиля» ниже. ' +
@@ -793,6 +804,55 @@ export class AgentSession {
             sudoPassword,
           });
           return { status: 'ok', ...this.truncate(output) };
+        }
+        case 'disk_usage': {
+          // Команды du/find собирает сервис из провалидированного пути (shq) —
+          // произвольный shell в инструмент не попадает, deny-лист exec_readonly
+          // не участвует (как у security_audit). Путь вне навигационных правил —
+          // обычный tool_result с текстом, цикл не падает.
+          let path: string;
+          try {
+            path = assertNavigablePath(normalizeDiskPath(String(args.path ?? '/')));
+          } catch (err) {
+            return { status: 'error', output: String((err as Error).message), truncated: false };
+          }
+          const limit = clampAgentLimit(args.limit);
+          // Одна предпроверка на оба вызова (иначе две независимые SFTP-stat
+          // на каждый вызов инструмента); транспорт/права — обычный tool_result,
+          // цикл не падает.
+          try {
+            await precheckNavigableDir(profile, path);
+          } catch (err) {
+            return { status: 'error', output: String((err as Error).message), truncated: false };
+          }
+          const skipPrecheck = { skipPrecheck: true };
+          // Каталоги — основной результат; файлы при отказе (нет find/stat)
+          // деградируют в строку-пояснение, не роняя инструмент целиком.
+          const [snap, files] = await Promise.allSettled([
+            diskUsageSnapshot(profile, path, skipPrecheck),
+            topFiles(profile, path, limit, skipPrecheck),
+          ]);
+          if (snap.status === 'rejected') {
+            return { status: 'error', output: String((snap.reason as Error).message), truncated: false };
+          }
+          if (files.status === 'rejected') {
+            return {
+              status: 'ok',
+              ...this.truncate(
+                formatAgentDiskUsage(
+                  path,
+                  snap.value,
+                  [],
+                  limit,
+                  `крупнейшие файлы недоступны: ${(files.reason as Error).message}`,
+                ),
+              ),
+            };
+          }
+          return {
+            status: 'ok',
+            ...this.truncate(formatAgentDiskUsage(path, snap.value, files.value.files, limit)),
+          };
         }
         case 'docker_action': {
           const action = String(args.action ?? '');

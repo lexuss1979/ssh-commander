@@ -493,6 +493,75 @@ esac
     console.log('  skip: SERVICES_POLKIT=1, но systemd на стенде недоступен');
   }
 
+  console.log('== disk usage (эпик 16) ==');
+  // Известное дерево: /tmp/sc-du/big.bin (1 МБ) + /tmp/sc-du/sub/small.txt.
+  await req('/api/files/mkdir', { method: 'POST', body: JSON.stringify({ profileId: pid, path: '/tmp/sc-du/sub' }) });
+  await req('/api/files/write', {
+    method: 'POST',
+    body: JSON.stringify({ profileId: pid, path: '/tmp/sc-du/big.bin', content: 'x'.repeat(1024 * 1024) }),
+  });
+  await req('/api/files/write', {
+    method: 'POST',
+    body: JSON.stringify({ profileId: pid, path: '/tmp/sc-du/sub/small.txt', content: 'hello' }),
+  });
+
+  const du1 = await req(`/api/disk-usage?${P({ path: '/tmp/sc-du' })}`);
+  check('du snapshot has total >= 1 МБ', du1.totalBytes >= 1024 * 1024, JSON.stringify(du1).slice(0, 200));
+  const subDir = du1.children.find((c) => c.name === 'sub');
+  check('du lists subdir with pct', !!subDir && subDir.pctOfParent >= 0 && subDir.pctOfParent <= 100, JSON.stringify(du1.children));
+
+  // Проваливание кликом: тот же запрос на дочерний каталог. Дерево известное —
+  // в /tmp/sc-du/sub только файл small.txt, подкаталогов нет.
+  const du2 = await req(`/api/disk-usage?${P({ path: '/tmp/sc-du/sub' })}`);
+  check('du descends into subdir', du2.totalBytes >= 5 && du2.children.length === 0, JSON.stringify(du2));
+
+  // Повторный запрос того же пути — кэш 2 с: согласованный ответ без падения.
+  const du1b = await req(`/api/disk-usage?${P({ path: '/tmp/sc-du' })}`);
+  check('du cache hit consistent', du1b.totalBytes === du1.totalBytes && du1b.children.length === du1.children.length);
+
+  // Режим «Файлы»: топ по размеру, лимит соблюдается, truncated честный.
+  const files1 = await req(`/api/disk-usage/files?${P({ path: '/tmp/sc-du', limit: 5 })}`);
+  check(
+    'top files lists big.bin first',
+    files1.files[0]?.path === '/tmp/sc-du/big.bin' && files1.files[0]?.bytes >= 1024 * 1024,
+    JSON.stringify(files1.files),
+  );
+  check('top files truncated=false', files1.truncated === false, `truncated=${files1.truncated}`);
+
+  // Файл вместо каталога → «Это не директория» (400).
+  try {
+    await req(`/api/disk-usage?${P({ path: '/tmp/sc-du/big.bin' })}`);
+    check('du on file → 400', false);
+  } catch (err) {
+    check('du on file → 400', String(err).includes('400'), String(err));
+  }
+
+  // Несуществующий путь → понятная ошибка (400).
+  try {
+    await req(`/api/disk-usage?${P({ path: '/tmp/sc-du/nope' })}`);
+    check('du on missing path → 400', false);
+  } catch (err) {
+    check('du on missing path → 400', String(err).includes('400'), String(err));
+  }
+
+  // Валидация пути: не-абсолютный и `..` → 400.
+  try {
+    await req(`/api/disk-usage?${P({ path: 'tmp' })}`);
+    check('du rejects relative path', false);
+  } catch (err) {
+    check('du rejects relative path', String(err).includes('400'), String(err));
+  }
+  try {
+    await req(`/api/disk-usage?${P({ path: '/tmp/../etc' })}`);
+    check('du rejects ..', false);
+  } catch (err) {
+    check('du rejects ..', String(err).includes('400'), String(err));
+  }
+
+  // Точка монтирования: du по /tmp не падает и даёт осмысленную сумму.
+  const duTmp = await req(`/api/disk-usage?${P({ path: '/tmp' })}`);
+  check('du on /tmp works', duTmp.totalBytes > 0 && Array.isArray(duTmp.children), JSON.stringify(duTmp).slice(0, 200));
+
   console.log('== cleanup ==');
   await req(`/api/profiles/${pid}`, { method: 'DELETE' });
   check('profile deleted', true);
