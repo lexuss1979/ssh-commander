@@ -10,6 +10,21 @@ interface WsMessage {
   rows?: number;
 }
 
+/**
+ * Лимит живых терминальных сессий на профиль (суммарно системных и
+ * контейнерных). Бюджет SSH-каналов: OpenSSH MaxSessions по умолчанию 10,
+ * из них постоянные потребители — SFTP (1) + follow-стримы (до 3, общий
+ * лимитер эпика 14); 4 терминала оставляют транзитным exec'ам запас 2.
+ */
+export const MAX_TERMINAL_SESSIONS_PER_PROFILE = 4;
+
+/** Запись о живой терминальной сессии для `GET /api/terminal/sessions`. */
+export interface TerminalSessionInfo {
+  tabId: number;
+  container: string | null;
+  containerName: string | null;
+}
+
 class TerminalSession {
   private shell: ShellSession | null = null;
   private attachments = new Set<WebSocket>();
@@ -23,8 +38,27 @@ class TerminalSession {
     private profile: Profile,
     private cols: number,
     private rows: number,
+    private tabId: number,
     private container?: string,
+    private containerName?: string | null,
   ) {}
+
+  /** Живая ли сессия: shell держит SSH-канал или канал открывается. */
+  isAlive(): boolean {
+    return this.shell !== null || this.spawning;
+  }
+
+  get profileId(): string {
+    return this.profile.id;
+  }
+
+  info(): TerminalSessionInfo {
+    return {
+      tabId: this.tabId,
+      container: this.container ?? null,
+      containerName: this.containerName ?? null,
+    };
+  }
 
   private broadcast(data: WsMessage): void {
     const payload = JSON.stringify(data);
@@ -48,9 +82,19 @@ class TerminalSession {
       shell.channel.on('data', (d: Buffer) => this.broadcast({ type: 'output', data: d.toString() }));
       shell.channel.on('close', () => {
         if (this.shell !== shell) return;
+        if (this.destroyTimer) {
+          clearTimeout(this.destroyTimer);
+          this.destroyTimer = null;
+        }
         this.shell = null;
         this.broadcast({ type: 'close' });
         this.cleanupAttachments();
+        // Выход из shell закрывает SSH-канал — реанимировать нечего, grace не
+        // нужен. Запись убирается из реестра сразу: с ключом по вкладке мапа
+        // иначе копит призраки на каждый `exit`, и они всплывают в
+        // /api/terminal/sessions. Клиент по close-фрейму переподключается тем
+        // же tabId и получает свежую запись.
+        sessions.delete(this.sessionKey);
       });
       shell.channel.on('error', () => {
         /* close follows */
@@ -182,9 +226,42 @@ class TerminalSession {
 
 const sessions = new Map<string, TerminalSession>();
 
-// Системный shell и shell контейнера — разные сессии, ключ включает container.
-function sessionKey(profileId: string, container?: string): string {
-  return container ? `${profileId}::${container}` : profileId;
+// Системный shell и shell контейнера — разные сессии, ключ включает container
+// и tabId вкладки (эпик 15): `${profileId}::${container|host}::${tabId}`.
+export function sessionKey(profileId: string, container?: string, tabId = 0): string {
+  return `${profileId}::${container ?? 'host'}::${tabId}`;
+}
+
+/**
+ * Разбор tabId из query. Отсутствие параметра — 0 (бесшовный деплой: вкладка
+ * старого клиента без tabId продолжает работать с единственной сессией
+ * `…::host::0`). Невалидное значение (не целое, вне 0..9999) — null → отказ.
+ */
+export function parseTabId(raw: string | null): number | null {
+  if (raw === null) return 0;
+  if (!/^\d{1,4}$/.test(raw)) return null;
+  return Number(raw);
+}
+
+/** Живые записи профиля: grace-сессии (shell жив) считаются, записи после
+ * exit/ошибки spawn — нет (канал освобождён или не открывался). */
+function countAliveSessions(profileId: string): number {
+  let count = 0;
+  for (const session of sessions.values()) {
+    if (session.profileId === profileId && session.isAlive()) count++;
+  }
+  return count;
+}
+
+/** Живые терминальные сессии профиля — восстановление вкладок после F5. */
+export function listTerminalSessions(profileId: string): TerminalSessionInfo[] {
+  const result: TerminalSessionInfo[] = [];
+  for (const session of sessions.values()) {
+    if (!session.isAlive()) continue;
+    if (session.profileId !== profileId) continue;
+    result.push(session.info());
+  }
+  return result;
 }
 
 export function attachTerminal(
@@ -193,11 +270,40 @@ export function attachTerminal(
   cols: number,
   rows: number,
   container?: string,
+  tabIdParam?: string | null,
+  containerName?: string | null,
 ): void {
-  const key = sessionKey(profile.id, container);
+  const tabId = parseTabId(tabIdParam ?? null);
+  if (tabId === null) {
+    ws.close(1008, 'Invalid tabId');
+    return;
+  }
+  const key = sessionKey(profile.id, container, tabId);
   let session = sessions.get(key);
   if (!session) {
-    session = new TerminalSession(key, profile, cols || 80, rows || 24, container);
+    // Лимит считают только живые записи — они держат SSH-канал. Существующая
+    // сессия (переподключение вкладки) проверку не проходит повторно.
+    if (countAliveSessions(profile.id) >= MAX_TERMINAL_SESSIONS_PER_PROFILE) {
+      ws.send(
+        JSON.stringify({
+          type: 'error',
+          data: `Слишком много терминалов (максимум ${MAX_TERMINAL_SESSIONS_PER_PROFILE}) — закройте другие вкладки`,
+        }),
+      );
+      ws.close(1013, 'Too many terminals');
+      return;
+    }
+    session = new TerminalSession(
+      key,
+      profile,
+      cols || 80,
+      rows || 24,
+      tabId,
+      container,
+      // containerName — только отображение (заголовок вкладки после F5), в
+      // ключ и shell-команду не попадает.
+      containerName ? containerName.slice(0, 200) : null,
+    );
     sessions.set(key, session);
   }
   session.attach(ws, cols, rows);

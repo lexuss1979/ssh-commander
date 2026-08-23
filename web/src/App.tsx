@@ -55,7 +55,14 @@ export default function App() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [activeProfileId, setActiveProfileId] = useState('');
   const [tab, setTab] = useState<Tab>('servers');
-  const [terminalContainer, setTerminalContainer] = useState<{ id: string; name: string } | null>(null);
+  // Одноразовый запрос «терминал в контейнер» из Docker Explorer (эпик 15):
+  // TerminalPage добавляет/активирует вкладку контейнера и сбрасывает через
+  // onOpenContainerConsumed (паттерн sqlInsert). Сбрасывается и при смене
+  // профиля — запрос мог остаться от контейнера чужого сервера.
+  const [terminalOpenRequest, setTerminalOpenRequest] = useState<{
+    containerId: string;
+    name: string;
+  } | null>(null);
   const [showProfiles, setShowProfiles] = useState(false);
   const [toast, setToast] = useState('');
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -208,6 +215,12 @@ export default function App() {
   useEffect(() => {
     if (!activeProfileId) return;
     setVisitedProfileIds((prev) => (prev.includes(activeProfileId) ? prev : [...prev, activeProfileId]));
+  }, [activeProfileId]);
+
+  // Смена профиля гасит зависший запрос терминала контейнера — контейнер
+  // принадлежал прошлому серверу.
+  useEffect(() => {
+    setTerminalOpenRequest(null);
   }, [activeProfileId]);
 
   // AgentPage сообщает о своей активности; null — снять индикатор.
@@ -426,8 +439,8 @@ export default function App() {
                     profile={activeProfile}
                     showError={showError}
                     visible={tab === 'terminal'}
-                    container={terminalContainer}
-                    onExitContainer={() => setTerminalContainer(null)}
+                    openContainerRequest={terminalOpenRequest}
+                    onOpenContainerConsumed={() => setTerminalOpenRequest(null)}
                     onAskAgent={handleAskAgent}
                   />
                 </div>
@@ -448,7 +461,7 @@ export default function App() {
                     showError={showError}
                     visible={tab === 'docker'}
                     onExecContainer={(id, name) => {
-                      setTerminalContainer({ id, name });
+                      setTerminalOpenRequest({ containerId: id, name });
                       setTab('terminal');
                     }}
                   />

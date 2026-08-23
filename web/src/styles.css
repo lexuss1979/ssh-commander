@@ -822,6 +822,85 @@ body.resizing-agent {
   height: 100%;
 }
 
+/* Терминальные вкладки (эпик 15): базовые .tab/.tab.active из Docker-секции,
+   здесь — только специфичное (точка статуса, ✕, «+», keep-alive слоты). */
+.terminal-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 16px 0;
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  flex-shrink: 0;
+}
+
+.terminal-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 240px;
+  padding: 6px 8px 6px 12px;
+}
+
+.terminal-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.terminal-tab-close:hover {
+  color: var(--danger);
+  background: var(--bg-hover);
+}
+
+.terminal-tab-add {
+  flex-shrink: 0;
+  width: 28px;
+  height: 30px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.terminal-tab-add:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.terminal-tab-add:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Keep-alive внутренние вкладки терминала: неактивные скрыты, WS живёт. */
+.terminal-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-view.hidden {
+  display: none;
+}
+
 .xterm-viewport {
   scrollbar-gutter: stable;
   scrollbar-width: thin;
@@ -2501,7 +2580,8 @@ body.resizing-agent {
 
 .history-palette {
   position: absolute;
-  top: 64px;
+  /* Ниже бара вкладок терминалов и тулбара активной вкладки (эпик 15). */
+  top: 108px;
   left: 50%;
   transform: translateX(-50%);
   width: 560px;

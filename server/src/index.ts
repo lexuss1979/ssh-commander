@@ -121,7 +121,11 @@ server.on('upgrade', (req, socket, head) => {
       const cols = Number(url.searchParams.get('cols')) || 80;
       const rows = Number(url.searchParams.get('rows')) || 24;
       const container = url.searchParams.get('container') || undefined;
-      attachTerminal(ws, profile, cols, rows, container);
+      // tabId вкладки терминала (эпик 15): отсутствие — дефолт 0 (старый клиент),
+      // невалидный — close(1008) внутри attachTerminal.
+      const tabId = url.searchParams.get('tabId');
+      const containerName = url.searchParams.get('containerName') || undefined;
+      attachTerminal(ws, profile, cols, rows, container, tabId, containerName);
     } else {
       const dialogueId = url.searchParams.get('dialogueId') ?? undefined;
       handleAgentWs(ws, profile, dialogueId);
