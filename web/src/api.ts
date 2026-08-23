@@ -482,6 +482,44 @@ export function serviceLogsUrl(profileId: string, unit: string, tail: number, fo
   return `/api/services/${encodeURIComponent(unit)}/logs?${params}`;
 }
 
+// Действия над процессами (эпик 17)
+export type ProcessSignal = 'TERM' | 'KILL' | 'HUP';
+
+export interface ProcessActionResult {
+  ok: true;
+  output: string;
+}
+
+/**
+ * Сигнал процессу (TERM|KILL|HUP). Ошибки 400 (нет прав, процесса больше нет,
+ * нет утилиты, неверный sudo-пароль) показываются как есть; 502 — сервер
+ * недоступен. Паттерн serviceAction.
+ */
+export async function processSignal(
+  profileId: string,
+  pid: number,
+  signal: ProcessSignal,
+  sudoPassword?: string,
+): Promise<ProcessActionResult> {
+  return api(`/api/processes/${pid}/signal?profileId=${encodeURIComponent(profileId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ signal, sudoPassword }),
+  });
+}
+
+/** Понижение приоритета процесса (nice −20..19); output renice — в notice. */
+export async function processRenice(
+  profileId: string,
+  pid: number,
+  nice: number,
+  sudoPassword?: string,
+): Promise<ProcessActionResult> {
+  return api(`/api/processes/${pid}/renice?profileId=${encodeURIComponent(profileId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ nice, sudoPassword }),
+  });
+}
+
 // Вкладка «Базы данных» (эпик 12, итерация 2: явные креденшалы)
 export type DbEngine = 'postgres' | 'mysql';
 export type MysqlFlavor = 'mysql' | 'mariadb';
