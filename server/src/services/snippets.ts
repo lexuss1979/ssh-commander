@@ -90,7 +90,11 @@ function persist(list: Snippet[]): void {
 }
 
 export function listSnippets(): Snippet[] {
-  return load().map((s) => ({ ...s }));
+  // profileIds копируем глубже: наружу не должен уходить массив, общий с кэшем.
+  return load().map((s) => ({
+    ...s,
+    profileIds: s.profileIds ? [...s.profileIds] : s.profileIds,
+  }));
 }
 
 export function getSnippet(id: string): Snippet | undefined {
@@ -105,19 +109,29 @@ export function requireSnippet(id: string): Snippet {
   return snippet;
 }
 
+function newId(list: Snippet[]): string {
+  // 8 символов UUID — 32 бита; коллизию проверяем, иначе delete/update
+  // задели бы обе записи.
+  let id = crypto.randomUUID().slice(0, 8);
+  while (list.some((s) => s.id === id)) {
+    id = crypto.randomUUID().slice(0, 8);
+  }
+  return id;
+}
+
 export function createSnippet(input: unknown): Snippet {
   const data = snippetInputSchema.parse(input);
   const now = new Date().toISOString();
   const snippet: Snippet = {
     ...data,
     profileIds: data.profileIds ?? null,
-    id: crypto.randomUUID().slice(0, 8),
+    id: newId(load()),
     createdAt: now,
     updatedAt: now,
   };
-  const list = load();
-  list.push(snippet);
-  persist(list);
+  // Новый массив, а не мутация кэша: при отказе persist (corrupt/диск) кэш
+  // в памяти не должен разойтись с файлом на диске.
+  persist([...load(), snippet]);
   return { ...snippet };
 }
 
@@ -137,8 +151,7 @@ export function updateSnippet(id: string, input: unknown): Snippet {
     createdAt: existing.createdAt,
     updatedAt: new Date().toISOString(),
   };
-  list[idx] = updated;
-  persist(list);
+  persist(list.map((s, i) => (i === idx ? updated : s)));
   return { ...updated };
 }
 

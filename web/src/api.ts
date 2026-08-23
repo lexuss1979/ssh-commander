@@ -520,13 +520,19 @@ export function deleteSnippet(id: string): Promise<void> {
 /**
  * Параллельный запуск сниппета или разовой команды на выбранных серверах.
  * Отказ отдельного сервера — не ошибка запроса: элемент results с ok:false.
+ * UI шлёт именно command (строку из подтверждения), а не snippetId —
+ * сниппет могли отредактировать между показом модалки и запуском.
+ * signal — кнопка «Отмена»: на сервере команда может продолжить выполняться.
  */
-export function runSnippet(params: {
-  snippetId?: string;
-  command?: string;
-  profileIds: string[];
-}): Promise<SnippetRunResponse> {
-  return api('/api/snippets/run', { method: 'POST', body: JSON.stringify(params) });
+export function runSnippet(
+  params: {
+    snippetId?: string;
+    command?: string;
+    profileIds: string[];
+  },
+  signal?: AbortSignal,
+): Promise<SnippetRunResponse> {
+  return api('/api/snippets/run', { method: 'POST', body: JSON.stringify(params), signal });
 }
 
 // Вкладка «Базы данных» (эпик 12, итерация 2: явные креденшалы)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createSnippet,
   deleteSnippet,
@@ -68,8 +68,15 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
   // Цели запуска: общий выбор для сниппетов и разовой команды.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [adhoc, setAdhoc] = useState('');
-  const [confirming, setConfirming] = useState<{ command: string; snippetId?: string } | null>(null);
+  // scope — область сниппета (null = все серверы): запуски сниппета с областью
+  // предвыбирают именно его цели, модалке остаётся показать выходы за область.
+  const [confirming, setConfirming] = useState<{ command: string; scope: string[] | null } | null>(null);
   const [running, setRunning] = useState(false);
+  // Замороженные цели и отмена: чекбоксы во время запуска меняют selected,
+  // а выполняется то, что ушло с запросом (AbortController — UI освобождается
+  // сразу, на сервере команда дорабатывает своё).
+  const [runTargets, setRunTargets] = useState<string[]>([]);
+  const runAbortRef = useRef<AbortController | null>(null);
   const [results, setResults] = useState<SnippetRunResponse | null>(null);
   const [openResults, setOpenResults] = useState<Set<string>>(new Set());
 
@@ -147,32 +154,51 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
     }
   };
 
-  const startRun = (command: string, snippetId?: string) => {
-    if (selected.size === 0) {
+  const startRun = (command: string, snippet?: Snippet) => {
+    // Сниппет с областью предвыбирает свои цели — настройка «только на этих
+    // серверах» должна значить что-то, а не молча наследовать прошлый выбор.
+    const scope = snippet?.profileIds ?? null;
+    let effective = selected;
+    if (scope) {
+      effective = new Set(scope.filter((id) => profileById.has(id)));
+      setSelected(effective);
+    }
+    if (effective.size === 0) {
       showError('Выберите хотя бы один сервер');
       return;
     }
-    setConfirming({ command, snippetId });
+    setConfirming({ command, scope });
+  };
+
+  const cancelRun = () => {
+    runAbortRef.current?.abort();
   };
 
   const confirmRun = async () => {
     if (!confirming) return;
+    const targets = [...selected];
     setConfirming(null);
     setRunning(true);
     setResults(null);
+    setRunTargets(targets);
+    const controller = new AbortController();
+    runAbortRef.current = controller;
     try {
-      const res = await runSnippet({
-        snippetId: confirming.snippetId,
-        command: confirming.snippetId ? undefined : confirming.command,
-        profileIds: [...selected],
-      });
+      // Уходит именно command — та строка, что показана в модалке; серверный
+      // путь со snippetId перечитал бы стор и мог выполнить уже отредактированную команду.
+      const res = await runSnippet({ command: confirming.command, profileIds: targets }, controller.signal);
       setResults(res);
       // Разворачиваем первый проблемный результат, остальные свёрнуты.
       const firstBad = res.results.find((r) => !r.ok);
       setOpenResults(new Set(firstBad ? [firstBad.profileId] : []));
     } catch (err) {
-      showError((err as Error).message);
+      if ((err as Error).name !== 'AbortError') {
+        showError((err as Error).message);
+      } else {
+        showError('Запуск отменён — на серверах выполнявшаяся команда могла продолжить работу');
+      }
     } finally {
+      runAbortRef.current = null;
       setRunning(false);
     }
   };
@@ -235,7 +261,7 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
                 <button
                   className="btn btn-mini"
                   disabled={running}
-                  onClick={() => startRun(s.command, s.id)}
+                  onClick={() => startRun(s.command, s)}
                 >
                   Выполнить
                 </button>
@@ -293,10 +319,11 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
           {profiles.map((p) => {
             const st = statusById.get(p.id);
             return (
-              <label key={p.id} className="snippets-target">
+              <label key={p.id} className={`snippets-target${running ? ' disabled' : ''}`}>
                 <input
                   type="checkbox"
                   checked={selected.has(p.id)}
+                  disabled={running}
                   onChange={() => toggleSelected(p.id)}
                 />
                 <span
@@ -313,7 +340,14 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
         </div>
       </div>
 
-      {running && <div className="snippets-running muted">Выполняется на {selected.size} сервер(ах)…</div>}
+      {running && (
+        <div className="snippets-running">
+          <span className="muted">Выполняется на {runTargets.length} сервер(ах)…</span>
+          <button className="btn btn-ghost btn-mini" onClick={cancelRun}>
+            Отменить
+          </button>
+        </div>
+      )}
 
       {results && (
         <div className="snippets-results">
@@ -379,6 +413,12 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
               Команда выполняется <strong>без фильтрации</strong> и может изменить состояние серверов.
               Запуск на {selected.size} сервер(ах) сразу:
             </p>
+            {confirming.scope && (
+              <p className="field-hint">
+                Выбор целей сброшен на область команды (сниппет сохранён для:{' '}
+                {confirming.scope.map((id) => profileById.get(id)?.name ?? id).join(', ') || 'нет существующих серверов'}).
+              </p>
+            )}
             <ul className="snippets-confirm-targets">
               {[...selected].map((id) => {
                 const p = profileById.get(id);

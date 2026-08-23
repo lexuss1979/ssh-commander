@@ -2457,6 +2457,14 @@ body.resizing-agent {
 
 .snippets-running {
   font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.snippets-target.disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .snippets-results {

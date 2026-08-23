@@ -4,6 +4,7 @@ import type { Profile } from '../types.js';
 import {
   createSnippet,
   deleteSnippet,
+  getSnippet,
   listSnippets,
   requireSnippet,
   runSnippetOnProfiles,
@@ -101,20 +102,28 @@ snippetsRouter.put('/:id', (req, res) => {
     res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Некорректная команда' });
     return;
   }
+  // Существование проверяем явно, а не регексом по тексту ошибки — HTTP-код
+  // не должен зависеть от формулировки сообщения.
+  if (!getSnippet(req.params.id)) {
+    res.status(404).json({ error: `Сниппет ${req.params.id} не найден` });
+    return;
+  }
   try {
     res.json(updateSnippet(req.params.id, parsed.data));
   } catch (err) {
-    const status = /не найден/.test(parseError(err)) ? 404 : 500;
-    res.status(status).json({ error: parseError(err) });
+    res.status(500).json({ error: parseError(err) });
   }
 });
 
 snippetsRouter.delete('/:id', (req, res) => {
+  if (!getSnippet(req.params.id)) {
+    res.status(404).json({ error: `Сниппет ${req.params.id} не найден` });
+    return;
+  }
   try {
     deleteSnippet(req.params.id);
     res.status(204).end();
   } catch (err) {
-    const status = /не найден/.test(parseError(err)) ? 404 : 500;
-    res.status(status).json({ error: parseError(err) });
+    res.status(500).json({ error: parseError(err) });
   }
 });
