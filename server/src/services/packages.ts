@@ -257,6 +257,31 @@ export function dedupeByName(updates: PackageUpdate[]): PackageUpdate[] {
 }
 
 // ---------------------------------------------------------------------------
+// Применение (мутация)
+// ---------------------------------------------------------------------------
+
+/**
+ * Команда применения обновлений. С sudo — прямая форма `sudo -S -p '' --`
+ * без `sh -c` (инвариант эпика 13); пароль уходит первой строкой stdin
+ * канала. `env DEBIAN_FRONTEND=noninteractive` — dpkg-промпты примут дефолт,
+ * а не зависнут на EOF-stdin. Статические строки — пользовательский ввод
+ * не интерполируется нигде.
+ */
+export function buildApplyCommand(pm: PackageManager, withSudo: boolean): string {
+  const sudo = withSudo ? `sudo -S -p '' -- ` : '';
+  switch (pm) {
+    case 'apt':
+      return `${sudo}env DEBIAN_FRONTEND=noninteractive apt-get -y upgrade`;
+    case 'dnf':
+      return `${sudo}dnf -y upgrade`;
+    case 'yum':
+      return `${sudo}yum -y upgrade`;
+    case 'apk':
+      return `${sudo}apk upgrade`;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Исполнители (снимок + детект, кэш 60 с)
 // ---------------------------------------------------------------------------
 

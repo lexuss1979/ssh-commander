@@ -488,6 +488,26 @@ export function fetchPackages(profileId: string): Promise<PackagesSnapshot> {
   return api<PackagesSnapshot>(`/api/packages/updates?profileId=${encodeURIComponent(profileId)}`);
 }
 
+/**
+ * Запрос применения обновлений: POST-стрим (chunked text/plain) с паролем в
+ * JSON-теле. Возвращается не fetch, а параметры для LogViewer.buildRequest —
+ * вызывающий стабилизирует useCallback (identity пропа перезапускала бы
+ * мутацию).
+ */
+export function packagesApplyRequest(
+  profileId: string,
+  sudoPassword: string | undefined,
+): { url: string; init?: RequestInit } {
+  return {
+    url: `/api/packages/apply?profileId=${encodeURIComponent(profileId)}`,
+    init: {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sudoPassword: sudoPassword || undefined }),
+    },
+  };
+}
+
 // Вкладка «Базы данных» (эпик 12, итерация 2: явные креденшалы)
 export type DbEngine = 'postgres' | 'mysql';
 export type MysqlFlavor = 'mysql' | 'mariadb';

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildApplyCommand,
   collectPackagesSnapshot,
   dedupeByName,
   detectPackageManager,
@@ -17,6 +18,7 @@ import {
   snapshotCommand,
   splitListSection,
   type ExecFn,
+  type PackageManager,
 } from '../src/services/packages.js';
 import type { ExecResult, Profile } from '../src/types.js';
 
@@ -246,6 +248,31 @@ describe('rebootCheckSuffix / snapshotCommand / parseRebootSection', () => {
   it('dnf-секция: код @@RESTART_CODE@@1 и информационный вывод', () => {
     const raw = '@@REBOOT@@\nCore libraries have been updated\n@@RESTART_CODE@@1\n';
     expect(parseRebootSection(raw)).toEqual({ code: 1, packages: ['Core libraries have been updated'] });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildApplyCommand
+// ---------------------------------------------------------------------------
+
+describe('buildApplyCommand', () => {
+  it('с sudo: прямая форма без sh -c для всех менеджеров', () => {
+    expect(buildApplyCommand('apt', true)).toBe(
+      "sudo -S -p '' -- env DEBIAN_FRONTEND=noninteractive apt-get -y upgrade",
+    );
+    expect(buildApplyCommand('dnf', true)).toBe("sudo -S -p '' -- dnf -y upgrade");
+    expect(buildApplyCommand('yum', true)).toBe("sudo -S -p '' -- yum -y upgrade");
+    expect(buildApplyCommand('apk', true)).toBe("sudo -S -p '' -- apk upgrade");
+    for (const pm of ['apt', 'dnf', 'yum', 'apk'] as PackageManager[]) {
+      expect(buildApplyCommand(pm, true)).not.toContain('sh -c');
+    }
+  });
+
+  it('без sudo — plain-команды; всё статично, пользовательский ввод не интерполируется', () => {
+    expect(buildApplyCommand('apt', false)).toBe('env DEBIAN_FRONTEND=noninteractive apt-get -y upgrade');
+    expect(buildApplyCommand('dnf', false)).toBe('dnf -y upgrade');
+    expect(buildApplyCommand('yum', false)).toBe('yum -y upgrade');
+    expect(buildApplyCommand('apk', false)).toBe('apk upgrade');
   });
 });
 

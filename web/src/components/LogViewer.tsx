@@ -16,8 +16,8 @@ interface Props {
   /** Заголовок источника (для сноски, если не задан logPath). */
   title: string;
   /** URL стрима; вызывающий стабилизирует useCallback, иначе identity
-   * пропа будет перезапускать стрим. */
-  buildUrl: (follow: boolean) => string;
+   * пропа будет перезапускать стрим. Не обязателен при заданном buildRequest. */
+  buildUrl?: (follow: boolean) => string;
   visible: boolean;
   onAskAgent?: (text: string) => void;
   /** Слот для дополнительных контролов тулбара (например «★ Закрепить»). */
@@ -25,9 +25,33 @@ interface Props {
   /** Путь файла для сообщения «В чат» — агент знает, что смотрит пользователь. */
   logPath?: string;
   serverName?: string;
+  /**
+   * Альтернатива buildUrl для мутирующих POST-стримов (эпик 19: применение
+   * обновлений пакетов): пароль — в теле запроса, не в URL. Обязательно
+   * стабилизировать useCallback с явными зависимостями — смена identity
+   * перезапустила бы стрим, то есть повторно выполнила мутацию.
+   */
+  buildRequest?: (follow: boolean) => { url: string; init?: RequestInit };
+  /**
+   * Разовый мутирующий стрим: «Следовать» скрыто (follow=false), кнопка
+   * «Переподключиться» скрыта (перезапуск = повторная мутация), статус по
+   * завершении — «завершено», и стрим стартует ровно один раз на
+   * монтирование (ref-guard против двойного эффекта StrictMode в dev).
+   */
+  oneShot?: boolean;
 }
 
-export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, logPath, serverName }: Props) {
+export function LogViewer({
+  title,
+  buildUrl,
+  visible,
+  onAskAgent,
+  toolbarExtra,
+  logPath,
+  serverName,
+  buildRequest,
+  oneShot,
+}: Props) {
   const [follow, setFollow] = useState(true);
   const [autoscroll, setAutoscroll] = useState(true);
   const [filter, setFilter] = useState('');
@@ -40,6 +64,11 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
   const [pendingLine, setPendingLine] = useState('');
   const bufferRef = useRef<LogBufferState>({ lines: [], pending: '' });
   const preRef = useRef<HTMLPreElement>(null);
+  // oneShot: ref-guard «запуск ровно один на монтирование». StrictMode в dev
+  // монтирует эффекты дважды — без guard'а POST (apt-get upgrade) ушёл бы
+  // двумя запросами. Refs StrictMode-ремоунт переживают, новый монтаж
+  // (открытие модалки) получает свежий экземпляр.
+  const oneShotStartedRef = useRef(false);
   // Метрики скролла прошлого события/эффекта. Клампинг браузера при сжатии
   // контента (фильтр, вытеснение кольцом) прижимает scrollTop к низу без
   // жеста пользователя — его подпись: упали ОБА, scrollHeight и scrollTop.
@@ -50,6 +79,10 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
     // Вкладка скрыта (keep-alive) — стрим на паузе; возврат перезапускает
     // его с чистым буфером. Рестарт (смена follow, retry) — тоже с чистым.
     if (!visible) return;
+    if (oneShot) {
+      if (oneShotStartedRef.current) return;
+      oneShotStartedRef.current = true;
+    }
     const controller = new AbortController();
     bufferRef.current = { lines: [], pending: '' };
     setLines([]);
@@ -66,7 +99,10 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
     };
     const flushTimer = window.setInterval(flush, FLUSH_MS);
 
-    void fetch(buildUrl(follow), { credentials: 'same-origin', signal: controller.signal })
+    const { url, init } = buildRequest
+      ? buildRequest(false)
+      : { url: buildUrl?.(oneShot ? false : follow) ?? '', init: undefined };
+    void fetch(url, { credentials: 'same-origin', signal: controller.signal, ...(init ?? {}) })
       .then(async (res) => {
         if (!res.ok || !res.body) {
           let message = res.statusText;
@@ -108,7 +144,7 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
       controller.abort();
       window.clearInterval(flushTimer);
     };
-  }, [buildUrl, follow, visible, retry]);
+  }, [buildUrl, buildRequest, follow, visible, retry, oneShot]);
 
   // Автоскролл после каждого флеша.
   useEffect(() => {
@@ -170,7 +206,9 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
 
   const statusText =
     status === 'stopped'
-      ? 'остановлено'
+      ? oneShot
+        ? 'завершено'
+        : 'остановлено'
       : status === 'error'
         ? error
         : 'подключено…';
@@ -178,10 +216,12 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
   return (
     <div className="log-viewer">
       <div className="logs-toolbar">
-        <label className="check">
-          <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
-          Следовать
-        </label>
+        {!oneShot && (
+          <label className="check">
+            <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
+            Следовать
+          </label>
+        )}
         <label className="check">
           <input type="checkbox" checked={autoscroll} onChange={(e) => setAutoscroll(e.target.checked)} />
           Автоскролл
@@ -198,7 +238,7 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
         {onAskAgent && (
           <button className="btn btn-mini" onClick={ask}>В чат</button>
         )}
-        {(status === 'error' || status === 'stopped') && (
+        {!oneShot && (status === 'error' || status === 'stopped') && (
           <button className="btn btn-mini" onClick={() => setRetry((r) => r + 1)}>Переподключиться</button>
         )}
       </div>

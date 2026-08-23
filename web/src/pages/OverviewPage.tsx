@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchMetrics, fetchMetricsHistory, fetchPackages } from '../api';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { fetchMetrics, fetchMetricsHistory, fetchPackages, packagesApplyRequest } from '../api';
 import type { HistorySample, PackagesSnapshot, ServerMetrics } from '../api';
 import type { AgentAskMode, Profile } from '../types';
 import { useSortBy, SortableTh } from '../hooks/useSortBy';
 import { LoadChart } from '../components/Sparkline';
+import { LogViewer } from '../components/LogViewer';
+import { Modal } from '../components/Modal';
 
 interface Props {
   profile: Profile;
@@ -58,6 +60,20 @@ export function Meter({ percent }: { percent: number | null }) {
   );
 }
 
+/** Имя команды применения — для заголовка просмотрщика и контекста «В чат». */
+export function applyLogLabel(pm: 'apt' | 'dnf' | 'yum' | 'apk'): string {
+  switch (pm) {
+    case 'apt':
+      return 'apt-get upgrade';
+    case 'dnf':
+      return 'dnf upgrade';
+    case 'yum':
+      return 'yum upgrade';
+    case 'apk':
+      return 'apk upgrade';
+  }
+}
+
 /** Возраст индекса apt: «индекс не обновлялся» (файла нет) / «N дн назад». */
 function indexAgeText(ms: number | null): string {
   if (ms === null) return 'индекс не обновлялся';
@@ -70,9 +86,11 @@ function indexAgeText(ms: number | null): string {
 
 function PackagesCard({
   packages,
+  onApply,
   onScrollToList,
 }: {
   packages: PackagesSnapshot | null;
+  onApply: () => void;
   onScrollToList: () => void;
 }) {
   const count = packages?.updates.length ?? 0;
@@ -105,6 +123,14 @@ function PackagesCard({
             </div>
           )}
           <div className="packages-actions">
+            <button
+              className="btn btn-danger btn-small"
+              onClick={onApply}
+              disabled={count === 0}
+              title={count === 0 ? 'обновлений нет' : undefined}
+            >
+              Обновить всё
+            </button>
             <button className="btn btn-ghost btn-small" onClick={onScrollToList}>
               Список
             </button>
@@ -123,13 +149,17 @@ function pluralUpdates(n: number): string {
   return 'обновлений';
 }
 
-export function OverviewPage({ profile, visible }: Props) {
+export function OverviewPage({ profile, visible, onAskAgent }: Props) {
   const [metrics, setMetrics] = useState<ServerMetrics | null>(null);
   const [history, setHistory] = useState<HistorySample[]>([]);
   const [packages, setPackages] = useState<PackagesSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const updatesSectionRef = useRef<HTMLDivElement>(null);
+  // Применение обновлений: подтверждение → просмотрщик живого вывода.
+  const [confirmApply, setConfirmApply] = useState(false);
+  const [applyPassword, setApplyPassword] = useState('');
+  const [applying, setApplying] = useState(false);
 
   // Последовательный polling: следующий запрос только после завершения
   // предыдущего. На скрытой вкладке (keep-alive) опрос полностью остановлен.
@@ -169,6 +199,25 @@ export function OverviewPage({ profile, visible }: Props) {
       window.clearTimeout(timer);
     };
   }, [profile.id, visible, reloadKey]);
+
+  // Стабильность identity обязательна: LogViewer перезапускает стрим при
+  // смене buildRequest, а для oneShot это повторный запуск мутации.
+  const buildApplyRequest = useCallback(
+    (_follow: boolean): { url: string; init?: RequestInit } =>
+      packagesApplyRequest(profile.id, applyPassword || undefined),
+    [profile.id, applyPassword],
+  );
+
+  const startApply = () => {
+    setConfirmApply(false);
+    setApplying(true);
+  };
+
+  const closeApply = () => {
+    setApplying(false);
+    // Серверный кэш снимка уже сброшен инвалидацией — немедленный refetch.
+    setReloadKey((k) => k + 1);
+  };
 
   const mem = metrics?.memory;
 
@@ -265,6 +314,7 @@ export function OverviewPage({ profile, visible }: Props) {
 
             <PackagesCard
               packages={packages}
+              onApply={() => setConfirmApply(true)}
               onScrollToList={() => updatesSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
             />
           </div>
@@ -338,6 +388,63 @@ export function OverviewPage({ profile, visible }: Props) {
             )}
           </div>
         </div>
+      )}
+
+      {confirmApply && packages?.pm && (
+        <Modal title="Обновить все пакеты" onClose={() => setConfirmApply(false)}>
+          <p>
+            Будет выполнено обновление всех доступных пакетов (<code>{applyLogLabel(packages.pm)}</code>,{' '}
+            {packages.updates.length} шт).
+          </p>
+          <p className="critical-warning">
+            ⚠ Обновление может перезапустить службы и оборвать SSH-соединение (sshd/ядро). Закрытие окна вывода
+            прервёт обновление.
+          </p>
+          <label>
+            sudo-пароль (применение требует root)
+            <input
+              type="password"
+              value={applyPassword}
+              onChange={(e) => setApplyPassword(e.target.value)}
+              placeholder="оставьте пустым — команда без sudo, ошибка прав уйдёт в вывод"
+              autoComplete="off"
+            />
+            <span className="muted" style={{ fontSize: 12 }}>
+              {' '}передаётся только на этот запрос, в логи не попадает
+            </span>
+          </label>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setConfirmApply(false)}>
+              Отмена
+            </button>
+            <button className="btn btn-danger" onClick={startApply}>
+              Запустить
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {applying && packages?.pm && (
+        <Modal title={`Обновление пакетов (${packages.pm})`} onClose={closeApply} wide>
+          <LogViewer
+            title={applyLogLabel(packages.pm)}
+            buildRequest={buildApplyRequest}
+            visible={visible}
+            oneShot
+            logPath={applyLogLabel(packages.pm)}
+            serverName={profile.name}
+            onAskAgent={(text) => {
+              // Просмотрщик закрываем: панель агента раскрывается под ним.
+              setApplying(false);
+              onAskAgent?.(text, 'send');
+            }}
+          />
+          <div className="modal-actions">
+            <button className="btn" onClick={closeApply}>
+              Закрыть
+            </button>
+          </div>
+        </Modal>
       )}
     </div>
   );
