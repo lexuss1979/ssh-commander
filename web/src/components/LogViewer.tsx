@@ -40,6 +40,10 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
   const [pendingLine, setPendingLine] = useState('');
   const bufferRef = useRef<LogBufferState>({ lines: [], pending: '' });
   const preRef = useRef<HTMLPreElement>(null);
+  // Метрики скролла прошлого события: сжатие контента (фильтр, вытеснение
+  // кольцом) прижимает scrollTop к низу без участия пользователя — такой
+  // скролл-эвент не должен переармировать автоскролл.
+  const lastScrollHeightRef = useRef(0);
 
   useEffect(() => {
     // Вкладка скрыта (keep-alive) — стрим на паузе; возврат перезапускает
@@ -115,6 +119,11 @@ export function LogViewer({ title, buildUrl, visible, onAskAgent, toolbarExtra, 
   const onScroll = () => {
     const el = preRef.current;
     if (!el) return;
+    if (el.scrollHeight !== lastScrollHeightRef.current) {
+      // Перераскладка, а не жест пользователя.
+      lastScrollHeightRef.current = el.scrollHeight;
+      return;
+    }
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= AUTOSCROLL_THRESHOLD_PX;
     if (atBottom !== autoscroll) setAutoscroll(atBottom);
   };

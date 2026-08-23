@@ -347,22 +347,30 @@ filesRouter.get('/tail', async (req, res) => {
     // быстрорастущем логе; вместо паузы канала (не выводим его наружу через
     // API execStream) дропаем чанки с подсчётом и маркером при возврате.
     const gate = createChunkGate();
-    const handle = execStream(profile, buildTailFollowCommand(path, q.lines), (chunk) => {
-      const out = gate.push(chunk, res.writableLength);
-      if (out !== null) res.write(out);
-    });
-    void handle.code.then(() => {
+    // Синхронный throw при сборке хэндла (между acquire и req.on('close'))
+    // оставил бы слот занятым до рестарта — headers уже отправлены, поэтому
+    // отказ уходит телом, а слот снимается catch'ем.
+    try {
+      const handle = execStream(profile, buildTailFollowCommand(path, q.lines), (chunk) => {
+        const out = gate.push(chunk, res.writableLength);
+        if (out !== null) res.write(out);
+      });
+      void handle.code.then(() => {
+        releaseSlot();
+        // Стрим закончился в состоянии дропа — маркер о потере, иначе
+        // пользователь не узнает о пропущенных байтах.
+        const tail = gate.finish();
+        if (tail !== null && !res.writableEnded) res.write(tail);
+        if (!res.writableEnded) res.end();
+      });
+      req.on('close', () => {
+        releaseSlot();
+        handle.close();
+      });
+    } catch (err) {
       releaseSlot();
-      // Стрим закончился в состоянии дропа — маркер о потере, иначе
-      // пользователь не узнает о пропущенных байтах.
-      const tail = gate.finish();
-      if (tail !== null && !res.writableEnded) res.write(tail);
-      if (!res.writableEnded) res.end();
-    });
-    req.on('close', () => {
-      releaseSlot();
-      handle.close();
-    });
+      res.end(`${String((err as Error).message ?? err)}\n`);
+    }
   } catch (err) {
     if (!res.headersSent) {
       res.status(400).json({ error: (err as Error).message });

@@ -123,25 +123,33 @@ dockerRouter.get('/containers/:id/logs', async (req, res) => {
   res.flushHeaders();
   let closed = false;
   const gate = createChunkGate();
-  const handle = streamContainerLogs(profile, req.params.id, tail, (chunk) => {
-    if (closed) return;
-    const out = gate.push(chunk, res.writableLength);
-    if (out !== null) res.write(out);
-  });
-  void handle.code.then(() => {
+  // Синхронный throw при сборке хэндла (между acquire и req.on('close'))
+  // оставил бы слот занятым до рестарта — headers уже отправлены, поэтому
+  // отказ уходит телом, а слот снимается catch'ем.
+  try {
+    const handle = streamContainerLogs(profile, req.params.id, tail, (chunk) => {
+      if (closed) return;
+      const out = gate.push(chunk, res.writableLength);
+      if (out !== null) res.write(out);
+    });
+    void handle.code.then(() => {
+      releaseSlot();
+      const tailMarker = gate.finish();
+      if (!closed && tailMarker !== null) res.write(tailMarker);
+      if (!closed) res.end();
+    }).catch(() => {
+      releaseSlot();
+      if (!closed) res.end();
+    });
+    req.on('close', () => {
+      closed = true;
+      releaseSlot();
+      handle.close();
+    });
+  } catch (err) {
     releaseSlot();
-    const tailMarker = gate.finish();
-    if (!closed && tailMarker !== null) res.write(tailMarker);
-    if (!closed) res.end();
-  }).catch(() => {
-    releaseSlot();
-    if (!closed) res.end();
-  });
-  req.on('close', () => {
-    closed = true;
-    releaseSlot();
-    handle.close();
-  });
+    res.end(`${String((err as Error).message ?? err)}\n`);
+  }
 });
 
 dockerRouter.get('/images', async (req, res) => {

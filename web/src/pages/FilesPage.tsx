@@ -460,7 +460,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
           title="Добавить путь лога"
           onClick={() => setAddLogOpen(true)}
         >
-          +
+          + лог
         </button>
       </div>
 
