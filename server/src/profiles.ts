@@ -16,6 +16,8 @@ export const profileInputSchema = z.object({
   password: z.string().optional(),
   dockerCommand: z.string().min(1).default('docker'),
   note: z.string().optional(),
+  // Закреплённые пути логов (эпик 14): чипы быстрого доступа в FilesPage.
+  logPaths: z.array(z.string().min(1)).max(50).optional(),
 });
 
 const profileSchema = profileInputSchema.extend({ id: z.string().min(1) });
@@ -75,6 +77,33 @@ function assertSecret(data: Pick<Profile, 'authType'> & Partial<Pick<Profile, 'k
   }
 }
 
+/**
+ * Нормализация закреплённых путей логов: trim, пустые отбрасываются,
+ * дедуп с сохранением порядка. Не-абсолютный путь или сегмент `..` —
+ * исключение с перечнем плохих строк.
+ */
+export function normalizeLogPaths(input: string[]): string[] {
+  const bad: string[] = [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of input) {
+    const p = raw.trim();
+    if (!p) continue;
+    if (!p.startsWith('/') || p.split('/').includes('..')) {
+      bad.push(p);
+      continue;
+    }
+    if (!seen.has(p)) {
+      seen.add(p);
+      result.push(p);
+    }
+  }
+  if (bad.length > 0) {
+    throw new Error(`Некорректные пути логов (нужен абсолютный путь без ..): ${bad.join(', ')}`);
+  }
+  return result;
+}
+
 function validate(input: unknown): Profile {
   const data = profileInputSchema.parse(input);
   assertSecret(data);
@@ -128,6 +157,8 @@ export function updateProfile(id: string, input: unknown): Profile {
     keyPath: data.keyPath ?? existing.keyPath,
     keyPassphrase: data.keyPassphrase ?? existing.keyPassphrase,
     password: data.password ?? existing.password,
+    // ProfileModal про поле не знает — непереданное не затирает пины.
+    logPaths: data.logPaths ?? existing.logPaths,
   };
   assertSecret(updated);
   list[idx] = updated;
@@ -147,6 +178,23 @@ export function importProfile(input: unknown): Profile {
   list.push(profile);
   persist(list);
   return { ...profile };
+}
+
+/**
+ * Заменяет список закреплённых путей логов (эпик 14). Отдельная функция, а не
+ * полный updateProfile: полный апдейт рвёт SSH-подключение профиля и оборвал
+ * бы тот самый tail-стрим, из которого пользователь жмёт «Закрепить».
+ */
+export function updateProfileLogPaths(id: string, paths: string[]): Profile {
+  const list = listProfiles();
+  const idx = list.findIndex((p) => p.id === id);
+  if (idx < 0) {
+    throw new Error(`Profile ${id} not found`);
+  }
+  const updated: Profile = { ...list[idx], logPaths: normalizeLogPaths(paths) };
+  list[idx] = updated;
+  persist(list);
+  return { ...updated };
 }
 
 export function deleteProfile(id: string): void {

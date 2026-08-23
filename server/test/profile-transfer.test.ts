@@ -63,6 +63,15 @@ describe('profile transfer', () => {
     expect(summary.imported).toBe(1);
   });
 
+  it('round-trips logPaths through a plaintext backup', () => {
+    profiles.createProfile(baseInput({ logPaths: ['/var/log/syslog', '/var/log/nginx/error.log'] }));
+    const backup = buildExport({ includeSecrets: true });
+    const summary = importBackup(backup);
+    expect(summary.imported).toBe(1);
+    const imported = profiles.listProfiles().find((p) => p.name === 'srv (2)');
+    expect(imported?.logPaths).toEqual(['/var/log/syslog', '/var/log/nginx/error.log']);
+  });
+
   it('rejects a wrong passphrase', () => {
     profiles.createProfile(baseInput());
     const backup = buildExport({ includeSecrets: true, passphrase: 'pw-123' });

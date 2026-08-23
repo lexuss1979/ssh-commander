@@ -10,7 +10,8 @@ import {
   uploadDirArchive,
   uploadFile,
 } from '../api';
-import type { FileEntry, FileListResponse, FileSearchResult, Profile } from '../types';
+import type { AgentAskMode, FileEntry, FileListResponse, FileSearchResult, Profile } from '../types';
+import { LogViewer } from '../components/LogViewer';
 import { Modal } from '../components/Modal';
 import { useSortBy, SortableTh } from '../hooks/useSortBy';
 
@@ -20,6 +21,9 @@ const CodeEditor = lazy(() => import('../components/CodeEditor'));
 interface Props {
   profile: Profile;
   showError: (msg: string) => void;
+  visible: boolean;
+  onAskAgent: (text: string, mode?: AgentAskMode, source?: string) => void;
+  onProfilesChanged: () => void;
 }
 
 function fileQuery(profileId: string, path: string): string {
@@ -27,7 +31,7 @@ function fileQuery(profileId: string, path: string): string {
   return `/api/files/list?${params}`;
 }
 
-export function FilesPage({ profile, showError }: Props) {
+export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesChanged }: Props) {
   const [path, setPath] = useState('/');
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -46,6 +50,11 @@ export function FilesPage({ profile, showError }: Props) {
   const dragCounter = useRef(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchLoading, setBatchLoading] = useState(false);
+  // Живой просмотр лога (эпик 14): tailTarget — путь открытого файла,
+  // addLogInput — значение инпута модалки «+ путь» для чипов.
+  const [tailTarget, setTailTarget] = useState<string | null>(null);
+  const [addLogOpen, setAddLogOpen] = useState(false);
+  const [addLogInput, setAddLogInput] = useState('');
 
   const fileAccessors = useMemo(() => ({
     // Папки всегда выше файлов; внутри группы — по алфавиту.
@@ -189,6 +198,56 @@ export function FilesPage({ profile, showError }: Props) {
   };
   // При смене директории сбрасываем выделение.
   const navigate = (p: string) => { setSelected(new Set()); setPath(p); };
+
+  // Эпик 14: живой просмотр логов. buildUrl стабилизирован useCallback —
+  // LogViewer перезапускает стрим при смене identity пропа.
+  const buildTailUrl = useCallback(
+    (follow: boolean) => {
+      const params = new URLSearchParams({
+        profileId: profile.id,
+        path: tailTarget ?? '',
+        lines: '500',
+        follow: follow ? '1' : '0',
+      });
+      return `/api/files/tail?${params}`;
+    },
+    [profile.id, tailTarget],
+  );
+
+  // PUT log-paths — отдельный маршрут: полный апдейт профиля рвёт
+  // SSH-подключение и оборвал бы открытый tail-стрим.
+  const putLogPaths = useCallback(
+    async (paths: string[]): Promise<boolean> => {
+      try {
+        await api(`/api/profiles/${encodeURIComponent(profile.id)}/log-paths`, {
+          method: 'PUT',
+          body: JSON.stringify({ paths }),
+        });
+        onProfilesChanged();
+        return true;
+      } catch (err) {
+        showError((err as Error).message);
+        return false;
+      }
+    },
+    [profile.id, onProfilesChanged, showError],
+  );
+
+  const pinnedPaths = useMemo(() => profile.logPaths ?? [], [profile.logPaths]);
+  const tailPinned = tailTarget !== null && pinnedPaths.includes(tailTarget);
+
+  const submitAddLog = async () => {
+    const value = addLogInput.trim();
+    if (!value.startsWith('/')) {
+      showError('Путь должен начинаться с /');
+      return;
+    }
+    // при отказе сервера (не-абсолютный, ..) модалку держим открытой
+    if (await putLogPaths([...pinnedPaths, value])) {
+      setAddLogOpen(false);
+      setAddLogInput('');
+    }
+  };
 
   const batchDownload = async () => {
     if (selected.size === 0) return;
@@ -379,6 +438,32 @@ export function FilesPage({ profile, showError }: Props) {
         </div>
       </div>
 
+      {pinnedPaths.length > 0 && (
+        <div className="log-chips">
+          {pinnedPaths.map((p) => (
+            <span key={p} className="log-chip">
+              <button className="log-chip-open" title={`Смотреть ${p}`} onClick={() => setTailTarget(p)}>
+                {p}
+              </button>
+              <button
+                className="log-chip-remove"
+                title="Открепить"
+                onClick={() => void putLogPaths(pinnedPaths.filter((x) => x !== p))}
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+          <button
+            className="log-chip log-chip-add"
+            title="Добавить путь лога"
+            onClick={() => setAddLogOpen(true)}
+          >
+            +
+          </button>
+        </div>
+      )}
+
       <div className="search-panel">
         <input
           className="search-input"
@@ -509,6 +594,14 @@ export function FilesPage({ profile, showError }: Props) {
                       <>
                         <a className="btn btn-mini" href={downloadUrl(profile.id, entry.path)}>⬇</a>
                         <button className="btn btn-mini" onClick={() => void openEditor(entry)}>✎</button>
+                        {/* симлинки можно: серверный stat следует по ссылке */}
+                        <button
+                          className="btn btn-mini"
+                          title="Смотреть хвост (tail -F)"
+                          onClick={() => setTailTarget(entry.path)}
+                        >
+                          👁
+                        </button>
                       </>
                     )}
                     <button
@@ -572,6 +665,53 @@ export function FilesPage({ profile, showError }: Props) {
           <div className="modal-actions">
             <button className="btn btn-primary" onClick={() => void submitPrompt()}>ОК</button>
             <button className="btn" onClick={() => setPromptState(null)}>Отмена</button>
+          </div>
+        </Modal>
+      )}
+
+      {tailTarget !== null && (
+        <Modal title={tailTarget} onClose={() => setTailTarget(null)} wide>
+          <LogViewer
+            title={tailTarget}
+            buildUrl={buildTailUrl}
+            visible={visible}
+            logPath={tailTarget}
+            serverName={profile.name}
+            onAskAgent={(text) => onAskAgent(text, 'send')}
+            toolbarExtra={
+              <button
+                className="btn btn-mini"
+                onClick={() =>
+                  void putLogPaths(
+                    tailPinned ? pinnedPaths.filter((p) => p !== tailTarget) : [...pinnedPaths, tailTarget],
+                  )
+                }
+              >
+                {tailPinned ? '☆ Открепить' : '★ Закрепить'}
+              </button>
+            }
+          />
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setTailTarget(null)}>Закрыть</button>
+          </div>
+        </Modal>
+      )}
+
+      {addLogOpen && (
+        <Modal title="Добавить путь лога" onClose={() => setAddLogOpen(false)}>
+          <label>
+            Абсолютный путь:
+            <input
+              autoFocus
+              value={addLogInput}
+              onChange={(e) => setAddLogInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && void submitAddLog()}
+              placeholder="/var/log/nginx/error.log"
+            />
+          </label>
+          <div className="modal-actions">
+            <button className="btn btn-primary" onClick={() => void submitAddLog()}>ОК</button>
+            <button className="btn" onClick={() => setAddLogOpen(false)}>Отмена</button>
           </div>
         </Modal>
       )}

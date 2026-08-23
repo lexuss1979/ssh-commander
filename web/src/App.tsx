@@ -424,7 +424,14 @@ export default function App() {
                   />
                 </div>
                 <div className={`tab-page ${tab === 'files' ? '' : 'hidden'}`}>
-                  <FilesPage key={activeProfile.id} profile={activeProfile} showError={showError} />
+                  <FilesPage
+                    key={activeProfile.id}
+                    profile={activeProfile}
+                    showError={showError}
+                    visible={tab === 'files'}
+                    onAskAgent={handleAskAgent}
+                    onProfilesChanged={() => void loadProfiles()}
+                  />
                 </div>
                 <div className={`tab-page ${tab === 'docker' ? '' : 'hidden'}`}>
                   <DockerPage
