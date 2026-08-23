@@ -384,6 +384,19 @@ export default function App() {
     [agentWidth],
   );
 
+  // Чипы проблемных профилей в сайдбаре: счётчик алертов и худшая severity.
+  const profileAlerts = useMemo(() => {
+    const map = new Map<string, { count: number; crit: boolean; messages: string[] }>();
+    for (const a of activeAlerts) {
+      const cur = map.get(a.profileId) ?? { count: 0, crit: false, messages: [] };
+      cur.count += 1;
+      cur.crit = cur.crit || a.severity === 'crit';
+      cur.messages.push(a.message);
+      map.set(a.profileId, cur);
+    }
+    return map;
+  }, [activeAlerts]);
+
   if (authed === null) {
     return (
       <>
@@ -403,19 +416,6 @@ export default function App() {
   }
 
   const activeProfile = profiles.find((p) => p.id === activeProfileId);
-
-  // Чипы проблемных профилей в сайдбаре: счётчик алертов и худшая severity.
-  const profileAlerts = useMemo(() => {
-    const map = new Map<string, { count: number; crit: boolean; messages: string[] }>();
-    for (const a of activeAlerts) {
-      const cur = map.get(a.profileId) ?? { count: 0, crit: false, messages: [] };
-      cur.count += 1;
-      cur.crit = cur.crit || a.severity === 'crit';
-      cur.messages.push(a.message);
-      map.set(a.profileId, cur);
-    }
-    return map;
-  }, [activeAlerts]);
 
   return (
     <div className="app">
