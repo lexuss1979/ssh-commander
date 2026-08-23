@@ -21,6 +21,16 @@ export interface Profile {
   logPaths?: string[];
 }
 
+/**
+ * Внутренняя вкладка терминала (эпик 15). id — стабильный на всю жизнь
+ * вкладки (монотонный счётчик в localStorage), им же ключ сессии на сервере;
+ * container — shell внутри docker-контейнера вместо системного.
+ */
+export interface TerminalTab {
+  id: number;
+  container?: { id: string; name: string };
+}
+
 export interface FileEntry {
   name: string;
   path: string;

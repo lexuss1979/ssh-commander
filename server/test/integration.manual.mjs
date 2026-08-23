@@ -196,6 +196,7 @@ case "$1" in
   logs) echo 'log line 1' ;;
   pull) echo "Pulled $2" ;;
   run) echo "$2" ;;
+  exec) sleep 60 ;;
 esac
 `;
   await req('/api/files/write', {
@@ -233,6 +234,144 @@ esac
     headers: { cookie },
   });
   check('docker logs', (await logs.text()).includes('log line 1'));
+
+  console.log('== terminal tabs (эпик 15) ==');
+  // Симуляция поведения UI: каждая вкладка — свой WS со стабильным tabId.
+  // Ручные UI-пункты (F5 в браузере, чистка localStorage, закрытие окна и
+  // grace 60 c) покрываются теми же серверными сценариями ниже.
+  const openTerminalTab = (extra) => {
+    const params = new URLSearchParams({ profileId: pid, cols: 80, rows: 24, ...extra });
+    return wsConnect(`/ws/terminal?${params}`, { cookie }).then((ws) => {
+      const state = { out: '', frames: [] };
+      ws.on('message', (raw) => {
+        const msg = JSON.parse(String(raw));
+        state.frames.push(msg);
+        if (msg.type === 'output' && msg.data) state.out += msg.data;
+      });
+      const waitFrame = (pred, timeout = 15000) =>
+        new Promise((resolve, reject) => {
+          const hit = state.frames.find(pred);
+          if (hit) {
+            resolve(hit);
+            return;
+          }
+          const timer = setTimeout(
+            () => reject(new Error(`timeout: ${state.out.slice(-300)}`)),
+            timeout,
+          );
+          const on = (raw) => {
+            const msg = JSON.parse(String(raw));
+            if (pred(msg)) {
+              clearTimeout(timer);
+              ws.off('message', on);
+              resolve(msg);
+            }
+          };
+          ws.on('message', on);
+        });
+      const input = (data) => ws.send(JSON.stringify({ type: 'input', data }));
+      const closeFrame = () => ws.send(JSON.stringify({ type: 'close' }));
+      return { ws, state, waitFrame, input, closeFrame };
+    });
+  };
+  const connected = (m) => m.type === 'connected';
+  const sessionsNow = () => req(`/api/terminal/sessions?${P()}`);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // Две вкладки: независимый ввод/вывод, потоки не пересекаются.
+  const t1 = await openTerminalTab({ tabId: '10' });
+  const t2 = await openTerminalTab({ tabId: '20' });
+  await t1.waitFrame(connected);
+  await t2.waitFrame(connected);
+  t1.input('echo LEAK_7f3\n');
+  t2.input('echo LEAK_9c1\n');
+  await t1.waitFrame((m) => m.type === 'output' && t1.state.out.includes('LEAK_7f3'));
+  await t2.waitFrame((m) => m.type === 'output' && t2.state.out.includes('LEAK_9c1'));
+  check(
+    'tabs: вывод вкладок не пересекается',
+    !t1.state.out.includes('LEAK_9c1') && !t2.state.out.includes('LEAK_7f3'),
+  );
+
+  const sess1 = await sessionsNow();
+  check(
+    'tabs: /sessions перечисляет вкладки с limit',
+    sess1.limit === 4 &&
+      sess1.sessions
+        .filter((s) => !s.container)
+        .map((s) => s.tabId)
+        .sort((a, b) => a - b)
+        .join(',') === '10,20',
+    JSON.stringify(sess1),
+  );
+
+  // Закрытие средней из трёх по close-фрейму (кнопка ✕): соседние живы.
+  const t3 = await openTerminalTab({ tabId: '30' });
+  await t3.waitFrame(connected);
+  t2.closeFrame();
+  await sleep(500);
+  const sess2 = await sessionsNow();
+  check('tabs: close-фрейм убирает сессию', !sess2.sessions.some((s) => s.tabId === 20), JSON.stringify(sess2));
+  t1.input('echo ALIVE_4b2\n');
+  await t1.waitFrame((m) => m.type === 'output' && t1.state.out.includes('ALIVE_4b2'));
+  check('tabs: соседние вкладки пережили закрытие средней', true);
+
+  // «F5»: обрыв без close-фрейма и переподключение той же вкладки —
+  // сессия переиспользуется (grace), дублей в /sessions нет.
+  t1.ws.close();
+  const t1b = await openTerminalTab({ tabId: '10' });
+  await t1b.waitFrame(connected);
+  const sess3 = await sessionsNow();
+  check(
+    'tabs: переподключение переиспользует сессию',
+    sess3.sessions.filter((s) => s.tabId === 10).length === 1,
+    JSON.stringify(sess3),
+  );
+
+  // Контейнерная вкладка (docker exec через фейковый docker с sleep):
+  // сосуществует с системным shell, видна в /sessions с именем контейнера.
+  const t4 = await openTerminalTab({ tabId: '40', container: 'abc123', containerName: 'web' });
+  await t4.waitFrame(connected);
+  const sess4 = await sessionsNow();
+  const cs = sess4.sessions.find((s) => s.tabId === 40);
+  check(
+    'tabs: контейнерная вкладка в списке с containerName',
+    !!cs && cs.container === 'abc123' && cs.containerName === 'web',
+    JSON.stringify(sess4),
+  );
+  check('tabs: системный shell жив рядом с контейнером', sess4.sessions.some((s) => s.tabId === 10 && !s.container));
+  t4.closeFrame();
+  await sleep(300);
+
+  // Лимит: 4 живых (10, 30, 50, 60) — пятая получает error-фрейм + close 1013.
+  const t5 = await openTerminalTab({ tabId: '50' });
+  const t6 = await openTerminalTab({ tabId: '60' });
+  await t5.waitFrame(connected);
+  await t6.waitFrame(connected);
+  const t7 = await openTerminalTab({ tabId: '70' });
+  const errFrame = await t7.waitFrame((m) => m.type === 'error');
+  const closedCode = new Promise((resolve) => t7.ws.once('close', (code) => resolve(code)));
+  check('tabs: лимит — error-фрейм с текстом', String(errFrame.data).includes('Слишком много терминалов'), JSON.stringify(errFrame));
+  check('tabs: лимит — close 1013', (await closedCode) === 1013);
+  t6.closeFrame();
+  await sleep(300);
+  const t7b = await openTerminalTab({ tabId: '70' });
+  await t7b.waitFrame(connected);
+  check('tabs: слот освободился — новая сессия проходит', true);
+
+  // exit внутри shell: «сессия завершена», запись снята, переподключение
+  // той же вкладки («Обновить сессию») поднимает свежий shell.
+  t7b.input('exit\n');
+  await t7b.waitFrame((m) => m.type === 'close');
+  await sleep(300);
+  const sess5 = await sessionsNow();
+  check('tabs: exit снимает запись из /sessions', !sess5.sessions.some((s) => s.tabId === 70), JSON.stringify(sess5));
+  const t7c = await openTerminalTab({ tabId: '70' });
+  await t7c.waitFrame(connected);
+  t7c.input('echo REFRESH_2d9\n');
+  await t7c.waitFrame((m) => m.type === 'output' && t7c.state.out.includes('REFRESH_2d9'));
+  check('tabs: переподключение после exit поднимает свежий shell', true);
+
+  for (const t of [t1b, t3, t5, t7c]) t.closeFrame();
 
   console.log('== cron ==');
   const cron0 = await req(`/api/cron?${P()}`);

@@ -393,6 +393,25 @@ export async function fetchTerminalHistory(profileId: string, limit = 100): Prom
   return data.commands;
 }
 
+// Терминальные вкладки (эпик 15)
+export interface TerminalSessionEntry {
+  tabId: number;
+  container: string | null;
+  containerName: string | null;
+}
+
+export interface TerminalSessionsResponse {
+  sessions: TerminalSessionEntry[];
+  limit: number;
+}
+
+/** Живые терминальные сессии профиля — сверка вкладок после F5/чистки localStorage. */
+export function fetchTerminalSessions(profileId: string): Promise<TerminalSessionsResponse> {
+  return api<TerminalSessionsResponse>(
+    `/api/terminal/sessions?profileId=${encodeURIComponent(profileId)}`,
+  );
+}
+
 // Вкладка «Службы» (эпик 13)
 export interface UnitInfo {
   /** Имя unit'а с суффиксом: 'nginx.service'. */

@@ -1,20 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
-import type { AgentAskMode, Profile } from '../types';
-import { fetchTerminalHistory } from '../api';
+import type { AgentAskMode, Profile, TerminalTab } from '../types';
+import { fetchTerminalHistory, fetchTerminalSessions } from '../api';
 
-interface Props {
-  profile: Profile;
-  showError: (msg: string) => void;
-  visible: boolean;
-  /** Контейнерная сессия: shell внутри docker-контейнера вместо системного. */
-  container?: { id: string; name: string } | null;
-  onExitContainer?: () => void;
-  /** «Спросить агента»: передать контекст терминала AI-агенту. */
-  onAskAgent?: (text: string, mode?: AgentAskMode) => void;
-}
+// Лимит до сверки с сервером (сервер отдаёт фактический в /api/terminal/sessions).
+const TERMINAL_LIMIT_DEFAULT = 4;
+
+type TerminalStatus = 'connecting' | 'connected' | 'disconnected' | 'closed' | 'error';
 
 // Лимиты контекста для кнопки «Спросить агента» (см. roadmap, эпик 7):
 // последние ~30 непустых строк, суммарно не более ~4 КБ.
@@ -151,22 +145,60 @@ function HistoryPalette({ profileId, onPick, onClose }: HistoryPaletteProps) {
   );
 }
 
-export function TerminalPage({ profile, showError, visible, container, onExitContainer, onAskAgent }: Props) {
+interface TerminalViewProps {
+  profile: Profile;
+  tab: TerminalTab;
+  /** Внутренняя вкладка активна (переключение вкладок терминала). */
+  active: boolean;
+  /** Вкладка «Терминал» приложения видима (возврат с других вкладок). */
+  visible: boolean;
+  showError: (msg: string) => void;
+  /** «Спросить агента»: передать контекст терминала AI-агенту. */
+  onAskAgent?: (text: string, mode?: AgentAskMode) => void;
+  /** Флаг «вкладку закрыл пользователь» (✕): cleanup шлёт серверу close-фрейм,
+   * сессия умирает явно. На прочих unmount'ах (смена профиля, «Обновить
+   * сессию») фрейм не шлётся — сессию держит grace 60 с. */
+  closeOnUnmountRef: { current: boolean };
+  /** Статус WS/shell — точка в заголовке вкладки. */
+  onStatus: (key: string, status: TerminalStatus) => void;
+}
+
+/** Идентификатор вкладки на клиенте — пара (tabId, container), как и ключ
+ * серверной сессии: два браузера с независимыми счётчиками tabId могут
+ * дать одинаковый номер host-вкладке и контейнерной — id одного номера
+ * недостаточно (коллизия React-ключей). */
+export function terminalTabKey(tab: TerminalTab): string {
+  return `${tab.id}:${tab.container?.id ?? 'host'}`;
+}
+
+function TerminalView({
+  profile,
+  tab,
+  active,
+  visible,
+  showError,
+  onAskAgent,
+  closeOnUnmountRef,
+  onStatus,
+}: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const sendInputRef = useRef<(data: string) => void>(() => {});
   const wsRef = useRef<WebSocket | null>(null);
-  const [status, setStatus] = useState('connecting');
+  const [status, setStatus] = useState<TerminalStatus>('connecting');
   const [sessionKey, setSessionKey] = useState(0);
   const [historyOpen, setHistoryOpen] = useState(false);
   // Есть ли выделение в xterm — включает пункты меню «В чат».
   const [hasSelection, setHasSelection] = useState(false);
   const [askMenuOpen, setAskMenuOpen] = useState(false);
   const askMenuRef = useRef<HTMLDivElement>(null);
-  const statusRef = useRef(status);
-  statusRef.current = status;
-  const containerId = container?.id ?? '';
+  const containerId = tab.container?.id ?? '';
+
+  // Статус — вверх, в точку заголовка вкладки.
+  useEffect(() => {
+    onStatus(terminalTabKey(tab), status);
+  }, [tab, status, onStatus]);
 
   // В контейнерной сессии история системного shell не имеет смысла.
   const openHistory = () => {
@@ -281,8 +313,12 @@ export function TerminalPage({ profile, showError, visible, container, onExitCon
       profileId: profile.id,
       cols: String(term.cols),
       rows: String(term.rows),
+      tabId: String(tab.id),
     });
-    if (containerId) wsParams.set('container', containerId);
+    if (containerId) {
+      wsParams.set('container', containerId);
+      wsParams.set('containerName', tab.container?.name ?? '');
+    }
     const ws = new WebSocket(`/ws/terminal?${wsParams}`);
     wsRef.current = ws;
 
@@ -338,32 +374,54 @@ export function TerminalPage({ profile, showError, visible, container, onExitCon
       closed = true;
       wsRef.current = null;
       ro.disconnect();
-      ws.close();
+      // close-фрейм — только явное закрытие вкладки пользователем: смена
+      // профиля размонтирует страницу, и безусловная отправка убивала бы все
+      // терминалы вместо grace (вернулся в течение 60 с — тот же shell).
+      if (closeOnUnmountRef.current) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'close' }));
+          ws.close();
+        } else if (ws.readyState === WebSocket.CONNECTING) {
+          // Сессия создаётся на сервере уже в момент апгрейда, а OPEN у
+          // клиента наступает позже: закрытие свежей вкладки должно донести
+          // close и по ещё не открывшемуся сокету, иначе слот держит grace.
+          ws.addEventListener('open', () => {
+            ws.send(JSON.stringify({ type: 'close' }));
+            ws.close();
+          });
+        } else {
+          ws.close();
+        }
+      } else {
+        ws.close();
+      }
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
       sendInputRef.current = () => {};
     };
-  }, [profile.id, sessionKey, showError, containerId]);
+  }, [profile.id, sessionKey, showError, containerId, tab.id, closeOnUnmountRef]);
 
-  // При display:none xterm теряет размеры — пересчитываем при возврате на вкладку.
+  // При display:none xterm теряет размеры — пересчитываем, когда вкладка
+  // терминалов видима и внутренняя вкладка активна (оба случая скрытия).
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || !active) return;
     try {
       fitRef.current?.fit();
     } catch {
       /* контейнер ещё скрыт */
     }
-  }, [visible]);
+    termRef.current?.focus();
+  }, [visible, active]);
 
   return (
-    <div className="page terminal-page">
+    <div className={`terminal-view${active ? '' : ' hidden'}`}>
       <div className="toolbar">
         <span className="muted">
           {profile.name} — {profile.username}@{profile.host}
         </span>
-        {container && (
-          <span className="container-chip">контейнер: {container.name}</span>
+        {tab.container && (
+          <span className="container-chip">контейнер: {tab.container.name}</span>
         )}
         <span className={`status-dot ${status}`} />
         <span className="status-text">
@@ -373,7 +431,7 @@ export function TerminalPage({ profile, showError, visible, container, onExitCon
           {status === 'closed' && 'сессия завершена'}
           {status === 'error' && 'ошибка'}
         </span>
-        {!container && (
+        {!tab.container && (
           <button className="btn btn-ghost" onClick={openHistory} title="Ctrl+R">
             История
           </button>
@@ -426,11 +484,6 @@ export function TerminalPage({ profile, showError, visible, container, onExitCon
             )}
           </div>
         )}
-        {container && onExitContainer && (
-          <button className="btn btn-ghost" onClick={onExitContainer}>
-            Системный shell
-          </button>
-        )}
         <button
           className="btn btn-ghost"
           title="Переустановить SSH-подключение (применить новые группы и права)"
@@ -451,9 +504,326 @@ export function TerminalPage({ profile, showError, visible, container, onExitCon
           Обновить сессию
         </button>
       </div>
-      <div className="terminal-container" ref={containerRef} />
-      {historyOpen && !container && (
-        <HistoryPalette profileId={profile.id} onPick={pickHistory} onClose={closeHistory} />
+      {/* Палитра — внутри terminal-container: якорится к области терминала
+          (position: relative), а не к заголовкам вкладок/тулбара с фиксированным
+          смещением, которое плывёт при росте тулбара. */}
+      <div className="terminal-container" ref={containerRef}>
+        {historyOpen && !tab.container && (
+          <HistoryPalette profileId={profile.id} onPick={pickHistory} onClose={closeHistory} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Вкладки терминалов (эпик 15) ----------
+
+interface TabsState {
+  tabs: TerminalTab[];
+  /** Монотонный счётчик id — вкладка сохраняет id на всю жизнь. */
+  nextId: number;
+  /** Ключ активной вкладки — terminalTabKey (пара id+container). */
+  activeId: string | null;
+}
+
+interface Props {
+  profile: Profile;
+  showError: (msg: string) => void;
+  visible: boolean;
+  /** Одноразовый запрос «терминал в контейнер» из Docker Explorer:
+   * TerminalPage добавляет/активирует вкладку контейнера и сбрасывает
+   * запрос через onOpenContainerConsumed (паттерн sqlInsert). */
+  openContainerRequest: { containerId: string; name: string } | null;
+  onOpenContainerConsumed: () => void;
+  onAskAgent?: (text: string, mode?: AgentAskMode) => void;
+}
+
+const tabsStorageKey = (profileId: string) => `sc-terminal-tabs:${profileId}`;
+
+const DEFAULT_TABS: TabsState = { tabs: [{ id: 0 }], nextId: 1, activeId: '0:host' };
+
+/** Разбор сохранённых вкладок: мусорные элементы отбрасываются, дубли
+ * числовых id — тоже: свои записи дубликатов не пишут (nextId монотонный),
+ * а возможную после сверки с сервером пару «host N + контейнер N» при
+ * следующем F5 сверка же и доукомплектует из живых сессий. */
+function parseStoredTabs(raw: string | null): TabsState | null {
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const { tabs, nextId, activeId } = parsed as {
+      tabs?: unknown;
+      nextId?: unknown;
+      activeId?: unknown;
+    };
+    if (!Array.isArray(tabs)) return null;
+    const valid: TerminalTab[] = [];
+    const seen = new Set<number>();
+    for (const item of tabs) {
+      if (typeof item !== 'object' || item === null) continue;
+      const { id, container } = item as { id?: unknown; container?: unknown };
+      if (typeof id !== 'number' || !Number.isInteger(id) || id < 0 || seen.has(id)) continue;
+      let tab: TerminalTab | null = null;
+      if (container === undefined) {
+        tab = { id };
+      } else if (
+        typeof container === 'object' &&
+        container !== null &&
+        typeof (container as { id?: unknown }).id === 'string' &&
+        typeof (container as { name?: unknown }).name === 'string'
+      ) {
+        tab = { id, container: container as { id: string; name: string } };
+      }
+      if (!tab) continue;
+      seen.add(id);
+      valid.push(tab);
+    }
+    if (valid.length === 0) return null;
+    const maxId = valid.reduce((m, t) => Math.max(m, t.id), 0);
+    const storedNext = typeof nextId === 'number' && Number.isInteger(nextId) ? nextId : 0;
+    const active =
+      typeof activeId === 'string' && valid.some((t) => terminalTabKey(t) === activeId)
+        ? activeId
+        : terminalTabKey(valid[0]);
+    return { tabs: valid, nextId: Math.max(maxId + 1, storedNext), activeId: active };
+  } catch {
+    return null;
+  }
+}
+
+function loadTabsState(profileId: string): TabsState {
+  try {
+    return parseStoredTabs(localStorage.getItem(tabsStorageKey(profileId))) ?? DEFAULT_TABS;
+  } catch {
+    /* localStorage может быть недоступен */
+    return DEFAULT_TABS;
+  }
+}
+
+export function TerminalPage({
+  profile,
+  showError,
+  visible,
+  openContainerRequest,
+  onOpenContainerConsumed,
+  onAskAgent,
+}: Props) {
+  const [tabsState, setTabsState] = useState<TabsState>(() => loadTabsState(profile.id));
+  const [statuses, setStatuses] = useState<Record<string, TerminalStatus>>({});
+  const [limit, setLimit] = useState(TERMINAL_LIMIT_DEFAULT);
+  // Флаги «вкладку закрыл пользователь»: TerminalView читает ref в cleanup
+  // и решает, слать ли close-фрейм (unmount по другой причине — grace).
+  const closeFlags = useRef(new Map<string, { current: boolean }>());
+
+  // Вкладки переживают F5: пишем при каждом изменении.
+  useEffect(() => {
+    try {
+      localStorage.setItem(tabsStorageKey(profile.id), JSON.stringify(tabsState));
+    } catch {
+      /* localStorage может быть недоступен */
+    }
+  }, [profile.id, tabsState]);
+
+  const getCloseFlag = useCallback((key: string) => {
+    let flag = closeFlags.current.get(key);
+    if (!flag) {
+      flag = { current: false };
+      closeFlags.current.set(key, flag);
+    }
+    return flag;
+  }, []);
+
+  const handleStatus = useCallback((key: string, status: TerminalStatus) => {
+    setStatuses((prev) => (prev[key] === status ? prev : { ...prev, [key]: status }));
+  }, []);
+
+  // Сверка с сервером при монтировании: живые сессии, которых нет среди
+  // вкладок (чистка localStorage, другой браузер), возвращаются вкладками;
+  // переполнение режет локальные вкладки без серверной сессии.
+  useEffect(() => {
+    let cancelled = false;
+    fetchTerminalSessions(profile.id)
+      .then(({ sessions, limit: serverLimit }) => {
+        if (cancelled) return;
+        setLimit(serverLimit);
+        const trimmed: string[] = [];
+        setTabsState((prev) => {
+          const isServerBacked = (t: TerminalTab) =>
+            sessions.some(
+              (s) => s.tabId === t.id && (s.container ?? null) === (t.container?.id ?? null),
+            );
+          const added: TerminalTab[] = [];
+          for (const s of sessions) {
+            const dup = prev.tabs.some(
+              (t) => t.id === s.tabId && (t.container?.id ?? null) === s.container,
+            );
+            if (dup) continue;
+            added.push({
+              id: s.tabId,
+              container: s.container
+                ? { id: s.container, name: s.containerName ?? s.container }
+                : undefined,
+            });
+          }
+          const tabs = [...prev.tabs, ...added];
+          while (tabs.length > serverLimit && tabs.some((t) => !isServerBacked(t))) {
+            for (let i = tabs.length - 1; i >= 0; i--) {
+              if (!isServerBacked(tabs[i])) {
+                // Срезаемой вкладке мог не хватить места в снимке (её WS
+                // открылся после запроса) — выставляем флаг закрытия, чтобы
+                // cleanup отправил close-фрейм и слот освободился сразу,
+                // а не по grace 60 с.
+                const key = terminalTabKey(tabs[i]);
+                getCloseFlag(key).current = true;
+                trimmed.push(key);
+                tabs.splice(i, 1);
+                break;
+              }
+            }
+          }
+          const nextId = sessions.reduce((m, s) => Math.max(m, s.tabId + 1), prev.nextId);
+          const lastKey = tabs.length ? terminalTabKey(tabs[tabs.length - 1]) : null;
+          const activeId = tabs.some((t) => terminalTabKey(t) === prev.activeId)
+            ? prev.activeId
+            : lastKey;
+          return { tabs, nextId, activeId };
+        });
+        if (trimmed.length) {
+          setStatuses((prev) => {
+            const next = { ...prev };
+            for (const key of trimmed) delete next[key];
+            return next;
+          });
+        }
+      })
+      .catch(() => {
+        /* Сервер недоступен — остаёмся на вкладках из localStorage. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profile.id, getCloseFlag]);
+
+  // «Терминал в контейнер» из Docker Explorer: существующая вкладка
+  // активируется, новой контейнерной вкладке не страшен предел (сервер
+  // останется защитой — ошибка придёт в терминал).
+  useEffect(() => {
+    if (!openContainerRequest) return;
+    const { containerId, name } = openContainerRequest;
+    onOpenContainerConsumed();
+    setTabsState((prev) => {
+      const existing = prev.tabs.find((t) => t.container?.id === containerId);
+      if (existing) return { ...prev, activeId: terminalTabKey(existing) };
+      const id = prev.nextId;
+      return {
+        tabs: [...prev.tabs, { id, container: { id: containerId, name } }],
+        nextId: id + 1,
+        activeId: `${id}:${containerId}`,
+      };
+    });
+  }, [openContainerRequest, onOpenContainerConsumed]);
+
+  const addTab = () => {
+    setTabsState((prev) => {
+      if (prev.tabs.length >= limit) return prev;
+      const id = prev.nextId;
+      return { tabs: [...prev.tabs, { id }], nextId: id + 1, activeId: `${id}:host` };
+    });
+  };
+
+  const activateTab = (key: string) => {
+    setTabsState((prev) => (prev.activeId === key ? prev : { ...prev, activeId: key }));
+  };
+
+  const closeTab = (key: string) => {
+    // Флаг выставляется ДО удаления из стейта: cleanup TerminalView при
+    // unmount увидит его и пошлёт close-фрейм — destroy, grace не занимается.
+    // Запись в closeFlags не удаляем: объект флага должен дожить до unmount
+    // View с той же идентичностью (проп в deps WS-эффекта) — ключи вкладок
+    // не повторяются (nextId монотонный), копеечный рост мапы допустим.
+    getCloseFlag(key).current = true;
+    setStatuses((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    setTabsState((prev) => {
+      const tabs = prev.tabs.filter((t) => terminalTabKey(t) !== key);
+      const lastKey = tabs.length ? terminalTabKey(tabs[tabs.length - 1]) : null;
+      const activeId = prev.activeId === key ? lastKey : prev.activeId;
+      return { ...prev, tabs, activeId };
+    });
+  };
+
+  const { tabs, activeId } = tabsState;
+
+  return (
+    <div className="page terminal-page">
+      {tabs.length > 0 && (
+        <div className="terminal-tabs">
+          {tabs.map((t) => {
+            const key = terminalTabKey(t);
+            return (
+              <div key={key} className={`tab terminal-tab${key === activeId ? ' active' : ''}`}>
+                <button
+                  type="button"
+                  className="terminal-tab-main"
+                  onClick={() => activateTab(key)}
+                  title={t.container ? t.container.id : `Терминал ${t.id + 1}`}
+                >
+                  <span className={`status-dot ${statuses[key] ?? 'connecting'}`} />
+                  <span className="terminal-tab-label">
+                    {t.container ? t.container.name : `shell ${t.id + 1}`}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="terminal-tab-close"
+                  title="Закрыть вкладку (сессия завершается)"
+                  onClick={() => closeTab(key)}
+                >
+                  ✕
+                </button>
+              </div>
+            );
+          })}
+          <button
+            type="button"
+            className="terminal-tab-add"
+            onClick={addTab}
+            disabled={tabs.length >= limit}
+            title={
+              tabs.length >= limit
+                ? `Максимум ${limit} терминала на сервер — закройте другие вкладки`
+                : 'Новый терминал'
+            }
+          >
+            +
+          </button>
+        </div>
+      )}
+      {tabs.length === 0 ? (
+        <div className="empty-state">
+          <p>Все терминалы закрыты.</p>
+          <button className="btn btn-primary" onClick={addTab}>
+            Открыть терминал
+          </button>
+        </div>
+      ) : (
+        tabs.map((t) => (
+          <TerminalView
+            key={terminalTabKey(t)}
+            profile={profile}
+            tab={t}
+            active={terminalTabKey(t) === activeId}
+            visible={visible}
+            showError={showError}
+            onAskAgent={onAskAgent}
+            closeOnUnmountRef={getCloseFlag(terminalTabKey(t))}
+            onStatus={handleStatus}
+          />
+        ))
       )}
     </div>
   );
