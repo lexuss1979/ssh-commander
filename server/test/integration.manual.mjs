@@ -682,6 +682,83 @@ esac
     }
   }
 
+  console.log('== snippets (эпик 18) ==');
+  // Чистим остатки прошлых прогонов и создаём сниппет.
+  const snippetsBefore = await req('/api/snippets');
+  for (const s of snippetsBefore.snippets.filter((x) => x.name.startsWith('sc-test-'))) {
+    await req(`/api/snippets/${s.id}`, { method: 'DELETE' });
+  }
+  const snippet = await req('/api/snippets', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: 'sc-test-версия ОС',
+      command: 'cat /etc/os-release | head -1',
+      description: 'интеграционный сценарий',
+      profileIds: null,
+    }),
+  });
+  check('snippet created', !!snippet.id);
+
+  const run = await req('/api/snippets/run', {
+    method: 'POST',
+    body: JSON.stringify({ snippetId: snippet.id, profileIds: [pid, pid] }),
+  });
+  check(
+    'snippet run: дубликаты целей дедуплицированы, код 0',
+    run.results.length === 1 && run.results[0].ok && run.results[0].code === 0,
+    JSON.stringify(run),
+  );
+  check('snippet run: эхо команды', run.command === 'cat /etc/os-release | head -1');
+  check('snippet run: вывод os-release', /PRETTY_NAME|ID=/.test(run.results[0].stdout), run.results[0].stdout);
+
+  const badRun = await req('/api/snippets/run', {
+    method: 'POST',
+    body: JSON.stringify({ command: 'no-such-command-sc-test', profileIds: [pid] }),
+  });
+  check(
+    'adhoc run: ненулевой код — ok:false, не ошибка запроса',
+    badRun.results[0].ok === false && badRun.results[0].code === 127,
+    JSON.stringify(badRun),
+  );
+
+  const bigRun = await req('/api/snippets/run', {
+    method: 'POST',
+    body: JSON.stringify({ command: 'yes | head -c 200000', profileIds: [pid] }),
+  });
+  check(
+    'big output: обрезка до 100 000 символов с truncated',
+    bigRun.results[0].truncated === true && bigRun.results[0].stdout.length === 100000,
+    `truncated=${bigRun.results[0].truncated} len=${bigRun.results[0].stdout.length}`,
+  );
+
+  try {
+    await req('/api/snippets/run', {
+      method: 'POST',
+      body: JSON.stringify({ snippetId: snippet.id, command: 'echo x', profileIds: [pid] }),
+    });
+    check('run XOR (оба поля) → 400', false, 'прошло');
+  } catch (err) {
+    check('run XOR (оба поля) → 400', String(err).includes('400'), String(err));
+  }
+  try {
+    await req('/api/snippets/run', {
+      method: 'POST',
+      body: JSON.stringify({ command: 'true', profileIds: ['no-such-profile'] }),
+    });
+    check('run: несуществующий профиль → 400', false, 'прошло');
+  } catch (err) {
+    check('run: несуществующий профиль → 400', String(err).includes('Профили не найдены'), String(err));
+  }
+
+  const updated = await req(`/api/snippets/${snippet.id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ name: 'sc-test-uptime', command: 'uptime', profileIds: [pid] }),
+  });
+  check('snippet update: полная замена полей', updated.name === 'sc-test-uptime' && updated.profileIds[0] === pid);
+  await req(`/api/snippets/${snippet.id}`, { method: 'DELETE' });
+  const snippetsAfter = await req('/api/snippets');
+  check('snippet deleted', !snippetsAfter.snippets.some((x) => x.id === snippet.id));
+
   console.log('== cleanup ==');
   await req(`/api/profiles/${pid}`, { method: 'DELETE' });
   check('profile deleted', true);

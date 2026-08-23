@@ -1,5 +1,6 @@
 import { listProfiles } from '../profiles.js';
 import type { Profile } from '../types.js';
+import { withTimeout } from '../util/async.js';
 import { listContainers, type DockerEntity } from './docker.js';
 import { getExternalIp } from './external-ip.js';
 import { collectMetrics, type ServerMetrics } from './metrics.js';
@@ -95,22 +96,6 @@ async function probeProfile(profile: Profile): Promise<ProfileProbe> {
     docker = undefined;
   }
   return { metrics, externalIp: externalIp ?? undefined, docker };
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), ms);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (err) => {
-        clearTimeout(timer);
-        reject(err);
-      },
-    );
-  });
 }
 
 let cache: { at: number; promise: Promise<OverviewResponse> } | null = null;
