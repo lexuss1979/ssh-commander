@@ -124,6 +124,12 @@ class TerminalSession {
       this.broadcast({ type: 'error', data: String((err as Error).message ?? err) });
       this.shell = null;
       this.cleanupAttachments();
+      // Канал не открылся — реанимировать нечего, запись убирается сразу
+      // (та же семантика, что у close канала): иначе при недоступном сервере
+      // мапа копит мёртвые записи по одной на каждую пару (container, tabId)
+      // и не освобождается до рестарта. Клиент по error-фрейму переподключится
+      // тем же tabId и получит свежую запись.
+      sessions.delete(this.sessionKey);
     } finally {
       this.spawning = false;
       if (this.restartQueued) {

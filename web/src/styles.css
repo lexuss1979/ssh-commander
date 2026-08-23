@@ -816,6 +816,9 @@ body.resizing-agent {
   padding: 8px 0 0 8px;
   background: #0f1419;
   overflow: hidden;
+  /* Якорь для палитры истории (эпик 15: позиционируется от области терминала,
+     а не от верха страницы с фиксированным смещением под бары). */
+  position: relative;
 }
 
 .terminal-container .xterm {
@@ -838,9 +841,24 @@ body.resizing-agent {
 .terminal-tab {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
+  max-width: 260px;
+  padding: 4px 6px 4px 10px;
+}
+
+/* Кнопка-заголовок (✕ — сиблинг, не вложение: одна кнопка внутри другой
+   невалидна для скринридера). */
+.terminal-tab-main {
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
-  max-width: 240px;
-  padding: 6px 8px 6px 12px;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 2px 0;
+  cursor: pointer;
 }
 
 .terminal-tab-label {
@@ -855,7 +873,9 @@ body.resizing-agent {
   justify-content: center;
   width: 18px;
   height: 18px;
+  border: none;
   border-radius: 4px;
+  background: transparent;
   color: var(--muted);
   font-size: 12px;
   line-height: 1;
@@ -2580,8 +2600,10 @@ body.resizing-agent {
 
 .history-palette {
   position: absolute;
-  /* Ниже бара вкладок терминалов и тулбара активной вкладки (эпик 15). */
-  top: 108px;
+  /* Эпик 15: палитра — дочерний элемент .terminal-container (position:
+     relative), якорь — область терминала, смещение не зависит от высоты
+     бара вкладок и тулбара. */
+  top: 24px;
   left: 50%;
   transform: translateX(-50%);
   width: 560px;

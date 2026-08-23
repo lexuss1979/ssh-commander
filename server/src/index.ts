@@ -121,9 +121,10 @@ server.on('upgrade', (req, socket, head) => {
       const cols = Number(url.searchParams.get('cols')) || 80;
       const rows = Number(url.searchParams.get('rows')) || 24;
       const container = url.searchParams.get('container') || undefined;
-      // tabId вкладки терминала (эпик 15): отсутствие — дефолт 0 (старый клиент),
-      // невалидный — close(1008) внутри attachTerminal.
-      const tabId = url.searchParams.get('tabId');
+      // tabId вкладки терминала (эпик 15): отсутствие или пустое значение —
+      // дефолт 0 внутри attachTerminal (как у container/cols/rows), мусорное
+      // непустое — close(1008).
+      const tabId = url.searchParams.get('tabId') || null;
       const containerName = url.searchParams.get('containerName') || undefined;
       attachTerminal(ws, profile, cols, rows, container, tabId, containerName);
     } else {

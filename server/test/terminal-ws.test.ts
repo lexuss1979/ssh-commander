@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Profile } from '../src/types.js';
+import { openShell } from '../src/ssh/manager.js';
 import {
   MAX_TERMINAL_SESSIONS_PER_PROFILE,
   attachTerminal,
@@ -7,6 +8,8 @@ import {
   parseTabId,
   sessionKey,
 } from '../src/ws/terminal.js';
+
+const openShellMock = vi.mocked(openShell);
 
 // Реестр shells, созданных моком openShell: тестам нужен доступ к каналу
 // (эмит 'close' = выход из shell). vi.hoisted — фабрика vi.mock поднимается
@@ -38,7 +41,11 @@ vi.mock('../src/ssh/manager.js', () => ({
       channel: h.makeChannel(),
       write: () => {},
       resize: () => {},
-      destroy: () => {},
+      destroy: () => {
+        // Как у ssh2: channel.close() в итоге даёт событие 'close' канала —
+        // ревью №4: рестарт/ws-close гоняют именно этот путь.
+        shell.channel.emit('close');
+      },
     };
     h.shells.push(shell);
     return shell;
@@ -248,6 +255,53 @@ describe('жизненный цикл записи', () => {
     const ws5 = await openSession(profileId, { tabId: '8' });
     expect(ws5.sentTypes()).toContain('connected');
     expect(listTerminalSessions(profileId)).toHaveLength(4);
+  });
+
+  it('отказ spawn удаляет запись и не занимает слот (ревью №1)', async () => {
+    const profileId = 'tc4';
+    openShellMock.mockRejectedValueOnce(new Error('SSH connect fail'));
+    const ws = new FakeWs();
+    attach(ws, profileId, { tabId: '1' });
+    await flush();
+    expect(ws.sentTypes()).toContain('error');
+    // Записи-призрака нет: ни в списке, ни в мапе (слот свободен).
+    expect(listTerminalSessions(profileId)).toEqual([]);
+    // Повторный attach тем же tabId создаёт свежую запись, не муторясь
+    // с протухшей.
+    const ws2 = await openSession(profileId, { tabId: '1' });
+    expect(ws2.sentTypes()).toContain('connected');
+    expect(listTerminalSessions(profileId)).toHaveLength(1);
+    ws2.message({ type: 'close' });
+  });
+
+  it('restart переживает close старого канала: запись жива, канал пересоздан', async () => {
+    const profileId = 'tc5';
+    const firstIdx = h.shells.length;
+    const ws = await openSession(profileId, { tabId: '3' });
+    ws.message({ type: 'restart' });
+    await flush();
+    // restart обнуляет this.shell ДО destroy старого канала — guard в
+    // обработчике close не даёт удалить запись: «Обновить сессию» держит её
+    // для нового shell (фиксация инварианта, ревью №4).
+    expect(listTerminalSessions(profileId)).toHaveLength(1);
+    expect(h.shells.length).toBe(firstIdx + 2);
+    expect(ws.sentTypes()).toContain('connected');
+    ws.message({ type: 'close' });
+    expect(listTerminalSessions(profileId)).toEqual([]);
+  });
+
+  it('выход из shell во время grace снимает запись сразу', async () => {
+    const profileId = 'tc6';
+    const firstIdx = h.shells.length;
+    const ws = await openSession(profileId, { tabId: '2' });
+    ws.close(); // detach без close-фрейма → grace-таймер 60 с
+    expect(listTerminalSessions(profileId)).toHaveLength(1);
+    // Shell умер в grace: обработчик close снимает и таймер, и запись —
+    // повторный destroy по таймеру не срабатывает, слот свободен.
+    h.shells[firstIdx].channel.emit('close');
+    expect(listTerminalSessions(profileId)).toEqual([]);
+    const ws2 = await openSession(profileId, { tabId: '2' });
+    ws2.message({ type: 'close' });
   });
 
   it('grace: detach без close-фрейма держит запись живой (shell не вышел)', async () => {

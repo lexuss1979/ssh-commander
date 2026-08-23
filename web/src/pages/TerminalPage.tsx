@@ -377,10 +377,24 @@ function TerminalView({
       // close-фрейм — только явное закрытие вкладки пользователем: смена
       // профиля размонтирует страницу, и безусловная отправка убивала бы все
       // терминалы вместо grace (вернулся в течение 60 с — тот же shell).
-      if (closeOnUnmountRef.current && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'close' }));
+      if (closeOnUnmountRef.current) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'close' }));
+          ws.close();
+        } else if (ws.readyState === WebSocket.CONNECTING) {
+          // Сессия создаётся на сервере уже в момент апгрейда, а OPEN у
+          // клиента наступает позже: закрытие свежей вкладки должно донести
+          // close и по ещё не открывшемуся сокету, иначе слот держит grace.
+          ws.addEventListener('open', () => {
+            ws.send(JSON.stringify({ type: 'close' }));
+            ws.close();
+          });
+        } else {
+          ws.close();
+        }
+      } else {
+        ws.close();
       }
-      ws.close();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
@@ -490,10 +504,14 @@ function TerminalView({
           Обновить сессию
         </button>
       </div>
-      <div className="terminal-container" ref={containerRef} />
-      {historyOpen && !tab.container && (
-        <HistoryPalette profileId={profile.id} onPick={pickHistory} onClose={closeHistory} />
-      )}
+      {/* Палитра — внутри terminal-container: якорится к области терминала
+          (position: relative), а не к заголовкам вкладок/тулбара с фиксированным
+          смещением, которое плывёт при росте тулбара. */}
+      <div className="terminal-container" ref={containerRef}>
+        {historyOpen && !tab.container && (
+          <HistoryPalette profileId={profile.id} onPick={pickHistory} onClose={closeHistory} />
+        )}
+      </div>
     </div>
   );
 }
@@ -628,6 +646,7 @@ export function TerminalPage({
       .then(({ sessions, limit: serverLimit }) => {
         if (cancelled) return;
         setLimit(serverLimit);
+        const trimmed: string[] = [];
         setTabsState((prev) => {
           const isServerBacked = (t: TerminalTab) =>
             sessions.some(
@@ -650,6 +669,13 @@ export function TerminalPage({
           while (tabs.length > serverLimit && tabs.some((t) => !isServerBacked(t))) {
             for (let i = tabs.length - 1; i >= 0; i--) {
               if (!isServerBacked(tabs[i])) {
+                // Срезаемой вкладке мог не хватить места в снимке (её WS
+                // открылся после запроса) — выставляем флаг закрытия, чтобы
+                // cleanup отправил close-фрейм и слот освободился сразу,
+                // а не по grace 60 с.
+                const key = terminalTabKey(tabs[i]);
+                getCloseFlag(key).current = true;
+                trimmed.push(key);
                 tabs.splice(i, 1);
                 break;
               }
@@ -662,6 +688,13 @@ export function TerminalPage({
             : lastKey;
           return { tabs, nextId, activeId };
         });
+        if (trimmed.length) {
+          setStatuses((prev) => {
+            const next = { ...prev };
+            for (const key of trimmed) delete next[key];
+            return next;
+          });
+        }
       })
       .catch(() => {
         /* Сервер недоступен — остаёмся на вкладках из localStorage. */
@@ -669,7 +702,7 @@ export function TerminalPage({
     return () => {
       cancelled = true;
     };
-  }, [profile.id]);
+  }, [profile.id, getCloseFlag]);
 
   // «Терминал в контейнер» из Docker Explorer: существующая вкладка
   // активируется, новой контейнерной вкладке не страшен предел (сервер
@@ -705,8 +738,10 @@ export function TerminalPage({
   const closeTab = (key: string) => {
     // Флаг выставляется ДО удаления из стейта: cleanup TerminalView при
     // unmount увидит его и пошлёт close-фрейм — destroy, grace не занимается.
+    // Запись в closeFlags не удаляем: объект флага должен дожить до unmount
+    // View с той же идентичностью (проп в deps WS-эффекта) — ключи вкладок
+    // не повторяются (nextId монотонный), копеечный рост мапы допустим.
     getCloseFlag(key).current = true;
-    closeFlags.current.delete(key);
     setStatuses((prev) => {
       if (!(key in prev)) return prev;
       const next = { ...prev };
@@ -730,37 +765,27 @@ export function TerminalPage({
           {tabs.map((t) => {
             const key = terminalTabKey(t);
             return (
-              <button
-                key={key}
-                type="button"
-                className={`tab terminal-tab${key === activeId ? ' active' : ''}`}
-                onClick={() => activateTab(key)}
-                title={t.container ? t.container.id : `Терминал ${t.id + 1}`}
-              >
-                <span className={`status-dot ${statuses[key] ?? 'connecting'}`} />
-                <span className="terminal-tab-label">
-                  {t.container ? t.container.name : `shell ${t.id + 1}`}
-                </span>
-                <span
-                  role="button"
-                  tabIndex={0}
+              <div key={key} className={`tab terminal-tab${key === activeId ? ' active' : ''}`}>
+                <button
+                  type="button"
+                  className="terminal-tab-main"
+                  onClick={() => activateTab(key)}
+                  title={t.container ? t.container.id : `Терминал ${t.id + 1}`}
+                >
+                  <span className={`status-dot ${statuses[key] ?? 'connecting'}`} />
+                  <span className="terminal-tab-label">
+                    {t.container ? t.container.name : `shell ${t.id + 1}`}
+                  </span>
+                </button>
+                <button
+                  type="button"
                   className="terminal-tab-close"
                   title="Закрыть вкладку (сессия завершается)"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    closeTab(key);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      closeTab(key);
-                    }
-                  }}
+                  onClick={() => closeTab(key)}
                 >
                   ✕
-                </span>
-              </button>
+                </button>
+              </div>
             );
           })}
           <button
