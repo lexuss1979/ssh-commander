@@ -343,14 +343,20 @@ function ProcessActionModal({
   onConfirm: (action: ProcessModalAction, nice: number) => void;
 }) {
   const [action, setAction] = useState<ProcessModalAction>('TERM');
-  const [nice, setNice] = useState(5);
+  // Сырая строка: очищенное `<input type="number">` даёт '', а
+  // `Number('') === 0` — пустое поле не должно молча означать «сброс в 0».
+  const [nice, setNice] = useState('5');
 
   // Превью команды mono: сервер соберёт ровно её (кроме sudo-обёртки).
   const command = action === 'renice' ? `renice -n ${nice} -p ${p.pid}` : `kill -${action} ${p.pid}`;
 
   // Предупреждения усиливают подтверждение, не блокируют (roadmap).
   const warnings: string[] = [];
-  if (p.user !== profileUsername) {
+  // `ps aux` усекает колонку USER до 8 символов с хвостовым '+' — длинные
+  // имена своего пользователя не должны ложно помечаться «чужими».
+  const userMatches = (u: string): boolean =>
+    u === profileUsername || (profileUsername.length > 8 && u === `${profileUsername.slice(0, 8)}+`);
+  if (!userMatches(p.user)) {
     warnings.push('Процесс другого пользователя — потребуется sudo-пароль');
   }
   if (p.pid < 100) {
@@ -392,7 +398,7 @@ function ProcessActionModal({
             min={-20}
             max={19}
             value={nice}
-            onChange={(e) => setNice(Number(e.target.value))}
+            onChange={(e) => setNice(e.target.value)}
           />
           <span className="muted" style={{ fontSize: 12 }}>
             {' '}−20..19; понижение (ускорение) требует root
@@ -432,7 +438,8 @@ function ProcessActionModal({
         </button>
         <button
           className={`btn ${action === 'KILL' ? 'btn-danger' : 'btn-primary'}`}
-          onClick={() => onConfirm(action, nice)}
+          // Пустое поле nice — дефолт 5, а не молчаливый 0 (Number('') === 0).
+          onClick={() => onConfirm(action, nice.trim() === '' ? 5 : Number(nice))}
           disabled={busy}
         >
           {busy ? 'Выполняется…' : PROCESS_ACTION_LABELS[action]}

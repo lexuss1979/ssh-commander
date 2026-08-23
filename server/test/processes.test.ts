@@ -289,10 +289,44 @@ describe('runProcessSignal', () => {
     }
   });
 
-  it('sudo-ретрай с ненулевым кодом → 502', async () => {
+  it('sudo-ретрай: утилиты нет (sudo: kill: command not found) → 400, а не 502', async () => {
+    // no-tool на plain-пути невозможен (kill — builtin login-shell);
+    // единственный путь, где промах по бинарнику реален, — sudo-ретрай,
+    // и здесь должна быть 400 «недоступна на этом сервере», а не 502.
     const { calls, execFn } = fakeExec((command) => {
       if (command === PROBE) return result(0, '');
-      if (command.startsWith('sudo ')) return result(1, 'sudo: kill: command not found');
+      if (command.startsWith('sudo ')) return result(127, 'sudo: kill: command not found');
+      return result(1, 'kill: (1234) - Operation not permitted');
+    });
+    try {
+      await runProcessSignal(profile, 1234, 'TERM', 's3cret', { execFn });
+      expect.unreachable();
+    } catch (err) {
+      expect((err as ProcessActionError).status).toBe(400);
+      expect((err as Error).message).toContain('недоступна на этом сервере');
+    }
+    expect(calls).toHaveLength(3);
+  });
+
+  it('sudo-ретрай: процесс умер за время зонда → 400 «больше не существует»', async () => {
+    const { execFn } = fakeExec((command) => {
+      if (command === PROBE) return result(0, '');
+      if (command.startsWith('sudo ')) return result(1, 'sudo: kill: (1234) - No such process');
+      return result(1, 'kill: (1234) - Operation not permitted');
+    });
+    try {
+      await runProcessSignal(profile, 1234, 'TERM', 's3cret', { execFn });
+      expect.unreachable();
+    } catch (err) {
+      expect((err as ProcessActionError).status).toBe(400);
+      expect((err as Error).message).toContain('больше не существует');
+    }
+  });
+
+  it('sudo-ретрай с ненулевым кодом (транспорт) → 502', async () => {
+    const { calls, execFn } = fakeExec((command) => {
+      if (command === PROBE) return result(0, '');
+      if (command.startsWith('sudo ')) return result(255, 'connection reset');
       return result(1, 'kill: (1234) - Operation not permitted');
     });
     try {

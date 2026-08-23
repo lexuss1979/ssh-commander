@@ -171,6 +171,16 @@ async function withSudoRetry(
     const retry = await execFn(profile, sudoCommand, { stdin: `${sudoPassword}\n` });
     const retryCat = classifyProcessActionFailure(retry);
     if (retryCat === 'ok') return onSuccess(retry);
+    // Та же лесенка, что у первой попытки, — это важно именно здесь:
+    // sudo-форма зовёт `/bin/kill`/`/bin/renice` напрямую (без shell), так
+    // что промах по бинарнику (`sudo: kill: command not found`) возможен
+    // только на ретрае; процесс мог также умереть за время sudo-зонда.
+    if (retryCat === 'gone') {
+      throw new ProcessActionError(400, 'Процесс больше не существует (уже завершился?)');
+    }
+    if (retryCat === 'no-tool') {
+      throw new ProcessActionError(400, `Команда \`${toolName}\` недоступна на этом сервере`);
+    }
     throw new ProcessActionError(
       502,
       (retry.stderr || retry.stdout).trim() || `Команда не выполнена (код ${retry.code ?? 'unknown'})`,
