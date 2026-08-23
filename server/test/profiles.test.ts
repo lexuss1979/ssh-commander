@@ -102,3 +102,75 @@ describe('profiles store', () => {
     profiles.deleteProfile(p.id);
   });
 });
+
+describe('normalizeLogPaths', () => {
+  it('принимает валидные абсолютные пути', () => {
+    expect(profiles.normalizeLogPaths(['/var/log/syslog', '/var/log/nginx/error.log'])).toEqual([
+      '/var/log/syslog',
+      '/var/log/nginx/error.log',
+    ]);
+  });
+
+  it('trim, пустые отбрасываются, дедуп с сохранением порядка', () => {
+    expect(
+      profiles.normalizeLogPaths(['  /var/log/a  ', '', '   ', '/var/log/a', '/var/log/b']),
+    ).toEqual(['/var/log/a', '/var/log/b']);
+  });
+
+  it('не-абсолютный путь — исключение с перечнем плохих строк', () => {
+    expect(() => profiles.normalizeLogPaths(['var/log/a'])).toThrow(/var\/log\/a/);
+    expect(() => profiles.normalizeLogPaths(['/ok', 'relative/path'])).toThrow(/relative\/path/);
+  });
+
+  it('сегмент .. — исключение', () => {
+    expect(() => profiles.normalizeLogPaths(['/var/log/../../etc/passwd'])).toThrow(/\.\./);
+    expect(() => profiles.normalizeLogPaths(['/var/..'])).toThrow(/\.\./);
+  });
+});
+
+describe('profile logPaths', () => {
+  it('updateProfile без logPaths сохраняет существующие пины', () => {
+    const p = profiles.createProfile(
+      baseInput({ logPaths: ['/var/log/syslog', '/var/log/auth.log'] }),
+    );
+    const updated = profiles.updateProfile(p.id, baseInput({ note: 'edit in modal' }));
+    expect(updated.logPaths).toEqual(['/var/log/syslog', '/var/log/auth.log']);
+    profiles.deleteProfile(p.id);
+  });
+
+  it('updateProfileLogPaths заменяет список', () => {
+    const p = profiles.createProfile(baseInput({ logPaths: ['/var/log/old.log'] }));
+    const updated = profiles.updateProfileLogPaths(p.id, [
+      '  /var/log/new.log  ',
+      '/var/log/new.log',
+      '/var/log/other.log',
+    ]);
+    expect(updated.logPaths).toEqual(['/var/log/new.log', '/var/log/other.log']);
+    // замена, а не слияние
+    expect(updated.logPaths).not.toContain('/var/log/old.log');
+    profiles.deleteProfile(p.id);
+  });
+
+  it('updateProfileLogPaths отклоняет мусор и неизвестный профиль', () => {
+    const p = profiles.createProfile(baseInput());
+    expect(() => profiles.updateProfileLogPaths(p.id, ['not-absolute'])).toThrow(/Некорректные пути/);
+    expect(() => profiles.updateProfileLogPaths('no-such-id', ['/a'])).toThrow(/not found/);
+    profiles.deleteProfile(p.id);
+  });
+
+  it('createProfile прогоняет logPaths через normalizeLogPaths', () => {
+    const p = profiles.createProfile(baseInput({ logPaths: ['  /var/log/a  ', '/var/log/a'] }));
+    expect(p.logPaths).toEqual(['/var/log/a']);
+    expect(() => profiles.createProfile(baseInput({ logPaths: ['relative/path'] }))).toThrow(
+      /Некорректные пути/,
+    );
+  });
+
+  it('updateProfile прогоняет logPaths через normalizeLogPaths', () => {
+    const p = profiles.createProfile(baseInput());
+    expect(() => profiles.updateProfile(p.id, baseInput({ logPaths: ['/ok', 'oops'] }))).toThrow(
+      /Некорректные пути/,
+    );
+    profiles.deleteProfile(p.id);
+  });
+});

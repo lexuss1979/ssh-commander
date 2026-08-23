@@ -120,6 +120,12 @@ export default function App() {
     applyProfiles(list);
   }, [applyProfiles]);
 
+  // После пиннинга логов из FilesPage: стабильная ссылка, чтобы useCallback
+  // у putLogPaths не пересоздавался каждый рендер.
+  const handleProfilesChanged = useCallback(() => {
+    void loadProfiles();
+  }, [loadProfiles]);
+
   // Истёкшая сессия (401 на любом запросе) — возвращаемся на страницу логина.
   useEffect(() => {
     setUnauthorizedHandler(() => setAuthed(false));
@@ -426,7 +432,14 @@ export default function App() {
                   />
                 </div>
                 <div className={`tab-page ${tab === 'files' ? '' : 'hidden'}`}>
-                  <FilesPage key={activeProfile.id} profile={activeProfile} showError={showError} />
+                  <FilesPage
+                    key={activeProfile.id}
+                    profile={activeProfile}
+                    showError={showError}
+                    visible={tab === 'files'}
+                    onAskAgent={handleAskAgent}
+                    onProfilesChanged={handleProfilesChanged}
+                  />
                 </div>
                 <div className={`tab-page ${tab === 'docker' ? '' : 'hidden'}`}>
                   <DockerPage

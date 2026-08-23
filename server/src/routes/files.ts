@@ -1,7 +1,7 @@
 import express, { Router } from 'express';
 import { Readable } from 'node:stream';
 import { z } from 'zod';
-import { exec, execRawChannel, getSftp, withSftp } from '../ssh/manager.js';
+import { exec, execRawChannel, execStream, getSftp, withSftp } from '../ssh/manager.js';
 import {
   chmod as sftpChmod,
   mkdir as sftpMkdir,
@@ -14,6 +14,16 @@ import {
   writeFile as sftpWriteFile,
 } from '../ssh/sftp.js';
 import { requireProfile } from '../profiles.js';
+import {
+  buildTailFollowCommand,
+  buildTailOnceCommand,
+  precheckTailable,
+  TAIL_DEFAULT_LINES,
+  TAIL_MAX_LINES,
+  TAIL_ONCE_TIMEOUT_MS,
+} from '../services/file-tail.js';
+import { createChunkGate } from '../services/chunk-gate.js';
+import { acquireFollowSlot, releaseFollowSlot } from '../services/stream-limits.js';
 import { searchFiles, SEARCH_MAX_RESULTS } from '../services/file-search.js';
 import { buildBatchDownloadCommand, buildTarDownloadCommand, buildTarUploadCommand, tarError } from '../services/transfer.js';
 import { assertSafePath, basename, dirname, joinRemotePath, modeToString } from '../util/path.js';
@@ -262,6 +272,107 @@ filesRouter.get('/search', async (req, res) => {
     res.json({ results });
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+// Предел вывода разового tail (совпадает с дефолтом exec — нужен для
+// обнаружения обрезки и честной пометки в теле ответа).
+const TAIL_OUTPUT_LIMIT = 2 * 1024 * 1024;
+
+const tailQuerySchema = z.object({
+  profileId: z.string().min(1, 'Укажите профиль'),
+  path: z.string().min(1),
+  lines: z.coerce.number().int().min(1).max(TAIL_MAX_LINES).default(TAIL_DEFAULT_LINES),
+  follow: z.enum(['0', '1']).default('0'),
+});
+
+// Живой просмотр лога: follow=0 — разовый снимок tail -n, follow=1 — chunked
+// стрим tail -F (переключение вкладки в UI рвёт запрос → req close → close()).
+filesRouter.get('/tail', async (req, res) => {
+  try {
+    const parsed = tailQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Некорректные параметры' });
+      return;
+    }
+    const q = parsed.data;
+    const profile = requireProfile(q.profileId);
+    const path = assertSafePath(normalizePath(q.path));
+    // Предпроверка до flushHeaders: отказ (нет файла, директория, бинарник) —
+    // обычная JSON-ошибка, канал под tail не открывается.
+    await precheckTailable(profile, path);
+
+    if (q.follow === '0') {
+      const result = await exec(profile, buildTailOnceCommand(path, q.lines), {
+        timeoutMs: TAIL_ONCE_TIMEOUT_MS,
+        maxOutput: TAIL_OUTPUT_LIMIT,
+      });
+      if (result.code !== 0) {
+        // нет прав, путь пропал между stat и tail
+        res.status(400).json({ error: result.stderr.trim() || `tail завершился с кодом ${result.code}` });
+        return;
+      }
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      let body = result.stdout || '(логов нет)';
+      if (result.stdout.length >= TAIL_OUTPUT_LIMIT) {
+        body += '\n… (вывод обрезан по лимиту 2 МБ)';
+      }
+      res.send(body);
+      return;
+    }
+
+    if (!acquireFollowSlot(profile.id)) {
+      res.status(429).json({
+        error: 'Достигнут лимит одновременных журналов на сервер — закройте часть просмотрщиков и повторите',
+      });
+      return;
+    }
+    // Слот снимается на любом пути завершения — req close и settle code
+    // (гарантия шага 0: промис резолвится и на ошибке до открытия канала).
+    // Идемпотентно через флаг: иначе 3 неудачных коннекта запрут стримы
+    // до рестарта процесса.
+    let slotReleased = false;
+    const releaseSlot = () => {
+      if (!slotReleased) {
+        slotReleased = true;
+        releaseFollowSlot(profile.id);
+      }
+    };
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.flushHeaders();
+    // Backpressure — общий гейт chunk-gate.ts: при переполнении сокета чанки
+    // дропаются с подсчётом и маркером (пауза SSH-канала потребовала бы
+    // вывода канала наружу через API execStream — отклонено планом).
+    const write = createChunkGate(res);
+    // Синхронный throw при сборке хэндла (между acquire и req.on('close'))
+    // оставил бы слот занятым до рестарта — headers уже отправлены, поэтому
+    // отказ уходит телом, а слот снимается catch'ем.
+    try {
+      const handle = execStream(profile, buildTailFollowCommand(path, q.lines), (chunk) => {
+        write(chunk);
+      });
+      void handle.code.then(() => {
+        // Стрим закончился в состоянии дропа — маркер о потере, иначе
+        // пользователь не узнает о пропущенных байтах.
+        write.finish();
+        if (!res.writableEnded) res.end();
+        releaseSlot();
+      });
+      req.on('close', () => {
+        releaseSlot();
+        handle.close();
+      });
+    } catch (err) {
+      releaseSlot();
+      res.end(`${String((err as Error).message ?? err)}\n`);
+    }
+  } catch (err) {
+    if (!res.headersSent) {
+      res.status(400).json({ error: (err as Error).message });
+    } else {
+      res.end();
+    }
   }
 });
 

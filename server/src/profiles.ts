@@ -16,6 +16,8 @@ export const profileInputSchema = z.object({
   password: z.string().optional(),
   dockerCommand: z.string().min(1).default('docker'),
   note: z.string().optional(),
+  // Закреплённые пути логов (эпик 14): чипы быстрого доступа в FilesPage.
+  logPaths: z.array(z.string().min(1)).max(50).optional(),
 });
 
 const profileSchema = profileInputSchema.extend({ id: z.string().min(1) });
@@ -75,8 +77,46 @@ function assertSecret(data: Pick<Profile, 'authType'> & Partial<Pick<Profile, 'k
   }
 }
 
+/**
+ * Нормализация закреплённых путей логов: trim, пустые отбрасываются,
+ * дедуп с сохранением порядка. Не-абсолютный путь или сегмент `..` —
+ * исключение с перечнем плохих строк.
+ */
+export function normalizeLogPaths(input: string[]): string[] {
+  const bad: string[] = [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of input) {
+    const p = raw.trim();
+    if (!p) continue;
+    if (!p.startsWith('/') || p.split('/').includes('..')) {
+      bad.push(p);
+      continue;
+    }
+    if (!seen.has(p)) {
+      seen.add(p);
+      result.push(p);
+    }
+  }
+  if (bad.length > 0) {
+    throw new Error(`Некорректные пути логов (нужен абсолютный путь без ..): ${bad.join(', ')}`);
+  }
+  return result;
+}
+
+/**
+ * Прогоняет logPaths через normalizeLogPaths после zod: схема допускает любые
+ * непустые строки, а абсолютность/`..`/дедуп нужны на каждом входе (create,
+ * update, импорт бэкапа), иначе относительный путь с импортом станет чипом,
+ * который упадёт на assertSafePath.
+ */
+function withNormalizedLogPaths<T extends { logPaths?: string[] }>(data: T): T {
+  if (!data.logPaths) return data;
+  return { ...data, logPaths: normalizeLogPaths(data.logPaths) };
+}
+
 function validate(input: unknown): Profile {
-  const data = profileInputSchema.parse(input);
+  const data = withNormalizedLogPaths(profileInputSchema.parse(input));
   assertSecret(data);
   return { ...data, id: crypto.randomUUID().slice(0, 8) };
 }
@@ -115,7 +155,7 @@ export function updateProfile(id: string, input: unknown): Profile {
     throw new Error(`Profile ${id} not found`);
   }
   const existing = list[idx];
-  const data = profileInputSchema.parse(input);
+  const data = withNormalizedLogPaths(profileInputSchema.parse(input));
   // Switching the auth type always requires the matching secret; otherwise
   // an omitted secret keeps the stored one (partial update without
   // re-sending the password).
@@ -128,6 +168,8 @@ export function updateProfile(id: string, input: unknown): Profile {
     keyPath: data.keyPath ?? existing.keyPath,
     keyPassphrase: data.keyPassphrase ?? existing.keyPassphrase,
     password: data.password ?? existing.password,
+    // ProfileModal про поле не знает — непереданное не затирает пины.
+    logPaths: data.logPaths ?? existing.logPaths,
   };
   assertSecret(updated);
   list[idx] = updated;
@@ -141,12 +183,29 @@ export function updateProfile(id: string, input: unknown): Profile {
  * imported as-is and the secret is filled in later via the UI.
  */
 export function importProfile(input: unknown): Profile {
-  const data = profileInputSchema.parse(input);
+  const data = withNormalizedLogPaths(profileInputSchema.parse(input));
   const profile: Profile = { ...data, id: crypto.randomUUID().slice(0, 8) };
   const list = listProfiles();
   list.push(profile);
   persist(list);
   return { ...profile };
+}
+
+/**
+ * Заменяет список закреплённых путей логов (эпик 14). Отдельная функция, а не
+ * полный updateProfile: полный апдейт рвёт SSH-подключение профиля и оборвал
+ * бы тот самый tail-стрим, из которого пользователь жмёт «Закрепить».
+ */
+export function updateProfileLogPaths(id: string, paths: string[]): Profile {
+  const list = listProfiles();
+  const idx = list.findIndex((p) => p.id === id);
+  if (idx < 0) {
+    throw new Error(`Profile ${id} not found`);
+  }
+  const updated: Profile = { ...list[idx], logPaths: normalizeLogPaths(paths) };
+  list[idx] = updated;
+  persist(list);
+  return { ...updated };
 }
 
 export function deleteProfile(id: string): void {

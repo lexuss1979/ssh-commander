@@ -1400,6 +1400,99 @@ body.resizing-agent {
   scrollbar-gutter: stable;
 }
 
+/* Живой просмотр логов (эпик 14) */
+.log-viewer {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.log-viewer .logs-toolbar {
+  flex-wrap: wrap;
+}
+
+.log-filter {
+  width: 220px;
+  flex: 0 1 auto;
+}
+
+.log-status {
+  font-size: 12px;
+}
+
+.log-status-error {
+  color: var(--danger);
+}
+
+.log-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.log-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-code);
+  overflow: hidden;
+}
+
+.log-chip-open {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  padding: 4px 4px 4px 10px;
+  font-size: 12px;
+  font-family: monospace;
+  cursor: pointer;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-chip-open:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+.log-chip-remove {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 4px 8px 4px 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.log-chip-remove:hover {
+  color: var(--danger);
+}
+
+.log-chip-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 26px;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.log-chip-add:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 /* Agent */
 .agent-page {
   min-height: 0;

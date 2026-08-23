@@ -135,3 +135,27 @@ describe('createChunkGate', () => {
     expect(res.writes[2]).toContain('пропущено 5 байт');
   });
 });
+
+describe('createChunkGate.finish', () => {
+  it('маркер для байтов, дропнутых до конца стрима', () => {
+    const res = fakeRes(2 * 1024 * 1024);
+    const write = gate(res);
+    write('a'.repeat(100));
+    write('b'.repeat(50));
+    expect(res.writes).toEqual([]);
+    write.finish();
+    expect(res.writes[0]).toContain('пропущено 150 байт');
+    // finish сбрасывает счётчик — повторный вызов пуст.
+    expect(res.writes).toHaveLength(1);
+    write.finish();
+    expect(res.writes).toHaveLength(1);
+  });
+
+  it('без дропа finish ничего не пишет', () => {
+    const res = fakeRes(0);
+    const write = gate(res);
+    write('ok\n');
+    write.finish();
+    expect(res.writes).toEqual(['ok\n']);
+  });
+});

@@ -1,6 +1,13 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { createProfile, deleteProfile, listProfiles, parseProfileInput, updateProfile } from '../profiles.js';
+import {
+  createProfile,
+  deleteProfile,
+  listProfiles,
+  parseProfileInput,
+  updateProfile,
+  updateProfileLogPaths,
+} from '../profiles.js';
 import { ProfileTransferError, buildExport, importBackup } from '../services/profile-transfer.js';
 import { clearHistory } from '../services/metrics-history.js';
 import { closeProfileConnection, testConnection } from '../ssh/manager.js';
@@ -95,6 +102,27 @@ profilesRouter.put('/:id', (req, res) => {
   try {
     closeProfileConnection(req.params.id);
     res.json(updateProfile(req.params.id, req.body));
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+/**
+ * Замена списка закреплённых путей логов (эпик 14). Отдельный маршрут, а не
+ * PUT /:id: полный апдейт вызывает closeProfileConnection и оборвал бы тот
+ * самый tail-стрим, из которого пользователь жмёт «Закрепить». Подключение
+ * не трогает — меняется только поле в profiles.json.
+ */
+const logPathsSchema = z.object({ paths: z.array(z.string()).max(50) });
+
+profilesRouter.put('/:id/log-paths', (req, res) => {
+  try {
+    const parsed = logPathsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'paths должен быть массивом строк (до 50)' });
+      return;
+    }
+    res.json(updateProfileLogPaths(req.params.id, parsed.data.paths));
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
   }

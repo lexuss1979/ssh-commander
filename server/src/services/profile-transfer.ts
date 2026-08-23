@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import { config } from '../config.js';
-import { importProfile, listProfiles, profileInputSchema } from '../profiles.js';
+import { importProfile, listProfiles, normalizeLogPaths, profileInputSchema } from '../profiles.js';
 import { assertPrivateKeyContent, sanitizeKeyFileName, saveKey } from './keys.js';
 import type { Profile } from '../types.js';
 
@@ -205,7 +205,12 @@ export function importBackup(raw: string, passphrase?: string): ImportSummary {
   });
   const profiles = payload.data.profiles.map((p, i) => {
     try {
-      return profileInputSchema.parse(p);
+      const data = profileInputSchema.parse(p);
+      // logPaths нормализуем здесь, на этапе валидации до первой записи —
+      // «либо импортируется всё, либо ничего» не должно нарушаться плохим
+      // путём лога (относительный/..) в середине бэкапа.
+      if (data.logPaths) data.logPaths = normalizeLogPaths(data.logPaths);
+      return data;
     } catch (err) {
       const name =
         typeof p === 'object' && p !== null && 'name' in p ? String((p as { name: unknown }).name) : `#${i + 1}`;

@@ -13,23 +13,38 @@ import type { ServerResponse } from 'node:http';
  */
 const GATE_LIMIT_BYTES = 1024 * 1024;
 
+export interface ChunkWriter {
+  (chunk: string): void;
+  /**
+   * Маркер для байтов, дропнутых до самого конца стрима (новые чанки их уже
+   * не вернут). Роут зовёт на settle `handle.code`, иначе пользователь не
+   * узнает о потере.
+   */
+  finish(): void;
+}
+
 /**
  * Возвращает функцию записи чанка в response с дропом при переполнении
- * сокета и маркером «пропущено N байт» при возврате в норму.
+ * сокета и маркером «пропущено N байт» при возврате в норму. Метод
+ * `finish()` закрывает маркером стрим, завершившийся в состоянии дропа.
  */
-export function createChunkGate(res: ServerResponse): (chunk: string) => void {
+export function createChunkGate(res: ServerResponse): ChunkWriter {
   let dropped = 0;
-  return (chunk: string) => {
+  const writeMarker = (): void => {
+    if (dropped > 0 && !res.destroyed) {
+      res.write(`\n… (пропущено ${dropped} байт: сервер занят)\n`);
+      dropped = 0;
+    }
+  };
+  const write = (chunk: string): void => {
     if (res.destroyed) return;
     if (res.writableLength > GATE_LIMIT_BYTES) {
       dropped += chunk.length;
       return;
     }
-    if (dropped > 0) {
-      const marker = `\n… (пропущено ${dropped} байт: сервер занят)\n`;
-      dropped = 0;
-      res.write(marker);
-    }
+    writeMarker();
     res.write(chunk);
   };
+  (write as ChunkWriter).finish = writeMarker;
+  return write as ChunkWriter;
 }

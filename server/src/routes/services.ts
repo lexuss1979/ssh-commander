@@ -157,7 +157,11 @@ servicesRouter.get('/:unit/logs', async (req, res) => {
   });
   void handle.code
     .then(() => {
-      if (!closed) res.end();
+      if (!closed) {
+        // Стрим закончился в состоянии дропа — маркер о потере.
+        write.finish();
+        res.end();
+      }
       release();
     })
     .catch(() => {

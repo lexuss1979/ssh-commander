@@ -107,43 +107,58 @@ dockerRouter.get('/containers/:id/logs', async (req, res) => {
   }
 
   // Follow-стримы считаются общим лимитером на профиль (не на подсистему):
-  // docker-логи, журнал systemd и терминал делят каналы одного SSH-соединения.
-  // Заголовки выставляем после проверки слота — иначе 429 ушёл бы с
-  // Content-Type: text/plain (Express не перетирает уже установленный).
+  // docker-логи, журнал systemd, tail файлов и терминал делят каналы одного
+  // SSH-соединения. Заголовки выставляем после проверки слота — иначе 429
+  // ушёл бы с Content-Type: text/plain (Express не перетирает уже
+  // установленный).
   if (!acquireFollowSlot(profile.id)) {
     res.status(429).json({
       error: 'Достигнут лимит одновременных журналов на сервер — закройте часть просмотрщиков и повторите',
     });
     return;
   }
-  let released = false;
-  const release = () => {
-    if (released) return;
-    released = true;
-    releaseFollowSlot(profile.id);
+  let slotReleased = false;
+  const releaseSlot = () => {
+    if (!slotReleased) {
+      slotReleased = true;
+      releaseFollowSlot(profile.id);
+    }
   };
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache');
   res.flushHeaders();
   let closed = false;
   const write = createChunkGate(res);
-  const handle = streamContainerLogs(profile, req.params.id, tail, (chunk) => {
-    if (!closed) write(chunk);
-  });
-  void handle.code
-    .then(() => {
-      if (!closed) res.end();
-      release();
-    })
-    .catch(() => {
-      if (!closed) res.end();
-      release();
+  // Синхронный throw при сборке хэндла (между acquire и req.on('close'))
+  // оставил бы слот занятым до рестарта — headers уже отправлены, поэтому
+  // отказ уходит телом, а слот снимается catch'ем.
+  try {
+    const handle = streamContainerLogs(profile, req.params.id, tail, (chunk) => {
+      if (!closed) write(chunk);
     });
-  req.on('close', () => {
-    closed = true;
-    handle.close();
-    release();
-  });
+    void handle.code
+      .then(() => {
+        if (!closed) {
+          // Стрим закончился в состоянии дропа — маркер о потере.
+          write.finish();
+          res.end();
+        }
+        releaseSlot();
+      })
+      .catch(() => {
+        if (!closed) res.end();
+        releaseSlot();
+      });
+    req.on('close', () => {
+      closed = true;
+      handle.close();
+      releaseSlot();
+    });
+  } catch (err) {
+    releaseSlot();
+    res.end(`${String((err as Error).message ?? err)}
+`);
+  }
 });
 
 dockerRouter.get('/images', async (req, res) => {

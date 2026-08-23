@@ -17,6 +17,8 @@ export interface Profile {
   password?: string;
   dockerCommand?: string;
   note?: string;
+  /** Закреплённые пути логов для быстрого доступа в FilesPage (эпик 14). */
+  logPaths?: string[];
 }
 
 export interface FileEntry {
