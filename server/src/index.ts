@@ -21,6 +21,7 @@ import { cronRouter } from './routes/cron.js';
 import { servicesRouter } from './routes/services.js';
 import { terminalRouter } from './routes/terminal.js';
 import { dbRouter } from './routes/db.js';
+import { alertsRouter } from './routes/alerts.js';
 import { requireProfile } from './profiles.js';
 import { attachTerminal } from './ws/terminal.js';
 import { handleAgentWs } from './ws/agent.js';
@@ -50,6 +51,7 @@ app.use('/api/cron', requireAuth, cronRouter);
 app.use('/api/services', requireAuth, servicesRouter);
 app.use('/api/terminal', requireAuth, terminalRouter);
 app.use('/api/db', requireAuth, dbRouter);
+app.use('/api/alerts', requireAuth, alertsRouter);
 
 // SPA static files (built web app).
 if (fs.existsSync(config.webDist)) {

@@ -1,6 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ApiError, api, fetchOverview, setUnauthorizedHandler } from './api';
-import type { AgentAskMode, Profile } from './types';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ApiError, api, fetchAlerts, fetchOverview, setUnauthorizedHandler } from './api';
+import type { AgentAskMode, AlertRuleState, Profile } from './types';
+import {
+  loadAlertsSettings,
+  mergeAlertStates,
+  saveAlertsSettings,
+  type ActiveAlert,
+  type AlertsSettings,
+} from './alerts';
 import { LoginPage } from './pages/LoginPage';
 import { ServersPage } from './pages/ServersPage';
 import { OverviewPage } from './pages/OverviewPage';
@@ -13,6 +20,7 @@ import { FilesPage } from './pages/FilesPage';
 import { DockerPage } from './pages/DockerPage';
 import { AgentPage } from './pages/AgentPage';
 import { ProfileModal } from './components/ProfileModal';
+import { AlertsBell } from './components/AlertsBell';
 
 type Tab = 'servers' | 'overview' | 'terminal' | 'files' | 'docker' | 'databases' | 'ports' | 'cron' | 'services';
 
@@ -84,7 +92,20 @@ export default function App() {
   // Активность агента по профилям для индикатора в сайдбаре:
   // 'pending' (ждёт подтверждения) важнее 'running'.
   const [agentActivity, setAgentActivity] = useState<Record<string, 'running' | 'pending'>>({});
+  // Алерты по порогам (эпик 20): правила считает сервер поверх кэша
+  // overview, переходы/гистерезис/уведомления — здесь. Настройки —
+  // настройка клиента (localStorage 'sc-alerts').
+  const [alertsSettings, setAlertsSettings] = useState<AlertsSettings>(loadAlertsSettings);
+  const [activeAlerts, setActiveAlerts] = useState<ActiveAlert[]>([]);
+  const activeAlertsRef = useRef<Map<string, ActiveAlert>>(new Map());
+  const syncedOnceRef = useRef(false);
   const toastTimer = useRef<number | null>(null);
+  // Пороги читаются из ref: в deps эффекта опроса — только тумблер, иначе
+  // каждое изменение числа в модалке пересоздавало бы таймер.
+  const alertsSettingsRef = useRef(alertsSettings);
+  alertsSettingsRef.current = alertsSettings;
+  const profilesRef = useRef(profiles);
+  profilesRef.current = profiles;
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -149,8 +170,12 @@ export default function App() {
       });
   }, [applyProfiles, showError]);
 
-  // Точки доступности серверов в сайдбаре: периодический опрос /api/overview
-  // (кэш снимка на сервере 4 с), на паузе при скрытой вкладке браузера.
+  // Точки доступности серверов в сайдбаре + алерты: один тик — два запроса
+  // параллельно (общий кэш overview на сервере 4 с; /api/alerts должен
+  // прийти, пока кэш жив, — последовательный вызов порождал бы второй опрос
+  // SSH). При включённых алертах опрос продолжается и в скрытой вкладке
+  // (браузер троттлит таймеры до ~1/мин — честный ритм фоновой проверки
+  // уведомлений), при выключенных — прежняя пауза.
   const [pageVisible, setPageVisible] = useState(() => !document.hidden);
   const [serverStatus, setServerStatus] = useState<Record<string, { ok: boolean; error?: string }>>({});
 
@@ -160,19 +185,63 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', onChange);
   }, []);
 
+  // Слияние состояний правил: держащиеся/новые/снятые + браузерные
+  // уведомления на новые (после первой тихой синхронизации, только когда
+  // вкладка неактивна — в приложении хватает колокольчика).
+  const applyAlertRules = useCallback((rules: AlertRuleState[]) => {
+    const { next, fired } = mergeAlertStates(activeAlertsRef.current, rules, Date.now());
+    activeAlertsRef.current = next;
+    setActiveAlerts([...next.values()]);
+    const first = !syncedOnceRef.current;
+    syncedOnceRef.current = true;
+    if (first) return; // F5 не спамит уведомлениями по уже активным алертам
+    const s = alertsSettingsRef.current;
+    if (
+      !s.notify ||
+      typeof Notification === 'undefined' ||
+      Notification.permission !== 'granted' ||
+      !document.hidden
+    ) {
+      return;
+    }
+    for (const a of fired) {
+      try {
+        const n = new Notification(
+          profilesRef.current.find((p) => p.id === a.profileId)?.name ?? 'ssh-commander',
+          { body: a.message, tag: a.key },
+        );
+        n.onclick = () => {
+          window.focus();
+          setActiveProfileId(a.profileId);
+          setTab('overview');
+        };
+      } catch {
+        /* браузер может отказаться создавать уведомление — не критично */
+      }
+    }
+  }, []);
+
   useEffect(() => {
-    if (!authed || !pageVisible) return;
+    if (!authed) return;
+    if (!pageVisible && !alertsSettingsRef.current.enabled) return;
     let cancelled = false;
     let timer = 0;
     const tick = async () => {
-      try {
-        const res = await fetchOverview();
-        if (cancelled) return;
+      const s = alertsSettingsRef.current;
+      const [overviewRes, alertsRes] = await Promise.allSettled([
+        fetchOverview(),
+        s.enabled ? fetchAlerts({ disk: s.disk, mem: s.mem, load: s.load }) : Promise.resolve(null),
+      ]);
+      if (cancelled) return;
+      if (overviewRes.status === 'fulfilled') {
         const next: Record<string, { ok: boolean; error?: string }> = {};
-        for (const s of res.servers) next[s.id] = { ok: s.ok, error: s.error };
+        for (const srv of overviewRes.value.servers) next[srv.id] = { ok: srv.ok, error: srv.error };
         setServerStatus(next);
-      } catch {
-        // Оставляем последний снимок; 401 уводит на логин глобальным обработчиком.
+      }
+      // Отказ любого из запросов — оставляем последний снимок без mass-resolve;
+      // 401 уводит на логин глобальным обработчиком.
+      if (alertsRes.status === 'fulfilled' && alertsRes.value) {
+        applyAlertRules(alertsRes.value.rules);
       }
       if (!cancelled) {
         timer = window.setTimeout(tick, SERVER_STATUS_POLL_MS);
@@ -183,7 +252,19 @@ export default function App() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [authed, pageVisible]);
+  }, [authed, pageVisible, alertsSettings.enabled, applyAlertRules]);
+
+  // Сохранение настроек алертов — тихий re-baseline: активный набор строится
+  // заново на следующем тике с новыми порогами (иначе гистерезис держал бы
+  // алерты по старым порогам, а смена настроек давала бы залп уведомлений).
+  const handleAlertsSettingsSaved = useCallback((s: AlertsSettings) => {
+    setAlertsSettings(s);
+    alertsSettingsRef.current = s;
+    saveAlertsSettings(s);
+    activeAlertsRef.current = new Map();
+    syncedOnceRef.current = false;
+    setActiveAlerts([]);
+  }, []);
 
   const handleLogin = useCallback(
     async (password: string) => {
@@ -202,6 +283,9 @@ export default function App() {
     setTab('servers');
     setVisitedProfileIds([]);
     setAgentActivity({});
+    setActiveAlerts([]);
+    activeAlertsRef.current = new Map();
+    syncedOnceRef.current = false;
   }, []);
 
   // Панель агента монтируется при первом посещении профиля и дальше живёт.
@@ -285,10 +369,36 @@ export default function App() {
 
   const activeProfile = profiles.find((p) => p.id === activeProfileId);
 
+  // Чипы проблемных профилей в сайдбаре: счётчик алертов и худшая severity.
+  const profileAlerts = useMemo(() => {
+    const map = new Map<string, { count: number; crit: boolean; messages: string[] }>();
+    for (const a of activeAlerts) {
+      const cur = map.get(a.profileId) ?? { count: 0, crit: false, messages: [] };
+      cur.count += 1;
+      cur.crit = cur.crit || a.severity === 'crit';
+      cur.messages.push(a.message);
+      map.set(a.profileId, cur);
+    }
+    return map;
+  }, [activeAlerts]);
+
   return (
     <div className="app">
       <aside className="sidebar">
-        <div className="logo">ssh-commander</div>
+        <div className="sidebar-head">
+          <div className="logo">ssh-commander</div>
+          <AlertsBell
+            alerts={activeAlerts}
+            settings={alertsSettings}
+            profiles={profiles}
+            onOpenProfile={(id) => {
+              setActiveProfileId(id);
+              setTab('overview');
+            }}
+            onSaveSettings={handleAlertsSettingsSaved}
+            showError={showError}
+          />
+        </div>
 
         <div className="sidebar-section sidebar-profiles">
           <button
@@ -316,6 +426,7 @@ export default function App() {
                   : `недоступен: ${st.error ?? 'нет данных'}`
                 : 'статус проверяется';
               const activity = agentActivity[p.id];
+              const pAlerts = profileAlerts.get(p.id);
               return (
                 <button
                   key={p.id}
@@ -339,6 +450,14 @@ export default function App() {
                             : 'Агент выполняет задачу'
                         }
                       />
+                    )}
+                    {pAlerts && (
+                      <span
+                        className={`profile-alert-chip${pAlerts.crit ? ' crit' : ''}`}
+                        title={pAlerts.messages.join('\n')}
+                      >
+                        ⚠ {pAlerts.count}
+                      </span>
                     )}
                   </span>
                   <span className="muted">
