@@ -110,7 +110,7 @@ function PackagesCard({
           </div>
           <div className="overview-sub">
             менеджер: <code>{pm}</code>
-            {pm === 'apt' && packages.indexAgeMs !== null && (
+            {pm === 'apt' && (
               <> · {indexAgeText(packages.indexAgeMs)}</>
             )}
           </div>
