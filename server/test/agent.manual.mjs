@@ -1,9 +1,16 @@
-// Тест цикла AI-агента против мокового OpenAI-совместимого endpoint'а:
-// 1) read-only инструмент выполняется автоматически,
+// Тест цикла AI-агента против мокового OpenAI-совместимого endpoint'а
+// (mock-openai-manual.mjs): сценарий мока — list_servers (read-only,
+// автоматически) → connect_server (мутирующий, ждёт approve) →
+// exec_readonly на подключённом сервере → финальный ответ с маркером
+// подсказки [[SUGGEST]]. Проверяется:
+// 1) read-only инструменты выполняются автоматически,
 // 2) мутирующий инструмент ждёт подтверждения и выполняется после approve,
 // 3) агент завершает цикл,
 // 4) usage каждого вызова пишется в журнал расходов (ai-usage.json), сессия
-//    шлёт WS-событие usage, summaries диалогов обогащаются итогами.
+//    шлёт WS-событие usage, summaries диалогов обогащаются итогами,
+// 5) маркер [[SUGGEST]] вырезается из ответа: WS-последовательность
+//    message (без маркера) → suggestion → done, в data/ai-dialogues.json
+//    маркера нет.
 //
 // Запуск: mock-openai-manual.mjs (:8199) + sshd на 127.0.0.1:2222 (user test)
 // и сервер: APP_PASSWORD=test123 AI_API_KEY=x AI_API_BASE=http://127.0.0.1:8199/v1
@@ -13,6 +20,7 @@ import fs from 'node:fs';
 
 const BASE = 'http://127.0.0.1:8091';
 const PASSWORD = 'test123';
+const MARKER = '[[SUGGEST]]';
 
 function check(name, ok, detail = '') {
   console.log(`${ok ? '  ok' : '  FAIL'}: ${name} ${detail}`);
@@ -46,23 +54,30 @@ const cookie = `sc_session=${m[1]}`;
 const existing = await req('/api/profiles', {}, cookie);
 for (const p of existing) await req(`/api/profiles/${p.id}`, { method: 'DELETE' }, cookie);
 
-const profile = await req(
-  '/api/profiles',
-  {
-    method: 'POST',
-    body: JSON.stringify({
-      name: 'test-sshd',
-      host: '127.0.0.1',
-      port: 2222,
-      username: 'test',
-      authType: 'password',
-      password: 'test123',
-      dockerCommand: 'docker',
-    }),
-  },
-  cookie,
-);
-const pid = profile.id;
+// Оба профиля смотрят на один sshd: мок подключает «второй сервер» по имени
+// test-sshd-b и выполняет exec_readonly с параметром server="test-sshd-b".
+const makeProfile = (name) =>
+  req(
+    '/api/profiles',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        host: '127.0.0.1',
+        port: 2222,
+        username: 'test',
+        authType: 'password',
+        password: 'test123',
+        dockerCommand: 'docker',
+      }),
+    },
+    cookie,
+  );
+
+const profileA = await makeProfile('test-sshd');
+const profileB = await makeProfile('test-sshd-b');
+const pid = profileA.id;
+const pidB = profileB.id;
 
 const ws = new WebSocket(`ws://127.0.0.1:8091/ws/agent?profileId=${pid}`, { headers: { cookie } });
 
@@ -98,19 +113,55 @@ await new Promise((resolve, reject) => {
 
 ws.send(JSON.stringify({ type: 'message', content: 'выполни проверку' }));
 
-const readOnlyResult = await waitFor((m) => m.type === 'tool_result' && m.name === 'exec_readonly');
-check('read-only tool ran automatically', readOnlyResult.status === 'ok', JSON.stringify(readOnlyResult));
-check('read-only output correct', String(readOnlyResult.output ?? '').trim() === 'test', readOnlyResult.output);
+// 1) list_servers — read-only, выполняется автоматически без подтверждения
+const listResult = await waitFor((m) => m.type === 'tool_result' && m.name === 'list_servers');
+check('read-only tool ran automatically', listResult.status === 'ok', JSON.stringify(listResult).slice(0, 200));
 
-const pending = await waitFor((m) => m.type === 'tool_pending' && m.name === 'exec');
-check('mutating tool waits for approval', true);
+// 2) connect_server — мутирующий, ждёт approve
+const pending = await waitFor((m) => m.type === 'tool_pending' && m.name === 'connect_server');
+check('mutating tool waits for approval', pending.server === 'test-sshd-b', `server=${pending.server}`);
 
 ws.send(JSON.stringify({ type: 'approve', callId: pending.callId }));
-const writeResult = await waitFor((m) => m.type === 'tool_result' && m.callId === pending.callId);
-check('approved tool executed', writeResult.status === 'ok', JSON.stringify(writeResult));
+const connectResult = await waitFor((m) => m.type === 'tool_result' && m.callId === pending.callId);
+check('approved tool executed', connectResult.status === 'ok', JSON.stringify(connectResult).slice(0, 200));
+
+// Подключение имело эффект: событие servers с двумя attached серверами
+const serversTwo = await waitFor((m) => m.type === 'servers' && m.attached?.length === 2);
+check(
+  'connect had effect (servers event with 2 attached)',
+  serversTwo.attached.some((s) => s.id === pid) && serversTwo.attached.some((s) => s.id === pidB),
+  JSON.stringify(serversTwo.attached.map((s) => s.name)),
+);
+
+// 3) exec_readonly на подключённом сервере — тоже автоматически
+const execResult = await waitFor((m) => m.type === 'tool_result' && m.name === 'exec_readonly');
+check(
+  'exec_readonly ran automatically on attached server',
+  execResult.status === 'ok' && String(execResult.output ?? '').includes('(exit code: 0)'),
+  String(execResult.output ?? '').slice(0, 120),
+);
+
+// 4) финальный ответ: маркер вырезан из message, подсказка — отдельное событие
+const finalMessage = await waitFor(
+  (m) => m.type === 'message' && typeof m.content === 'string' && m.content.includes('Готово'),
+);
+check('final message has no suggest marker', !finalMessage.content.includes(MARKER), finalMessage.content);
+
+const suggestion = await waitFor((m) => m.type === 'suggestion');
+check('suggestion event carries marker text', suggestion.text === 'Да, перезапусти nginx', JSON.stringify(suggestion));
 
 const done = await waitFor((m) => m.type === 'done');
 check('agent loop finished', done.note === undefined || done.note !== 'Достигнут лимит шагов', JSON.stringify(done));
+
+// Порядок событий: message (чистый контент) → suggestion → done
+const idxMessage = events.indexOf(finalMessage);
+const idxSuggestion = events.indexOf(suggestion);
+const idxDone = events.indexOf(done);
+check(
+  'event order is message → suggestion → done',
+  idxMessage >= 0 && idxMessage < idxSuggestion && idxSuggestion < idxDone,
+  `${idxMessage}, ${idxSuggestion}, ${idxDone}`,
+);
 
 // Расходы: WS-событие usage с кумулятивными итогами диалога после записи.
 const usageEvent = await waitFor((m) => m.type === 'usage');
@@ -119,10 +170,6 @@ check(
   usageEvent.totals && usageEvent.totals.calls >= 1 && typeof usageEvent.totals.costUsd === 'number',
   JSON.stringify(usageEvent.totals),
 );
-
-// Проверяем, что мутирующая команда реально выполнилась на сервере
-const files = await req(`/api/files/list?profileId=${pid}&path=/tmp`, {}, cookie);
-check('approved command had effect', files.entries.some((e) => e.name === 'agent-approved'));
 
 ws.close();
 
@@ -136,6 +183,28 @@ check(
   full.dialogue.messages.some((m) => m.role === 'user') && full.dialogue.messages.some((m) => m.role === 'assistant'),
   JSON.stringify(full.dialogue.messages.map((m) => m.role)),
 );
+check(
+  'dialogue messages contain no suggest marker',
+  !JSON.stringify(full.dialogue.messages).includes(MARKER),
+);
+check(
+  'dialogue extraProfileIds contains B (connect persisted)',
+  Array.isArray(full.dialogue.extraProfileIds) && full.dialogue.extraProfileIds.includes(pidB),
+  JSON.stringify(full.dialogue.extraProfileIds),
+);
+
+// Персист на диске: в data/ai-dialogues.json маркера нет.
+const dialoguesPath = 'data/ai-dialogues.json';
+if (fs.existsSync(dialoguesPath)) {
+  const store = JSON.parse(fs.readFileSync(dialoguesPath, 'utf8'));
+  const stored = (store.dialogues ?? []).find((d) => d.id === saved.id);
+  check(
+    'ai-dialogues.json stored dialogue has no marker',
+    Boolean(stored) && !JSON.stringify(stored.messages ?? []).includes(MARKER),
+  );
+} else {
+  check(`ai-dialogues.json exists at ${dialoguesPath}`, false, 'server DATA_DIR не по умолчанию?');
+}
 
 // Расходы: summaries обогащены итогами (usage), итоги диалога и отчёт сходятся.
 check(
@@ -176,5 +245,6 @@ for (const d of dialogues.dialogues) {
 }
 
 await req(`/api/profiles/${pid}`, { method: 'DELETE' }, cookie);
+await req(`/api/profiles/${pidB}`, { method: 'DELETE' }, cookie);
 
 console.log(process.exitCode ? 'AGENT TEST: FAILED' : 'AGENT TEST: PASSED');

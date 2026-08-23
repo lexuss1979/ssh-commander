@@ -8,7 +8,9 @@
 //   1) tool_call list_servers (без аргументов)
 //   2) tool_call connect_server {server: "test-sshd-b"}
 //   3) tool_call exec_readonly {command: "hostname", server: "test-sshd-b"}
-//   4) финальный assistant content без tool_calls
+//   4) финальный assistant content с хвостовым маркером подсказки
+//      [[SUGGEST]] — сервер вырезает его и шлёт WS-событие suggestion
+//      (проверка в agent.manual.mjs).
 import http from 'node:http';
 
 const PORT = 8199;
@@ -51,7 +53,7 @@ const script = [
       {
         message: {
           role: 'assistant',
-          content: 'Готово: srv-b подключён, hostname проверен.',
+          content: 'Готово: srv-b подключён, hostname проверен.\n[[SUGGEST]] Да, перезапусти nginx',
         },
       },
     ],

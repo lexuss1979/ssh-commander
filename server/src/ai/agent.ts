@@ -9,6 +9,12 @@ import { readMemory, writeMemory, memoryPromptBlock } from './memory.js';
 import { isSearchConfigured, searchWeb, type WebSearchUsage } from './web-search.js';
 import { computeCostUsd } from './pricing.js';
 import { recordUsage, usageTotalsByDialogue } from './usage.js';
+import {
+  SUGGEST_MARKER,
+  MAX_SUGGESTION_LENGTH,
+  createSuggestionTokenFilter,
+  extractSuggestion,
+} from './suggest.js';
 import { exec, withSftp } from '../ssh/manager.js';
 import {
   readFile as sftpReadFile,
@@ -143,6 +149,24 @@ export class AgentSession {
         'без подтверждения — используй его, когда нужен свежий или неизвестный факт (версии, релизы, настройки сервисов), ' +
         'вместо ответа по памяти.';
     }
+    // Подсказка вероятного ответа (agent-suggest): маркер вырезается из ответа
+    // до персиста и контекста (ai/suggest.ts), текст подсказки уходит на
+    // фронтенд отдельным WS-событием suggestion. Инструкция консервативна
+    // (асимметрия в пользу молчания): подсказка — только при заведомо
+    // вероятном ответе; на открытые вопросы, равнозначные варианты и
+    // необратимые/рискованные действия модель молчит.
+    systemPrompt +=
+      ` Если твой финальный ответ запрашивает у пользователя решение или выбор («продолжать?», «какой вариант?», «выполнить?»), ` +
+      `добавь самой последней строкой ответа ${SUGGEST_MARKER} <краткий вероятный ответ пользователя> — ` +
+      `одна фраза до ${MAX_SUGGESTION_LENGTH} символов на русском, без markdown и кавычек, которую пользователь мог бы отправить в ответ ` +
+      '(например, «Да, выполняй» или «Сначала покажи конфиг»). ' +
+      'Эта строка пользователю не показывается — приложение превращает её в подсказку поля ввода. ' +
+      'Добавляй подсказку только если один ответ заведомо вероятен: простое подтверждение безопасного следующего шага ' +
+      'или очевидный запрос вроде «покажи логи». ' +
+      'Не добавляй строку, если вопрос открытый (нужны данные — имя, домен, путь, число), варианты равнозначны ' +
+      'или речь о необратимом/рискованном действии — там не подсказывай согласие. ' +
+      'Если сомневаешься — не добавляй: отсутствие подсказки лучше неверной. ' +
+      'Не вставляй маркер в середину ответа и не используй его ни для чего другого.';
     const memoryBlock = memoryPromptBlock(homeProfile.id);
     if (memoryBlock) {
       systemPrompt += `\n\n${memoryBlock}`;
@@ -497,12 +521,16 @@ export class AgentSession {
       this.loopAbort = new AbortController();
       let assistant: ChatMessage;
       try {
+        // Holdback-фильтр: маркер [[SUGGEST]] и текст подсказки не мелькают
+        // в стрим-пузыре. flush — только на успешном стриме (решение 5 плана).
+        const tokenFilter = createSuggestionTokenFilter((t) => this.send({ type: 'token', content: t }));
         const result = await streamChatCompletion({
           messages: buildPlanRequestMessages(sanitizeMessages(this.messages)),
           tools: toolsForRequest(true),
           signal: this.loopAbort.signal,
-          onToken: (token) => this.send({ type: 'token', content: token }),
+          onToken: (token) => tokenFilter.push(token),
         });
+        tokenFilter.flush();
         assistant = result.message;
         // Шаг планирования — тоже платный вызов: учитываем в журнале.
         if (result.usage) {
@@ -518,9 +546,12 @@ export class AgentSession {
       }
 
       // Инструменты в запросе не передавались; если модель всё же вернула
-      // tool_calls — игнорируем их и сохраняем только текст плана.
-      this.send({ type: 'message', role: 'assistant', content: assistant.content ?? '' });
-      this.messages.push({ role: 'assistant', content: assistant.content });
+      // tool_calls — игнорируем их и сохраняем только текст плана. Подсказка
+      // в режиме планирования не нужна (точка решения — кнопка «Выполнить»),
+      // но маркер на всякий случай вырезаем и здесь.
+      const { content: planContent } = extractSuggestion(assistant.content ?? '');
+      this.send({ type: 'message', role: 'assistant', content: planContent });
+      this.messages.push({ role: 'assistant', content: planContent });
       this.save();
       this.planPending = true;
       this.send({ type: 'plan_ready' });
@@ -554,12 +585,18 @@ export class AgentSession {
 
         let assistant: ChatMessage;
         try {
+          // Holdback-фильтр: маркер [[SUGGEST]] и текст подсказки не мелькают
+          // в стрим-пузыре. flush — только на успешном стриме: на пути
+          // ошибки/останова удержанный хвост не важен (финального message
+          // там всё равно нет, потеря косметическая).
+          const tokenFilter = createSuggestionTokenFilter((t) => this.send({ type: 'token', content: t }));
           const result = await streamChatCompletion({
             messages: sanitizeMessages(this.messages),
             tools: getToolDefs(),
             signal: this.loopAbort.signal,
-            onToken: (token) => this.send({ type: 'token', content: token }),
+            onToken: (token) => tokenFilter.push(token),
           });
+          tokenFilter.flush();
           assistant = result.message;
           // Каждый вызов чата — платная запись в журнале (решения 5, 6).
           if (result.usage) {
@@ -574,12 +611,20 @@ export class AgentSession {
           return;
         }
 
-        this.send({ type: 'message', role: 'assistant', content: assistant.content ?? '' });
-        this.messages.push(assistant);
+        // Маркер [[SUGGEST]] вырезается до this.messages/save(): в персист и
+        // контекст модели попадает только чистый контент. На финальном ходе
+        // (без tool_calls — агент ждёт пользователя) подсказка уходит отдельным
+        // WS-событием suggestion после message, до done.
+        const { content, suggestion } = extractSuggestion(assistant.content ?? '');
+        this.send({ type: 'message', role: 'assistant', content });
+        this.messages.push(assistant.content === null ? assistant : { ...assistant, content });
         this.save();
 
         const calls = assistant.tool_calls ?? [];
         if (!calls.length) {
+          if (suggestion) {
+            this.send({ type: 'suggestion', text: suggestion });
+          }
           this.send({ type: 'done' });
           return;
         }

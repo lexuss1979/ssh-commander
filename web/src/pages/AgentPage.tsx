@@ -90,6 +90,11 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   // записи в журнал — бейдж двигается во время длинных прогонов, а не только
   // по done (refreshDialogues). Сбрасываются при смене диалога.
   const [liveUsage, setLiveUsage] = useState<DialogueUsageTotals | null>(null);
+  // Подсказка вероятного ответа (WS-событие suggestion): плейсхолдер пустого
+  // поля ввода, Tab подставляет текст. Живёт только в стейте страницы — до
+  // следующего хода (сброс на running/send/error/смену диалога), из
+  // persisted-диалога не восстанавливается. Автоотправки нет никогда.
+  const [suggestion, setSuggestion] = useState('');
   const wsRef = useRef<WebSocket | null>(null);
   // Отложенная отправка первого сообщения в только что созданный диалог
   // ('new-dialogue' из терминала): заполняется после успешного POST, а
@@ -289,6 +294,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     setPlanReady(false);
     setDecidedCalls(new Set());
     setLiveUsage(null);
+    setSuggestion('');
 
     void api<{ dialogue: Dialogue }>(`/api/ai/dialogues/${encodeURIComponent(activeDialogueId)}`)
       .then(({ dialogue }) => {
@@ -346,6 +352,11 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
         case 'message':
           finalizeAssistant(String(msg.content ?? ''));
           break;
+        case 'suggestion':
+          // Подсказка вероятного ответа агента: плейсхолдер поля ввода,
+          // подставляется по Tab. На done не сбрасываем — агент ждёт ответа.
+          setSuggestion(String(msg.text ?? ''));
+          break;
         case 'tool_start':
           addToolCard(
             String(msg.callId ?? ''),
@@ -394,6 +405,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
         case 'running':
           setRunning(true);
           setPlanReady(false);
+          setSuggestion('');
           break;
         case 'plan_ready':
           setPlanReady(true);
@@ -408,6 +420,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
         }
         case 'error':
           setRunning(false);
+          setSuggestion('');
           showError(String(msg.message ?? 'Ошибка агента'));
           void refreshDialogues();
           break;
@@ -596,6 +609,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     setMessages((prev) => [...prev, { id: nextId++, role: 'user', content }]);
     setInput('');
     setPlanReady(false);
+    setSuggestion('');
     // Правки к ожидающему плану — это тоже message с planMode=true:
     // сервер пересоставит план. Выход из режима — снять переключатель «План».
     sendWs({ type: 'message', content, planMode });
@@ -906,8 +920,32 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                 e.preventDefault();
                 send();
               }
+              // Tab подставляет подсказку агента — только при строго пустом
+              // поле (иначе сохраняем нативное поведение — переход фокуса).
+              // Подставленный текст — обычное содержимое поля: правится
+              // перед отправкой, Enter всегда нажимает пользователь.
+              if (
+                e.key === 'Tab' &&
+                !e.shiftKey &&
+                !e.ctrlKey &&
+                !e.altKey &&
+                !e.metaKey &&
+                suggestion &&
+                input === ''
+              ) {
+                e.preventDefault();
+                setInput(suggestion);
+                requestAnimationFrame(() => {
+                  const el = inputRef.current;
+                  if (!el) return;
+                  el.focus();
+                  el.setSelectionRange(el.value.length, el.value.length);
+                });
+              }
             }}
-            placeholder="Задача для агента… (Enter — отправить)"
+            placeholder={
+              suggestion ? `${suggestion} · Tab — подставить` : 'Задача для агента… (Enter — отправить)'
+            }
             rows={2}
           />
           <button
