@@ -354,6 +354,124 @@ esac
     console.log('  skip: SERVICES_POLKIT=1, но systemd на стенде недоступен');
   }
 
+  console.log('== processes (эпик 17) ==');
+  // Фоновый `sleep 600` через терминал; `setsid` отвязывает от сессии и
+  // управляющего терминала, поэтому процесс переживает закрытие сессии.
+  // pid берём из снимка метрик (поиск по командной строке), а не из вывода
+  // терминала — надёжнее.
+  const pws = await wsConnect(`/ws/terminal?profileId=${pid}&cols=80&rows=24`, { cookie });
+  let pwsReady = false;
+  const spawnCmd = 'setsid sleep 600 >/dev/null 2>&1 </dev/null & exit\n';
+  pws.on('message', (raw) => {
+    const msg = JSON.parse(String(raw));
+    if (msg.type === 'connected') {
+      pwsReady = true;
+      pws.send(JSON.stringify({ type: 'input', data: spawnCmd }));
+    }
+  });
+  if (pwsReady) pws.send(JSON.stringify({ type: 'input', data: spawnCmd }));
+  await new Promise((resolve) => setTimeout(() => { pws.close(); resolve(); }, 2000));
+
+  let sleepPid = null;
+  for (let i = 0; i < 5 && !sleepPid; i++) {
+    const snap = await req(`/api/metrics?${P()}`);
+    sleepPid = snap.processes.find((pr) => pr.command.includes('sleep 600'))?.pid ?? null;
+    if (!sleepPid) await new Promise((r) => setTimeout(r, 1500));
+  }
+  check('process: sleep 600 запущен (pid найден в снимке)', !!sleepPid, `pid=${sleepPid}`);
+  if (sleepPid) {
+    // renice +5 своего процесса — без sudo; вывод renice в ответе.
+    const rn = await req(`/api/processes/${sleepPid}/renice?${P()}`, {
+      method: 'POST',
+      body: JSON.stringify({ nice: 5 }),
+    });
+    check(
+      'process: renice +5 своего процесса → ok с выводом',
+      rn.ok === true && typeof rn.output === 'string' && rn.output.trim() !== '',
+      JSON.stringify(rn),
+    );
+    const afterRenice = await req(`/api/metrics?${P()}`);
+    check('process: процесс жив после renice', afterRenice.processes.some((pr) => pr.pid === sleepPid));
+
+    // Понижение приоритета (−5) своему процессу — EPERM без root → 400.
+    try {
+      await req(`/api/processes/${sleepPid}/renice?${P()}`, {
+        method: 'POST',
+        body: JSON.stringify({ nice: -5 }),
+      });
+      check('process: renice −5 без пароля → 400 «укажите sudo-пароль»', false, 'ожидался 400');
+    } catch (err) {
+      check(
+        'process: renice −5 без пароля → 400 «укажите sudo-пароль»',
+        String(err).includes('400') && String(err).includes('укажите sudo-пароль'),
+        String(err),
+      );
+    }
+
+    // С sudo-паролем (SUDO_ACCESS-стенд) понижение проходит.
+    if (process.env.SUDO_PASSWORD) {
+      const rnSudo = await req(`/api/processes/${sleepPid}/renice?${P()}`, {
+        method: 'POST',
+        body: JSON.stringify({ nice: -5, sudoPassword: process.env.SUDO_PASSWORD }),
+      });
+      check('process: renice −5 с sudo → ok', rnSudo.ok === true, JSON.stringify(rnSudo));
+    } else {
+      console.log('  skip: SUDO_PASSWORD не задан — кейс «с sudo» пропущен');
+    }
+
+    // TERM своего процесса — без sudo; после мутации кэш метрик сброшен,
+    // процесс исчезает из снимка сразу (без ожидания кэша 2 с).
+    const sig = await req(`/api/processes/${sleepPid}/signal?${P()}`, {
+      method: 'POST',
+      body: JSON.stringify({ signal: 'TERM' }),
+    });
+    check('process: TERM своего процесса → ok', sig.ok === true, JSON.stringify(sig));
+    let gone = false;
+    for (let i = 0; i < 5 && !gone; i++) {
+      const snap = await req(`/api/metrics?${P()}`);
+      gone = !snap.processes.some((pr) => pr.pid === sleepPid);
+      if (!gone) await new Promise((r) => setTimeout(r, 1000));
+    }
+    check('process: процесс исчез из снимка', gone);
+
+    // Несуществующий pid → 400 «больше не существует» (ESRCH-категория).
+    try {
+      await req('/api/processes/4194304/signal?' + P(), {
+        method: 'POST',
+        body: JSON.stringify({ signal: 'TERM' }),
+      });
+      check('process: несуществующий pid → 400', false, 'ожидался 400');
+    } catch (err) {
+      check(
+        'process: несуществующий pid → 400',
+        String(err).includes('400') && String(err).includes('больше не существует'),
+        String(err),
+      );
+    }
+
+    // Недопустимый pid (1 — kill -1 бьёт по группам) → 400 ещё до команды.
+    try {
+      await req('/api/processes/1/signal?' + P(), {
+        method: 'POST',
+        body: JSON.stringify({ signal: 'KILL' }),
+      });
+      check('process: pid=1 → 400', false, 'ожидался 400');
+    } catch (err) {
+      check('process: pid=1 → 400', String(err).includes('400'), String(err));
+    }
+
+    // Сигнал вне whitelist → 400.
+    try {
+      await req(`/api/processes/${sleepPid}/signal?${P()}`, {
+        method: 'POST',
+        body: JSON.stringify({ signal: 'SIGKILL' }),
+      });
+      check('process: сигнал вне whitelist → 400', false, 'ожидался 400');
+    } catch (err) {
+      check('process: сигнал вне whitelist → 400', String(err).includes('400'), String(err));
+    }
+  }
+
   console.log('== cleanup ==');
   await req(`/api/profiles/${pid}`, { method: 'DELETE' });
   check('profile deleted', true);
