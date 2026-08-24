@@ -414,16 +414,29 @@ export function OverviewPage({ profile, visible, onOpenInFiles, onAskAgent }: Pr
                     <span className="mount" title={d.filesystem}>
                       {d.mount}
                     </span>
-                    <button
-                      className="btn btn-ghost btn-mini disk-whats-eating"
-                      onClick={() => setDuTarget(d.mount)}
-                      title="Что занимает место в этом каталоге"
-                    >
-                      Что занимает
-                    </button>
                     <span className="sizes">
                       {formatBytes(d.usedBytes)} из {formatBytes(d.totalBytes)}
                     </span>
+                    <button
+                      className="btn btn-small disk-analyze"
+                      onClick={() => setDuTarget(d.mount)}
+                      title="Что занимает место в этом каталоге"
+                    >
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <circle cx="11" cy="11" r="7" />
+                        <line x1="20.5" y1="20.5" x2="16" y2="16" />
+                      </svg>
+                      Подробнее
+                    </button>
                   </div>
                   <Meter percent={d.usedPercent} />
                 </div>

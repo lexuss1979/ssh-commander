@@ -2607,12 +2607,13 @@ body.resizing-agent {
 
 .disk-row-head {
   display: flex;
-  justify-content: space-between;
-  gap: 8px;
+  align-items: center;
+  gap: 12px;
   font-size: 13px;
 }
 
 .disk-row-head .mount {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2621,6 +2622,7 @@ body.resizing-agent {
 .disk-row-head .sizes {
   color: var(--muted);
   white-space: nowrap;
+  margin-left: auto;
 }
 
 /* Навигатор «Что занимает» (эпик 16) */
@@ -2754,9 +2756,104 @@ body.resizing-agent {
   margin-bottom: 10px;
 }
 
-.disk-whats-eating {
-  margin-left: auto;
+/* Кнопка «Подробнее» анализa диска — видимая (bordered), с иконкой-лупой */
+.disk-analyze {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   flex-shrink: 0;
+}
+
+.disk-analyze svg {
+  color: var(--muted);
+}
+
+.disk-row-head:hover .disk-analyze svg {
+  color: var(--accent);
+}
+
+/* Статус-бар длительного опроса du/find (эпик 16) */
+.du-scan {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 4px;
+}
+
+.scan-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.scan-bar {
+  position: relative;
+  height: 6px;
+  border-radius: 6px;
+  background: var(--bg-input);
+  overflow: hidden;
+}
+
+/* Индетерминированная полоса: du не отдаёт прогресс, показываем «выполняется» */
+.scan-bar::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 40%;
+  border-radius: 6px;
+  background: var(--accent);
+  animation: scan 1.2s ease-in-out infinite;
+}
+
+@keyframes scan {
+  0% {
+    left: -40%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+.scan-note {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.scan-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.scan-elapsed {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.scan-foot .spacer {
+  flex: 1;
 }
 
 .overview-processes {

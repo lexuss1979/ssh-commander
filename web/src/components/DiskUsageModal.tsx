@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchDiskUsage, fetchDiskUsageFiles, formatSize } from '../api';
 import type { DiskUsageFilesResponse, DiskUsageSnapshot } from '../api';
 import type { Profile } from '../types';
@@ -27,12 +27,19 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // Опрос длительный — показываем статус-бар со счётчиком и кнопкой «Отмена».
+  const [cancelled, setCancelled] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const controllerRef = useRef<AbortController | null>(null);
 
   // Свежий fetch на смену пути/режима; закрытие модалки (unmount) рвёт запрос.
   useEffect(() => {
     const controller = new AbortController();
+    controllerRef.current = controller;
     setLoading(true);
     setError(null);
+    setCancelled(false);
+    setElapsed(0);
     // Старые данные прошлого пути/режима не показываем под новыми крошками.
     setData(null);
     setFilesData(null);
@@ -61,6 +68,19 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
     }
     return () => controller.abort();
   }, [profile.id, path, mode, reloadKey]);
+
+  // Счётчик секунд сканирования: тикает, пока идёт опрос.
+  useEffect(() => {
+    if (!loading) return;
+    const id = window.setInterval(() => setElapsed((e) => e + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [loading]);
+
+  const cancelScan = () => {
+    controllerRef.current?.abort();
+    setCancelled(true);
+    setLoading(false);
+  };
 
   const crumbs = useMemo(() => {
     const parts = path.split('/').filter(Boolean);
@@ -123,9 +143,18 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
         </div>
       )}
 
-      {!error && loading && !data && !filesData && <div className="du-hint">Загрузка…</div>}
+      {!error && loading && <ScanStatusBar mode={mode} elapsed={elapsed} onCancel={cancelScan} />}
 
-      {!error && mode === 'dirs' && data && (
+      {!error && !loading && cancelled && (
+        <div className="du-hint">
+          Опрос отменён.{' '}
+          <button className="btn btn-ghost" onClick={() => setReloadKey((k) => k + 1)}>
+            Повторить
+          </button>
+        </div>
+      )}
+
+      {!error && !cancelled && mode === 'dirs' && data && (
         <>
           {data.incomplete && (
             <div className="du-chip">Часть каталогов недоступна (нет прав) — цифры неполные</div>
@@ -171,7 +200,7 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
         </>
       )}
 
-      {!error && mode === 'files' && filesData && (
+      {!error && !cancelled && mode === 'files' && filesData && (
         <>
           {filesData.incomplete && (
             <div className="du-chip">Часть каталогов недоступна (нет прав) — список неполный</div>
@@ -200,5 +229,39 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
         </>
       )}
     </Modal>
+  );
+}
+
+/** Статус-бар длительного опроса du/find: спиннер + индетерминированная полоса
+ * + счётчик секунд + кнопка «Отмена». Процент невозможен — сервер не стримит
+ * прогресс, полоса лишь показывает, что запрос выполняется. */
+function ScanStatusBar({
+  mode,
+  elapsed,
+  onCancel,
+}: {
+  mode: 'dirs' | 'files';
+  elapsed: number;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="du-scan">
+      <div className="scan-status">
+        <span className="spinner" />
+        <span>{mode === 'dirs' ? 'Сканирование каталогов…' : 'Поиск крупнейших файлов…'}</span>
+      </div>
+      <div className="scan-bar" />
+      <div className="scan-note">
+        <code>{mode === 'dirs' ? 'du -x -d 1' : 'find -printf'}</code> — опрос сервера может занять
+        десятки секунд; прогресс не передаётся, полоса показывает, что запрос выполняется.
+      </div>
+      <div className="scan-foot">
+        <span className="scan-elapsed">{elapsed} с</span>
+        <span className="spacer" />
+        <button className="btn" onClick={onCancel}>
+          Отмена
+        </button>
+      </div>
+    </div>
   );
 }
