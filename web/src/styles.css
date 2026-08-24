@@ -1405,6 +1405,10 @@ body.resizing-agent {
   font-size: 13px;
   text-align: left;
   padding: 0;
+  /* flex-строка: иконка и текст центрируются по вертикали (иначе inline-flex
+     иконка встаёт по baseline и «уезжает» вверх) */
+  display: inline-flex;
+  align-items: center;
 }
 
 .link-cell:hover {
