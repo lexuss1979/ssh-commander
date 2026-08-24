@@ -34,8 +34,60 @@ function fileQuery(profileId: string, path: string): string {
   return `/api/files/list?${params}`;
 }
 
+// SVG-иконки на currentColor — читаемы на обеих темах (вместо эмодзи, которые
+// на светлой теме почти не видны).
+const FOLDER_ICON = (
+  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+    <path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z" />
+  </svg>
+);
+const FILE_ICON = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" />
+    <path d="M14 2v6h6" />
+  </svg>
+);
+const DOWN_ICON = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M12 3v12M6 11l6 6 6-6" />
+    <path d="M5 21h14" />
+  </svg>
+);
+const EDIT_ICON = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M12 20h9" />
+    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" />
+  </svg>
+);
+const EYE_ICON = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+const TAG_ICON = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M20.6 13.4L12 22l-8-8V4h10l8.6 8.6a2 2 0 0 1 0 2.8z" />
+  </svg>
+);
+const LOCK_ICON = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <rect x="3.5" y="11" width="17" height="10" rx="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+const X_ICON = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M18 6L6 18M6 6l12 12" />
+  </svg>
+);
+
 export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesChanged, openPath, onFilesPathConsumed }: Props) {
   const [path, setPath] = useState('/');
+  // Редактируемая адресная строка: draft синхронизирован с path, Enter — переход.
+  const [pathDraft, setPathDraft] = useState('/');
+  const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<number | null>(null);
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [editTarget, setEditTarget] = useState<FileEntry | null>(null);
@@ -92,6 +144,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
     setSelected(new Set());
     setSearchResults(null);
     setPath(openPath);
+    setPathDraft(openPath);
     onFilesPathConsumed?.();
   }, [openPath, onFilesPathConsumed]);
 
@@ -211,7 +264,36 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
     }
   };
   // При смене директории сбрасываем выделение.
-  const navigate = (p: string) => { setSelected(new Set()); setPath(p); };
+  const navigate = (p: string) => { setSelected(new Set()); setPath(p); setPathDraft(p); };
+
+  // Вверх (родительский каталог).
+  const goUp = () => {
+    const parent = path === '/' ? '/' : path.replace(/\/[^/]*$/, '') || '/';
+    navigate(parent);
+  };
+
+  // Копировать текущий путь; короткая подсветка кнопки.
+  const copyPath = async () => {
+    try {
+      await navigator.clipboard.writeText(path);
+    } catch {
+      /* clipboard может быть недоступен */
+    }
+    setCopied(true);
+    if (copiedTimer.current) window.clearTimeout(copiedTimer.current);
+    copiedTimer.current = window.setTimeout(() => setCopied(false), 1500);
+  };
+
+  // Переход по введённому пути (Enter в адресной строке).
+  const commitPathDraft = () => {
+    const v = pathDraft.trim();
+    if (!v.startsWith('/')) {
+      showError('Путь должен начинаться с /');
+      setPathDraft(path);
+      return;
+    }
+    navigate(v);
+  };
 
   // Эпик 14: живой просмотр логов. buildUrl стабилизирован useCallback —
   // LogViewer перезапускает стрим при смене identity пропа.
@@ -380,8 +462,147 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
 
   return (
     <div className="page">
-      <div className="toolbar">
-        <div className="breadcrumbs">
+      <div className="toolbar files-toolbar">
+        <div className="addr-row">
+          <div className="addr-bar">
+            <button className="addr-btn" title="Вверх (родительский каталог)" onClick={goUp}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 19V5M5 12l7-7 7 7" />
+              </svg>
+            </button>
+            <button className="addr-btn" title="Копировать путь" onClick={() => void copyPath()}>
+              {copied ? (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              )}
+            </button>
+            <input
+              className="path-input"
+              value={pathDraft}
+              onChange={(e) => setPathDraft(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && commitPathDraft()}
+              onBlur={() => setPathDraft(path)}
+              spellCheck={false}
+            />
+          </div>
+
+          <div className="tools">
+            <div className="tools-group">
+              <button className="btn btn-small" onClick={() => setPromptState({ title: 'Новая директория', value: '', action: 'mkdir' })}>
+                <span className="ic">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                </span>
+                Папка
+              </button>
+              <button className="btn btn-small" onClick={() => setPromptState({ title: 'Новый файл', value: '', action: 'newfile' })}>
+                <span className="ic">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                </span>
+                Файл
+              </button>
+            </div>
+            <span className="tools-sep" />
+            <div className="tools-group">
+              <button className="btn btn-small" onClick={() => fileInputRef.current?.click()}>
+                <span className="ic">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 16V4M6 10l6-6 6 6" />
+                    <path d="M4 20h16" />
+                  </svg>
+                </span>
+                Загрузить
+              </button>
+              <button
+                className="btn btn-small"
+                disabled={uploadingArchive}
+                onClick={() => archiveInputRef.current?.click()}
+                title="Загрузить архив .tar.gz и распаковать в текущую директорию"
+              >
+                {uploadingArchive ? (
+                  'Распаковка…'
+                ) : (
+                  <>
+                    <span className="ic">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 3v12M6 11l6 6 6-6" />
+                        <path d="M5 21h14" />
+                      </svg>
+                    </span>
+                    Архив
+                  </>
+                )}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                hidden
+                onChange={(e) => void upload(e.target.files)}
+              />
+              <input
+                ref={archiveInputRef}
+                type="file"
+                accept=".tar.gz,.tgz,application/gzip"
+                hidden
+                onChange={(e) => void uploadArchive(e.target.files)}
+              />
+            </div>
+            <span className="tools-sep" />
+            <div className="tools-group">
+              <button className="btn btn-ghost btn-small" onClick={() => void load()}>↻ Обновить</button>
+              <button
+                className="btn btn-ghost btn-small"
+                title="Переустановить SSH-подключение (применить новые группы и права)"
+                onClick={() => void reconnect()}
+              >
+                ⇄ Переподключить
+              </button>
+            </div>
+            {selected.size > 0 && (
+              <>
+                <span className="tools-sep" />
+                <div className="tools-group">
+                  <span className="muted" style={{ fontSize: 12 }}>выбрано: {selected.size}</span>
+                  <button className="btn btn-small" disabled={batchLoading} onClick={() => void batchDownload()}>
+                    {batchLoading ? (
+                      'Упаковка…'
+                    ) : (
+                      <>
+                        <span className="ic">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 4v12M6 12l6 6 6-6" />
+                            <path d="M5 21h14" />
+                          </svg>
+                        </span>
+                        Скачать
+                      </>
+                    )}
+                  </button>
+                  <button className="btn btn-small btn-danger" onClick={() => void batchDelete()}>
+                    <span className="ic">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M18 6L6 18M6 6l12 12" />
+                      </svg>
+                    </span>
+                    Удалить
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="crumb-rail">
           <button className="btn btn-ghost" onClick={() => navigate('/')}>/</button>
           {path !== '/' &&
             path
@@ -397,58 +618,6 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
                   </span>
                 );
               })}
-        </div>
-        <div className="toolbar-actions">
-          <button className="btn" onClick={() => fileInputRef.current?.click()}>Загрузить</button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => void upload(e.target.files)}
-          />
-          <button
-            className="btn"
-            disabled={uploadingArchive}
-            onClick={() => archiveInputRef.current?.click()}
-            title="Загрузить архив .tar.gz и распаковать в текущую директорию"
-          >
-            {uploadingArchive ? 'Распаковка…' : 'Загрузить архив'}
-          </button>
-          <input
-            ref={archiveInputRef}
-            type="file"
-            accept=".tar.gz,.tgz,application/gzip"
-            hidden
-            onChange={(e) => void uploadArchive(e.target.files)}
-          />
-          <button className="btn" onClick={() => setPromptState({ title: 'Новая директория', value: '', action: 'mkdir' })}>
-            + Папка
-          </button>
-          <button className="btn" onClick={() => setPromptState({ title: 'Новый файл', value: '', action: 'newfile' })}>
-            + Файл
-          </button>
-          <button className="btn btn-ghost" onClick={() => void load()}>Обновить</button>
-          <button
-            className="btn btn-ghost"
-            title="Переустановить SSH-подключение (применить новые группы и права)"
-            onClick={() => void reconnect()}
-          >
-            Переподключить
-          </button>
-          {selected.size > 0 && (
-            <>
-              <span className="muted" style={{ fontSize: 12 }}>
-                выбрано: {selected.size}
-              </span>
-              <button className="btn" disabled={batchLoading} onClick={() => void batchDownload()}>
-                {batchLoading ? 'Упаковка…' : '⬇ Скачать'}
-              </button>
-              <button className="btn btn-danger" onClick={() => void batchDelete()}>
-                ✕ Удалить
-              </button>
-            </>
-          )}
         </div>
       </div>
 
@@ -585,7 +754,9 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
                     className="link-cell"
                     onClick={() => entry.isDirectory && navigate(entry.path)}
                   >
-                    <span className="file-icon">{entry.isDirectory ? '📁' : '📄'}</span>
+                    <span className={`file-kind ${entry.isDirectory ? 'dir' : 'file'}`}>
+                      {entry.isDirectory ? FOLDER_ICON : FILE_ICON}
+                    </span>
                     {entry.name}
                     {entry.isSymlink && ' →'}
                   </button>
@@ -601,40 +772,48 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
                         href={downloadDirUrl(profile.id, entry.path)}
                         title="Скачать директорию архивом (.tar.gz)"
                       >
-                        ⬇
+                        {DOWN_ICON}
                       </a>
                     )}
                     {!entry.isDirectory && (
                       <>
-                        <a className="btn btn-mini" href={downloadUrl(profile.id, entry.path)}>⬇</a>
-                        <button className="btn btn-mini" onClick={() => void openEditor(entry)}>✎</button>
+                        <a className="btn btn-mini" href={downloadUrl(profile.id, entry.path)} title="Скачать">
+                          {DOWN_ICON}
+                        </a>
+                        <button className="btn btn-mini" title="Редактировать" onClick={() => void openEditor(entry)}>
+                          {EDIT_ICON}
+                        </button>
                         {/* симлинки можно: серверный stat следует по ссылке */}
                         <button
                           className="btn btn-mini"
                           title="Смотреть хвост (tail -F)"
                           onClick={() => setTailTarget(entry.path)}
                         >
-                          👁
+                          {EYE_ICON}
                         </button>
                       </>
                     )}
                     <button
                       className="btn btn-mini"
+                      title="Переименовать"
                       onClick={() =>
                         setPromptState({ title: 'Переименовать', value: entry.name, action: 'rename', target: entry })
                       }
                     >
-                      ↻
+                      {TAG_ICON}
                     </button>
                     <button
                       className="btn btn-mini"
+                      title="Права доступа (chmod)"
                       onClick={() =>
                         setPromptState({ title: 'Права доступа', value: '755', action: 'chmod', target: entry })
                       }
                     >
-                      🔒
+                      {LOCK_ICON}
                     </button>
-                    <button className="btn btn-mini btn-danger" onClick={() => void remove(entry)}>✕</button>
+                    <button className="btn btn-mini btn-danger" title="Удалить" onClick={() => void remove(entry)}>
+                      {X_ICON}
+                    </button>
                   </div>
                 </td>
               </tr>
