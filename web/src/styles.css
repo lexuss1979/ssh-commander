@@ -4160,7 +4160,8 @@ body.resizing-agent {
   flex: 1;
   min-height: 0;
   display: flex;
-  gap: 12px;
+  gap: 16px;
+  padding: 12px 16px;
 }
 
 /* Левая колонка: инстансы → базы → таблицы */
@@ -4176,7 +4177,7 @@ body.resizing-agent {
 }
 
 .db-sidebar .section-title {
-  margin: 12px 0 4px;
+  margin: 14px 0 6px;
 }
 
 .db-sidebar .section-title:first-child {
@@ -4305,7 +4306,7 @@ body.resizing-agent {
 .db-tables {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
 }
 
 /* Строка таблицы: шеврон (раскрытие) + имя (вставка SELECT) */
@@ -4505,6 +4506,13 @@ body.resizing-agent {
   color: var(--text);
   cursor: pointer;
   user-select: none;
+  white-space: nowrap; /* не переносить «только чтение» и не растягивать чекбокс */
+}
+
+/* глобальный `input { width:100% }` растянул бы чекбокс — возвращаем компактный */
+.db-readonly-toggle input {
+  width: auto;
+  margin: 0;
 }
 
 .db-shortcut {
