@@ -2063,7 +2063,8 @@ body.resizing-agent {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 0 0 10px;
+  /* выравниваем по горизонтали с поиском/таблицей (16px), немного сверху/снизу */
+  padding: 8px 16px 12px;
 }
 
 .log-bookmarks .lbl {
