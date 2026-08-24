@@ -656,29 +656,36 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
         </div>
       </div>
 
-      {/* Ряд чипов закреплённых логов — безусловно: «+» достижим и при
-          пустом logPaths, иначе первый пин ставится только через 👁. */}
-      <div className="log-chips">
+      {/* Ряд закреплённых логов — компактные чипы по имени файла (полный путь в
+          подсказке); «+» достижим и при пустом logPaths. */}
+      <div className="log-bookmarks">
+        <span className="lbl">Закреплённые логи</span>
         {pinnedPaths.map((p) => (
-          <span key={p} className="log-chip">
-            <button className="log-chip-open" title={`Смотреть ${p}`} onClick={() => setTailTarget(p)}>
-              {p}
+          <span key={p} className="log-pin">
+            <span className="ic">{FILE_ICON}</span>
+            <button className="name" title={`Смотреть ${p}`} onClick={() => setTailTarget(p)}>
+              {p.split('/').pop() || p}
             </button>
             <button
-              className="log-chip-remove"
+              className="rm"
               title="Открепить"
               onClick={() => void putLogPaths(pinnedPaths.filter((x) => x !== p))}
             >
-              ✕
+              {X_ICON}
             </button>
           </span>
         ))}
         <button
-          className="log-chip-add"
+          className="log-pin-add"
           title="Добавить путь лога"
           onClick={() => setAddLogOpen(true)}
         >
-          + лог
+          <span className="ic">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </span>
+          Добавить лог
         </button>
       </div>
 

@@ -2057,73 +2057,112 @@ body.resizing-agent {
   color: var(--danger);
 }
 
-.log-chips {
+/* Ряд закреплённых логов: компактные чипы по имени файла */
+.log-bookmarks {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   margin: 0 0 10px;
 }
 
-.log-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg-code);
-  overflow: hidden;
+.log-bookmarks .lbl {
+  font-size: 12px;
+  color: var(--muted);
+  margin-right: 2px;
 }
 
-.log-chip-open {
-  border: none;
-  background: transparent;
+.log-pin {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 6px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+
+.log-pin:hover {
+  border-color: var(--accent);
+}
+
+.log-pin .ic {
+  display: inline-flex;
   color: var(--accent);
-  padding: 4px 4px 4px 10px;
-  font-size: 12px;
-  font-family: monospace;
+}
+
+.log-pin .ic svg {
+  width: 14px;
+  height: 14px;
+}
+
+.log-pin .name {
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-family: Menlo, Consolas, "JetBrains Mono", "Fira Code", monospace;
+  font-size: 12.5px;
   cursor: pointer;
-  max-width: 320px;
+  padding: 0;
+  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.log-chip-open:hover {
-  color: var(--accent-hover);
-  text-decoration: underline;
+.log-pin .name:hover {
+  color: var(--accent);
 }
 
-.log-chip-remove {
-  border: none;
-  background: transparent;
+.log-pin .rm {
+  border: 0;
+  background: none;
   color: var(--muted);
-  padding: 4px 8px 4px 4px;
-  font-size: 12px;
   cursor: pointer;
+  padding: 2px;
+  display: inline-flex;
+  border-radius: 4px;
 }
 
-.log-chip-remove:hover {
+.log-pin .rm svg {
+  width: 13px;
+  height: 13px;
+}
+
+.log-pin .rm:hover {
   color: var(--danger);
+  background: var(--danger-soft-bg);
 }
 
-.log-chip-add {
+.log-pin-add {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  height: 26px;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
   border: 1px dashed var(--border);
-  border-radius: 999px;
+  border-radius: 8px;
   background: transparent;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 12.5px;
   cursor: pointer;
 }
 
-.log-chip-add:hover {
+.log-pin-add:hover {
   color: var(--accent);
   border-color: var(--accent);
+}
+
+.log-pin-add .ic {
+  display: inline-flex;
+}
+
+.log-pin-add .ic svg {
+  width: 13px;
+  height: 13px;
 }
 
 /* Agent */
