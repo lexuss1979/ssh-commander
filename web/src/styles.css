@@ -1411,8 +1411,27 @@ body.resizing-agent {
   color: var(--accent-hover);
 }
 
-.file-icon {
+/* SVG-иконки папок/файлов (вместо эмодзи — читаемы на обеих темах) */
+.file-kind {
+  display: inline-flex;
+  align-items: center;
+  width: 16px;
+  height: 16px;
   margin-right: 6px;
+  flex-shrink: 0;
+}
+
+.file-kind svg {
+  width: 16px;
+  height: 16px;
+}
+
+.file-kind.dir {
+  color: var(--accent);
+}
+
+.file-kind.file {
+  color: var(--muted);
 }
 
 .row-actions {
@@ -1423,6 +1442,135 @@ body.resizing-agent {
 
 .row-actions a {
   text-decoration: none;
+}
+
+/* Иконки-действия строки файла: компактные кнопки с SVG */
+.row-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  padding: 2px 4px;
+}
+
+.row-actions .btn svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+}
+
+/* === Файлы: адресная строка + сгруппированный тулбар (эпик 6) === */
+.files-toolbar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 10px 16px 8px;
+}
+
+.files-toolbar .addr-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.addr-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.addr-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--muted);
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.addr-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.addr-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.path-input {
+  flex: 1;
+  min-width: 140px;
+  height: 30px;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.path-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg);
+}
+
+/* Группы кнопок тулбара */
+.tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tools-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tools-sep {
+  width: 1px;
+  height: 22px;
+  background: var(--border-soft);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+.tools-group .btn {
+  padding: 5px 9px;
+}
+
+/* SVG внутри кнопок тулбара (иконка + подпись) */
+.btn .ic {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: -2px;
+  margin-right: 5px;
+}
+
+.btn .ic svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* Хлебные крошки под адресной строкой */
+.files-toolbar .crumb-rail {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  overflow-x: auto;
 }
 
 /* Breadcrumbs */
@@ -1817,6 +1965,79 @@ body.resizing-agent {
 
 .log-viewer .logs-toolbar {
   flex-wrap: wrap;
+}
+
+/* Просмотрщик: панель-«редактор» с заголовком (имя · строк · статус) */
+.viewer-pane {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-code);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.viewer-pane .logs-view {
+  border: 0;
+  border-radius: 0;
+  max-height: 56vh;
+  min-height: 200px;
+}
+
+.viewer-pane-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.viewer-pane-head code {
+  color: var(--text);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.viewer-pane-head .spacer {
+  flex: 1;
+}
+
+.viewer-pane-head > span:not(.spacer) {
+  white-space: nowrap;
+}
+
+.viewer-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.viewer-status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.viewer-status.live {
+  color: var(--ok);
+}
+
+.viewer-status.stopped {
+  color: var(--muted);
+}
+
+.viewer-status.error {
+  color: var(--danger);
 }
 
 .log-filter {

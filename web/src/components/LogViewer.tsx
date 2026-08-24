@@ -267,6 +267,9 @@ export function LogViewer(props: Props) {
         ? error
         : 'подключено…';
 
+  const statusClass = status === 'error' ? 'error' : status === 'stopped' ? 'stopped' : 'live';
+  const fileName = (logPath ?? title).split('/').pop() ?? title;
+
   return (
     <div className="log-viewer">
       <div className="logs-toolbar">
@@ -287,7 +290,6 @@ export function LogViewer(props: Props) {
           onChange={(e) => setFilter(e.target.value)}
         />
         {toolbarExtra}
-        <span className={`muted log-status${status === 'error' ? ' log-status-error' : ''}`}>{statusText}</span>
         <button className="btn btn-mini" onClick={() => void copy()}>Скопировать</button>
         {onAskAgent && (
           <button className="btn btn-mini" onClick={ask}>В чат</button>
@@ -296,9 +298,17 @@ export function LogViewer(props: Props) {
           <button className="btn btn-mini" onClick={() => setRetry((r) => r + 1)}>Переподключиться</button>
         )}
       </div>
-      <pre className="logs-view" ref={preRef} onScroll={onScroll}>
-        {visibleLines.join('\n')}
-      </pre>
+      <div className="viewer-pane">
+        <div className="viewer-pane-head">
+          <code>{fileName}</code>
+          <span className="spacer" />
+          <span>{visibleLines.length} строк</span>
+          <span className={`viewer-status ${statusClass}`}>{statusText}</span>
+        </div>
+        <pre className="logs-view" ref={preRef} onScroll={onScroll}>
+          {visibleLines.join('\n')}
+        </pre>
+      </div>
     </div>
   );
 }
