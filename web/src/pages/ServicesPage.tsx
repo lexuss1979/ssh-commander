@@ -64,14 +64,39 @@ function statusText(u: UnitInfo): string {
   return `${active} (${u.sub})`;
 }
 
+/** Класс чипа статуса с точкой: running/ok, failed/red, exited|activating/amber, остальное нейтральный. */
 function statusBadgeClass(u: UnitInfo): string {
   if (u.sub === 'running') return 'running';
   if (u.active === 'failed' || u.sub === 'failed') return 'failed';
+  if (u.sub === 'exited') return 'exited';
+  if (u.active === 'activating' || u.sub === 'activating') return 'activating';
   return '';
 }
 
 function isFailed(u: UnitInfo): boolean {
   return u.active === 'failed' || u.sub === 'failed';
+}
+
+/** Класс бейджа автозапуска в карточке (enabled/masked/generated цветные, остальные нейтральные). */
+function unitAutoClass(enabled: UnitInfo['enabled']): string {
+  if (enabled === 'enabled') return 'enabled';
+  if (enabled === 'masked') return 'masked';
+  if (enabled === 'generated') return 'generated';
+  return '';
+}
+
+/** Автозапуск переключаем (enable/disable имеют смысл) только для enabled/disabled. */
+function autoToggleable(enabled: UnitInfo['enabled']): boolean {
+  return enabled === 'enabled' || enabled === 'disabled';
+}
+
+/** Подсказка под switch, когда enable/disable неприменимы. */
+function autoHint(enabled: UnitInfo['enabled']): string {
+  if (enabled === 'masked') return 'замаскирован — нужен unmask';
+  if (enabled === 'static' || enabled === 'indirect' || enabled === 'alias' || enabled === 'generated') {
+    return `автозапуск: ${enabled} — управляется системой`;
+  }
+  return '';
 }
 
 const DETAIL_FIELDS: Array<{ key: string; label: string }> = [
@@ -86,6 +111,13 @@ const DETAIL_FIELDS: Array<{ key: string; label: string }> = [
   { key: 'ActiveEnterTimestamp', label: 'Запущен' },
 ];
 
+/** Цель подтверждения: действие + unit + необязательный откат (для switch автозапуска). */
+interface ConfirmTarget {
+  action: ServiceAction;
+  unit: UnitInfo;
+  onCancel?: () => void;
+}
+
 export function ServicesPage({ profile, visible, showError }: Props) {
   const [snapshot, setSnapshot] = useState<ServicesSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -97,7 +129,7 @@ export function ServicesPage({ profile, visible, showError }: Props) {
   const [detail, setDetail] = useState<ServiceDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailKey, setDetailKey] = useState(0);
-  const [confirm, setConfirm] = useState<{ action: ServiceAction; unit: UnitInfo } | null>(null);
+  const [confirm, setConfirm] = useState<ConfirmTarget | null>(null);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [logsUnit, setLogsUnit] = useState<UnitInfo | null>(null);
@@ -107,6 +139,8 @@ export function ServicesPage({ profile, visible, showError }: Props) {
   // sudo-пароль держим в стейте страницы на время жизни вкладки (без persist):
   // после первого ввода повторные действия не спрашивают его заново.
   const [sudoPassword, setSudoPassword] = useState('');
+  // Оптимистичное положение switch автозапуска во время подтверждения (откат при отмене).
+  const [autoFlip, setAutoFlip] = useState<{ name: string; value: boolean } | null>(null);
 
   const showNotice = useCallback((msg: string) => {
     setNotice(msg);
@@ -210,9 +244,21 @@ export function ServicesPage({ profile, visible, showError }: Props) {
   // Дефолт — failed вверх (приоритет failed → activating → остальные).
   const { sort, toggle, sorted } = useSortBy(filtered, accessors, { key: 'status', dir: 'asc' });
 
-  const handleActionRequest = (unit: UnitInfo, action: ServiceAction) => {
-    setConfirm({ action, unit });
+  const handleActionRequest = (unit: UnitInfo, action: ServiceAction, onCancel?: () => void) => {
+    setConfirm({ action, unit, onCancel });
     setConfirmError(null);
+  };
+
+  const closeConfirm = () => {
+    confirm?.onCancel?.();
+    setConfirm(null);
+  };
+
+  // Переключение switch автозапуска: оптимистичный флип + подтверждение + откат при отмене.
+  const handleAutoToggle = (unit: UnitInfo, newValue: boolean) => {
+    const action: ServiceAction = newValue ? 'enable' : 'disable';
+    setAutoFlip({ name: unit.name, value: newValue });
+    handleActionRequest(unit, action, () => setAutoFlip(null));
   };
 
   const handleConfirmAction = async () => {
@@ -222,6 +268,7 @@ export function ServicesPage({ profile, visible, showError }: Props) {
     try {
       const result = await serviceAction(profile.id, confirm.unit.name, confirm.action, sudoPassword || undefined);
       setConfirm(null);
+      setAutoFlip(null);
       showNotice(
         `${ACTION_LABELS[confirm.action]}: ${confirm.unit.name}${result.output ? ` — ${result.output}` : ''}`,
       );
@@ -236,6 +283,13 @@ export function ServicesPage({ profile, visible, showError }: Props) {
       setActionBusy(false);
     }
   };
+
+  // Состояние switch автозапуска для выбранного unit'а.
+  const selEnabled = selectedUnit?.enabled ?? null;
+  const flipping = autoFlip?.name === selectedUnit?.name;
+  const autoOn = flipping ? (autoFlip?.value ?? false) : selEnabled === 'enabled';
+  const autoDisabled = !(autoToggleable(selEnabled) || flipping);
+  const autoHintText = autoHint(selEnabled);
 
   return (
     <div className="page services-page">
@@ -288,88 +342,99 @@ export function ServicesPage({ profile, visible, showError }: Props) {
           </p>
         </div>
       ) : (
-        <>
-          {selectedUnit && (
-            <DetailPanel
-              unit={selectedUnit}
-              detail={detail}
-              loading={detailLoading}
-              onAction={handleActionRequest}
-              onLogs={() => setLogsUnit(selectedUnit)}
-              onClose={() => setSelected(null)}
-            />
-          )}
-          <div className="ports-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <SortableTh sortKey="name" currentSort={sort} onToggle={toggle}>
-                    Имя
-                  </SortableTh>
-                  <SortableTh sortKey="description" currentSort={sort} onToggle={toggle}>
-                    Описание
-                  </SortableTh>
-                  <SortableTh sortKey="status" currentSort={sort} onToggle={toggle}>
-                    Статус
-                  </SortableTh>
-                  <SortableTh sortKey="enabled" currentSort={sort} onToggle={toggle}>
-                    Автозапуск
-                  </SortableTh>
-                  <th className="col-actions">Действия</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map((u) => (
-                  <tr
-                    key={u.name}
-                    className={selectedUnit?.name === u.name ? 'selected' : ''}
-                    onClick={() => setSelected(u)}
-                  >
-                    <td>
-                      <code>{u.name}</code>
-                    </td>
-                    <td>
-                      <span className="muted">{u.description ?? '—'}</span>
-                    </td>
-                    <td>
-                      <span className={`status-badge ${statusBadgeClass(u)}`}>{statusText(u)}</span>
-                    </td>
-                    <td>{u.enabled ?? '—'}</td>
-                    <td className="col-actions">
+        <div className="ports-scroll">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <SortableTh sortKey="name" currentSort={sort} onToggle={toggle}>
+                  Служба
+                </SortableTh>
+                <SortableTh sortKey="status" currentSort={sort} onToggle={toggle}>
+                  Статус
+                </SortableTh>
+                <th className="col-actions">Действия</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((u) => (
+                <tr
+                  key={u.name}
+                  className={selectedUnit?.name === u.name ? 'selected' : ''}
+                  onClick={() => setSelected(u)}
+                >
+                  <td>
+                    <div className="cell-main">
+                      <div className="cell-top">
+                        <span className={`unit-auto ${unitAutoClass(u.enabled)}`}>{u.enabled ?? '—'}</span>
+                      </div>
+                      <span className="name" title={u.name}>
+                        {u.name}
+                      </span>
+                      <span className="image" title={u.description ?? ''}>
+                        {u.description || '—'}
+                      </span>
+                    </div>
+                  </td>
+                  <td>
+                    <span className={`status-badge ${statusBadgeClass(u)}`}>
+                      <i className="sb-dot" />
+                      {statusText(u)}
+                    </span>
+                  </td>
+                  <td className="col-actions">
+                    <div className="row-actions">
                       <button
-                        className="btn btn-ghost btn-small"
+                        className="btn btn-mini icon-btn btn-primary"
+                        title="Перезапустить"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleActionRequest(u, 'restart');
                         }}
                       >
-                        Перезапустить
+                        ↻
                       </button>
+                      <span className="action-sep" />
                       <button
-                        className="btn btn-ghost btn-small"
+                        className="btn btn-mini icon-btn btn-ghost"
+                        title="Журнал"
                         onClick={(e) => {
                           e.stopPropagation();
                           setLogsUnit(u);
                         }}
                       >
-                        Журнал
+                        ≡
                       </button>
-                    </td>
-                  </tr>
-                ))}
-                {snapshot && sorted.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="muted">
-                      {filter.trim() !== '' || onlyRunning || onlyFailed
-                        ? 'Ничего не найдено по фильтру'
-                        : 'Служб нет'}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {snapshot && sorted.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="muted">
+                    {filter.trim() !== '' || onlyRunning || onlyFailed
+                      ? 'Ничего не найдено по фильтру'
+                      : 'Служб нет'}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {selectedUnit && (
+        <ServiceDetailModal
+          unit={selectedUnit}
+          detail={detail}
+          loading={detailLoading}
+          autoOn={autoOn}
+          autoDisabled={autoDisabled}
+          autoHint={autoHintText}
+          onToggleAuto={(v) => handleAutoToggle(selectedUnit, v)}
+          onAction={handleActionRequest}
+          onLogs={() => setLogsUnit(selectedUnit)}
+          onClose={() => setSelected(null)}
+        />
       )}
 
       {confirm && (
@@ -380,7 +445,7 @@ export function ServicesPage({ profile, visible, showError }: Props) {
           error={confirmError}
           sudoPassword={sudoPassword}
           onSudoPasswordChange={setSudoPassword}
-          onClose={() => setConfirm(null)}
+          onClose={closeConfirm}
           onConfirm={handleConfirmAction}
         />
       )}
@@ -401,13 +466,17 @@ export function ServicesPage({ profile, visible, showError }: Props) {
 }
 
 // ---------------------------------------------------------------------------
-// Панель детали unit'а
+// Деталь unit'а — модальное окно
 // ---------------------------------------------------------------------------
 
-function DetailPanel({
+function ServiceDetailModal({
   unit,
   detail,
   loading,
+  autoOn,
+  autoDisabled,
+  autoHint,
+  onToggleAuto,
   onAction,
   onLogs,
   onClose,
@@ -415,42 +484,60 @@ function DetailPanel({
   unit: UnitInfo;
   detail: ServiceDetail | null;
   loading: boolean;
-  onAction: (unit: UnitInfo, action: ServiceAction) => void;
+  autoOn: boolean;
+  autoDisabled: boolean;
+  autoHint: string;
+  onToggleAuto: (newValue: boolean) => void;
+  onAction: (unit: UnitInfo, action: ServiceAction, onCancel?: () => void) => void;
   onLogs: () => void;
   onClose: () => void;
 }) {
-  const actions: ServiceAction[] = ['start', 'stop', 'restart', 'reload', 'enable', 'disable'];
   return (
-    <div className="services-detail">
-      <div className="services-detail-head">
-        <span className={`status-badge ${statusBadgeClass(unit)}`}>{statusText(unit)}</span>
-        <span className="services-detail-name">
-          <code>{unit.name}</code>
+    <Modal title={unit.name} onClose={onClose} wide>
+      <div className="svc-head">
+        <span className={`status-badge ${statusBadgeClass(unit)}`}>
+          <i className="sb-dot" />
+          {statusText(unit)}
         </span>
-        <span className="muted">
-          {unit.enabled ? `автозапуск: ${unit.enabled}` : 'автозапуск: —'}
-        </span>
-        <button className="btn btn-ghost btn-small services-detail-close" onClick={onClose}>
-          ✕
-        </button>
+        <label className="svc-switch">
+          <span className="muted">автозапуск</span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              checked={autoOn}
+              disabled={autoDisabled}
+              onChange={(e) => onToggleAuto(e.target.checked)}
+            />
+            <span className="slider" />
+          </span>
+          {autoHint && (
+            <span className="muted" style={{ fontSize: 11 }}>
+              {autoHint}
+            </span>
+          )}
+        </label>
       </div>
 
       <div className="services-actions">
-        {actions.map((a) => (
-          <button key={a} className="btn btn-ghost btn-small" onClick={() => onAction(unit, a)}>
-            {ACTION_LABELS[a]}
-          </button>
-        ))}
+        <button className="btn btn-mini btn-primary" onClick={() => onAction(unit, 'start')}>
+          Запустить
+        </button>
+        <button className="btn btn-mini btn-danger" onClick={() => onAction(unit, 'stop')}>
+          Остановить
+        </button>
+        <button className="btn btn-mini btn-ghost" onClick={() => onAction(unit, 'restart')}>
+          Перезапустить
+        </button>
+        <button className="btn btn-mini btn-ghost" onClick={() => onAction(unit, 'reload')}>
+          Перезагрузить
+        </button>
         {isFailed(unit) && (
-          <button
-            className="btn btn-ghost btn-small"
-            onClick={() => onAction(unit, 'reset-failed')}
-            title="Снять флаг failed, чтобы unit не оставался в списке сбойных после успешного старта"
-          >
+          <button className="btn btn-mini btn-danger" onClick={() => onAction(unit, 'reset-failed')}>
             {ACTION_LABELS['reset-failed']}
           </button>
         )}
-        <button className="btn btn-ghost btn-small" onClick={onLogs}>
+        <span className="action-sep" />
+        <button className="btn btn-mini btn-ghost" onClick={onLogs}>
           Журнал
         </button>
       </div>
@@ -469,7 +556,7 @@ function DetailPanel({
           <pre className="logs-view services-status">{detail.status || '(статус пуст)'}</pre>
         </>
       )}
-    </div>
+    </Modal>
   );
 }
 
