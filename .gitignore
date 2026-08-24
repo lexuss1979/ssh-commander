@@ -16,3 +16,5 @@ keys/*
 .eslintcache
 data/ai-usage.json
 data/ai-usage.json.*
+# HTML-превью UI-прототипов (локальные моки, не часть приложения)
+previews/
