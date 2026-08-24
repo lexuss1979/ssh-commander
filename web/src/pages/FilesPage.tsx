@@ -65,9 +65,12 @@ const EYE_ICON = (
     <circle cx="12" cy="12" r="3" />
   </svg>
 );
-const TAG_ICON = (
+// Переименование — «карандаш на поле имени» (отличимо от карандаша
+// редактирования содержимого) и наглядно читается в 13px.
+const RENAME_ICON = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <path d="M20.6 13.4L12 22l-8-8V4h10l8.6 8.6a2 2 0 0 1 0 2.8z" />
+    <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+    <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
   </svg>
 );
 const LOCK_ICON = (
@@ -800,7 +803,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
                         setPromptState({ title: 'Переименовать', value: entry.name, action: 'rename', target: entry })
                       }
                     >
-                      {TAG_ICON}
+                      {RENAME_ICON}
                     </button>
                     <button
                       className="btn btn-mini"
