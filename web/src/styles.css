@@ -2303,6 +2303,162 @@ body.resizing-agent {
   min-height: 0;
 }
 
+/* === Панель агента: шапка (бренд + иконки) и статус-бар === */
+.agent-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  position: relative; /* якорь для дропдауна истории */
+}
+
+.agent-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  min-width: 0;
+}
+
+.agent-brand .mark {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+.agent-brand .mark svg {
+  width: 17px;
+  height: 17px;
+}
+
+.agent-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.headbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.headbtn:hover {
+  background: var(--bg-input);
+  color: var(--text);
+}
+
+.headbtn.open {
+  background: var(--bg-input);
+  color: var(--text);
+}
+
+.headbtn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Статус-бар: статус + контекст сервера + стоимость + «План» + «Стоп» */
+.agent-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.agent-status .sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border-soft);
+  flex-shrink: 0;
+}
+
+.status-label {
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.agent-ctx {
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.agent-status-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* Мини-переключатель «План» */
+.mini-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.mini-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.mini-switch .sw {
+  position: relative;
+  display: inline-block;
+  width: 30px;
+  height: 17px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 17px;
+  transition: 0.2s;
+  flex-shrink: 0;
+}
+
+.mini-switch .sw::before {
+  content: "";
+  position: absolute;
+  height: 11px;
+  width: 11px;
+  left: 2px;
+  bottom: 2px;
+  background: var(--muted);
+  border-radius: 50%;
+  transition: 0.2s;
+}
+
+.mini-switch input:checked + .sw {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.mini-switch input:checked + .sw::before {
+  transform: translateX(13px);
+  background: var(--on-accent);
+}
+
 .agent-messages {
   flex: 1;
   overflow-y: auto;

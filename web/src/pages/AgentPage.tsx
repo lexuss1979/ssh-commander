@@ -651,157 +651,180 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   return (
     <div className="page agent-page">
       <div className="agent-chat">
-        <div className="toolbar">
-          <div className="agent-history" ref={historyRef}>
+        <div className="agent-head">
+          <span className="agent-brand">
+            <span className="mark">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M12 3l1.9 5.8 5.8 1.9-5.8 1.9L12 18.4l-1.9-5.8-5.8-1.9 5.8-1.9z" />
+              </svg>
+            </span>
+            AI-агент
+          </span>
+          <div className="agent-head-actions">
+            <div className="agent-history" ref={historyRef}>
+              <button
+                className={`headbtn ${historyOpen ? 'open' : ''}`}
+                title="История диалогов"
+                onClick={() => {
+                  const next = !historyOpen;
+                  setHistoryOpen(next);
+                  if (next) void refreshDialogues();
+                }}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path d="M3 3v5h5" />
+                  <path d="M12 7v5l4 2" />
+                </svg>
+              </button>
+              {historyOpen && (
+                <div className="agent-history-dropdown">
+                  <div className="agent-history-head">
+                    <span className="sidebar-label">Диалоги</span>
+                    <button
+                      className="btn btn-primary btn-mini"
+                      onClick={() => {
+                        setHistoryOpen(false);
+                        void startNewDialogue();
+                      }}
+                    >
+                      Новый
+                    </button>
+                  </div>
+                  <div className="agent-history-list">
+                    {dialogues.length === 0 && !loading && (
+                      <div className="muted dialogue-empty">Пока нет диалогов</div>
+                    )}
+                    {dialogues.map((d) => (
+                      <div
+                        key={d.id}
+                        className={`dialogue-item ${d.id === activeDialogueId ? 'active' : ''}`}
+                        onClick={() => {
+                          setActiveDialogueId(d.id);
+                          setSqlInsertEnabled(false);
+                          setHistoryOpen(false);
+                        }}
+                      >
+                        <div className="dialogue-item-title" title={d.title}>
+                          {d.title}
+                        </div>
+                        {d.extraProfileIds && d.extraProfileIds.length > 0 && (
+                          <span
+                            className="dialogue-badge"
+                            title={`Мульти-серверный диалог: подключено ещё ${d.extraProfileIds.length} серверов`}
+                          >
+                            +{d.extraProfileIds.length}
+                          </span>
+                        )}
+                        <div className="dialogue-item-meta">
+                          {formatRelativeDate(d.updatedAt)}
+                          {d.usage && d.usage.calls > 0 ? ` · ${formatUsd(d.usage.costUsd)}` : ''}
+                        </div>
+                        <button
+                          className="dialogue-delete"
+                          title="Удалить диалог"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void removeDialogue(d.id);
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
             <button
-              className={`btn btn-ghost agent-history-btn ${historyOpen ? 'open' : ''}`}
-              title="История диалогов"
-              onClick={() => {
-                const next = !historyOpen;
-                setHistoryOpen(next);
-                if (next) void refreshDialogues();
-              }}
+              className="headbtn"
+              title="Начать новый диалог (текущий останется в истории)"
+              onClick={() => void startNewDialogue()}
             >
               <svg
-                width="14"
-                height="14"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                aria-hidden="true"
+                aria-hidden
               >
-                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                <path d="M3 3v5h5" />
-                <path d="M12 7v5l4 2" />
+                <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                <path d="M18.375 2.625a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4Z" />
               </svg>
-              История
             </button>
-            {historyOpen && (
-              <div className="agent-history-dropdown">
-                <div className="agent-history-head">
-                  <span className="sidebar-label">Диалоги</span>
-                  <button
-                    className="btn btn-primary btn-mini"
-                    onClick={() => {
-                      setHistoryOpen(false);
-                      void startNewDialogue();
-                    }}
-                  >
-                    Новый
-                  </button>
-                </div>
-                <div className="agent-history-list">
-                  {dialogues.length === 0 && !loading && (
-                    <div className="muted dialogue-empty">Пока нет диалогов</div>
-                  )}
-                  {dialogues.map((d) => (
-                    <div
-                      key={d.id}
-                      className={`dialogue-item ${d.id === activeDialogueId ? 'active' : ''}`}
-                      onClick={() => {
-                        setActiveDialogueId(d.id);
-                        setSqlInsertEnabled(false);
-                        setHistoryOpen(false);
-                      }}
-                    >
-                      <div className="dialogue-item-title" title={d.title}>
-                        {d.title}
-                      </div>
-                      {d.extraProfileIds && d.extraProfileIds.length > 0 && (
-                        <span
-                          className="dialogue-badge"
-                          title={`Мульти-серверный диалог: подключено ещё ${d.extraProfileIds.length} серверов`}
-                        >
-                          +{d.extraProfileIds.length}
-                        </span>
-                      )}
-                      <div className="dialogue-item-meta">
-                        {formatRelativeDate(d.updatedAt)}
-                        {d.usage && d.usage.calls > 0 ? ` · ${formatUsd(d.usage.costUsd)}` : ''}
-                      </div>
-                      <button
-                        className="dialogue-delete"
-                        title="Удалить диалог"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void removeDialogue(d.id);
-                        }}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-          <button
-            className="btn btn-ghost"
-            title="Начать новый диалог (текущий останется в истории)"
-            onClick={() => void startNewDialogue()}
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
+            <button
+              className="headbtn"
+              title="Детерминированная проверка безопасности сервера (инструмент security_audit)"
+              onClick={() => {
+                setAuditServerId('');
+                setAuditOpen(true);
+              }}
             >
-              <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-              <path d="M18.375 2.625a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4Z" />
-            </svg>
-            Новый диалог
-          </button>
-          <span className="muted">
-            AI-агент · {profile.name} ({profile.username}@{profile.host})
-          </span>
-          <span className={`status-dot ${connected ? 'connected' : 'disconnected'}`} />
-          <span className="status-text">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div className="agent-status">
+          <span
+            className={`status-dot ${connected ? (running ? 'pending' : 'connected') : 'disconnected'}`}
+          />
+          <span className="status-label">
             {running ? 'выполняется…' : connected ? 'готов' : 'нет соединения'}
           </span>
-          {activeUsage && activeUsage.calls > 0 && (
-            <span
-              className="cost-badge"
-              title={usageTooltip(activeUsage)}
-              data-unpriced={activeUsage.unpricedCalls > 0 ? 'true' : undefined}
+          <span className="sep" />
+          <span className="agent-ctx" title={`${profile.name} — ${profile.username}@${profile.host}`}>
+            {profile.name} ({profile.username}@{profile.host})
+          </span>
+          <div className="agent-status-right">
+            {activeUsage && activeUsage.calls > 0 && (
+              <span
+                className="cost-badge"
+                title={usageTooltip(activeUsage)}
+                data-unpriced={activeUsage.unpricedCalls > 0 ? 'true' : undefined}
+              >
+                {/* Ни один вызов не протарифицирован — $0.0000 врал бы «бесплатно» */}
+                ≈ {activeUsage.costUsd === 0 && activeUsage.unpricedCalls > 0 ? '—' : formatUsd(activeUsage.costUsd)}
+              </span>
+            )}
+            <label
+              className="mini-switch"
+              title="Сначала составить пошаговый план и показать его на подтверждение — ничего не выполняя"
             >
-              {/* Ни один вызов не протарифицирован — $0.0000 врал бы «бесплатно» */}
-              ≈ {activeUsage.costUsd === 0 && activeUsage.unpricedCalls > 0 ? '—' : formatUsd(activeUsage.costUsd)}
-            </span>
-          )}
-          <label
-            className="plan-toggle"
-            title="Сначала составить пошаговый план и показать его на подтверждение — ничего не выполняя"
-          >
-            <input
-              type="checkbox"
-              checked={planMode}
-              onChange={(e) => setPlanMode(e.target.checked)}
-            />
-            План
-          </label>
-          <button
-            className="btn btn-ghost"
-            title="Детерминированная проверка безопасности сервера (инструмент security_audit)"
-            onClick={() => {
-              setAuditServerId('');
-              setAuditOpen(true);
-            }}
-          >
-            Проверка безопасности
-          </button>
-          {running && (
-            <button className="btn btn-danger" onClick={() => sendWs({ type: 'stop' })}>
-              Стоп
-            </button>
-          )}
+              <input
+                type="checkbox"
+                checked={planMode}
+                onChange={(e) => setPlanMode(e.target.checked)}
+              />
+              <span className="sw" />
+              План
+            </label>
+            {running && (
+              <button className="btn btn-danger" onClick={() => sendWs({ type: 'stop' })}>
+                Стоп
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="agent-servers">
