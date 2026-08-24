@@ -506,7 +506,7 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
                         <button className="btn btn-mini icon-btn btn-danger" onClick={() => void containerAction(id, 'stop', name)} title="Остановить">■</button>
                         <span className="action-sep" />
                         <button className="btn btn-mini icon-btn btn-ghost" onClick={() => onExecContainer(id, name)} title="Терминал в контейнере">❯</button>
-                        <button className="btn btn-mini icon-btn btn-ghost" onClick={() => setLogsTarget({ id, name })} title="Логи">📄</button>
+                        <button className="btn btn-mini icon-btn btn-ghost" onClick={() => setLogsTarget({ id, name })} title="Логи">≡</button>
                         <button className="btn btn-mini icon-btn btn-ghost" onClick={() => void containerAction(id, 'rm', name)} title="Удалить">✕</button>
                       </div>
                     </td>
