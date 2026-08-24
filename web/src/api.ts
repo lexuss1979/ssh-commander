@@ -947,6 +947,41 @@ export interface DbColumnInfo {
   name: string;
 }
 
+/** Детальные поля таблицы (раскрытие в сайдбаре). */
+export interface DbColumnDetail {
+  name: string;
+  type: string;
+  nullable: boolean;
+  default: string | null;
+  key: 'pk' | 'fk' | 'uq' | null;
+}
+
+export interface DbIndexDetail {
+  name: string;
+  columns: string[];
+  unique: boolean;
+  primary: boolean;
+}
+
+export interface DbTableDetail {
+  schema: string;
+  table: string;
+  columns: DbColumnDetail[];
+  indexes: DbIndexDetail[];
+}
+
+/** Детали таблицы: поля (типы, ключи) + индексы (имя, колонки, тип). */
+export function fetchDbTableDetail(
+  profileId: string,
+  connectionId: string,
+  database: string,
+  schema: string,
+  table: string,
+): Promise<DbTableDetail> {
+  const params = new URLSearchParams({ profileId, connectionId, database, schema, table });
+  return api<DbTableDetail>(`/api/db/table-detail?${params}`);
+}
+
 /** Колонки таблиц базы — схема для промпта «Спросить агента».
  * `truncated` — сервер обрезал список по лимиту (4000). */
 export function fetchDbColumns(

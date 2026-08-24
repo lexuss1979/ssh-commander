@@ -5,6 +5,7 @@ import { discoverDbContainers } from '../services/db-discovery.js';
 import {
   createDbConnection,
   dbNameSchema,
+  dbTableComponentSchema,
   dbConnectionInputSchema,
   deleteDbConnection,
   listDbConnections,
@@ -23,6 +24,7 @@ import {
   fetchDbDatabases,
   fetchDbOverview,
   fetchDbTables,
+  fetchDbTableDetail,
   runDbQuery,
   testDbConnection,
   type DbExecTarget,
@@ -243,6 +245,33 @@ dbRouter.get('/columns', async (req, res) => {
     const columns = await fetchDbColumns(profile, target, check.data);
     // Достигли лимита — схема в промпте обрезана, фронт показывает пометку.
     res.json({ columns, truncated: columns.length >= DB_COLUMNS_LIMIT });
+  } catch (err) {
+    res.status(errorStatus(err)).json({ error: (err as Error).message });
+  }
+});
+
+/** Детали таблицы: поля (имя, тип, nullable, default, ключ) + индексы (имя,
+ * колонки, unique, primary). Требует schema + table (для PG — схема таблицы,
+ * для MySQL — совпадает с именем базы). */
+dbRouter.get('/table-detail', async (req, res) => {
+  const db = dbNameSchema.safeParse(String(req.query.database ?? ''));
+  const schema = dbTableComponentSchema.safeParse(String(req.query.schema ?? ''));
+  const table = dbTableComponentSchema.safeParse(String(req.query.table ?? ''));
+  if (!db.success) {
+    res.status(400).json({ error: db.error.issues[0]?.message ?? 'Некорректное имя базы' });
+    return;
+  }
+  if (!schema.success) {
+    res.status(400).json({ error: schema.error.issues[0]?.message ?? 'Некорректная схема' });
+    return;
+  }
+  if (!table.success) {
+    res.status(400).json({ error: table.error.issues[0]?.message ?? 'Некорректное имя таблицы' });
+    return;
+  }
+  try {
+    const { profile, target } = connectionFromQuery(req);
+    res.json(await fetchDbTableDetail(profile, target, db.data, schema.data, table.data));
   } catch (err) {
     res.status(errorStatus(err)).json({ error: (err as Error).message });
   }

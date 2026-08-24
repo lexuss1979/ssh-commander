@@ -677,3 +677,227 @@ export async function fetchDbColumns(
   return parseColumnList(
     await runDbMetaQuery(profile, target, database, sql), target.engine);
 }
+
+// ---------------------------------------------------------------------------
+// Детали таблицы: поля (типы, ключи) и индексы (имя, колонки, тип)
+// ---------------------------------------------------------------------------
+
+export interface DbColumnDetail {
+  name: string;
+  type: string;
+  nullable: boolean;
+  default: string | null;
+  key: 'pk' | 'fk' | 'uq' | null;
+}
+
+export interface DbIndexDetail {
+  name: string;
+  columns: string[];
+  unique: boolean;
+  primary: boolean;
+}
+
+export interface DbTableDetail {
+  schema: string;
+  table: string;
+  columns: DbColumnDetail[];
+  indexes: DbIndexDetail[];
+}
+
+/** SQL-литерал с экранированием одиночных кавычек (идёт в stdin, не в shell). */
+function sqlLiteral(s: string): string {
+  return `'${s.replace(/'/g, "''")}'`;
+}
+
+/** Поля таблицы PG: имя, тип, nullable, default + типы констрейнтов колонки. */
+export function pgTableDetailColumnsSql(schema: string, table: string): string {
+  const s = sqlLiteral(schema);
+  const t = sqlLiteral(table);
+  return (
+    `SELECT c.column_name AS name,\n` +
+    `       c.data_type AS type,\n` +
+    `       c.is_nullable AS nullable,\n` +
+    `       c.column_default AS "default",\n` +
+    `       (SELECT string_agg(DISTINCT tc.constraint_type, ',')\n` +
+    `          FROM information_schema.key_column_usage kcu\n` +
+    `          JOIN information_schema.table_constraints tc\n` +
+    `            ON tc.constraint_name = kcu.constraint_name\n` +
+    `           AND tc.constraint_schema = kcu.constraint_schema\n` +
+    `           AND tc.table_schema = kcu.table_schema\n` +
+    `           AND tc.table_name = kcu.table_name\n` +
+    `         WHERE kcu.table_schema = c.table_schema\n` +
+    `           AND kcu.table_name = c.table_name\n` +
+    `           AND kcu.column_name = c.column_name) AS constraints\n` +
+    `FROM information_schema.columns c\n` +
+    `WHERE c.table_schema = ${s} AND c.table_name = ${t}\n` +
+    `ORDER BY c.ordinal_position`
+  );
+}
+
+/** Индексы таблицы PG (имя, уникальность, первичность, определение — колонки парсим). */
+export function pgTableDetailIndexesSql(schema: string, table: string): string {
+  const s = sqlLiteral(schema);
+  const t = sqlLiteral(table);
+  return (
+    `SELECT i.relname AS index_name,\n` +
+    `       ix.indisprimary AS is_primary,\n` +
+    `       ix.indisunique AS is_unique,\n` +
+    `       pg_get_indexdef(i.oid) AS def\n` +
+    `FROM pg_index ix\n` +
+    `JOIN pg_class i ON i.oid = ix.indexrelid\n` +
+    `JOIN pg_class t ON t.oid = ix.indrelid\n` +
+    `JOIN pg_namespace ns ON ns.oid = t.relnamespace\n` +
+    `WHERE ns.nspname = ${s} AND t.relname = ${t}\n` +
+    `ORDER BY ix.indisprimary DESC, i.relname`
+  );
+}
+
+/** Поля таблицы MySQL (COLUMN_KEY: PRI/UNI/MUL). */
+export function mysqlTableDetailColumnsSql(table: string): string {
+  const t = sqlLiteral(table);
+  return (
+    `SELECT column_name AS name,\n` +
+    `       column_type AS type,\n` +
+    `       is_nullable AS nullable,\n` +
+    `       column_default AS \`default\`,\n` +
+    `       column_key AS \`key\`\n` +
+    `FROM information_schema.columns\n` +
+    `WHERE table_schema = DATABASE() AND table_name = ${t}\n` +
+    `ORDER BY ordinal_position`
+  );
+}
+
+/** Индексы/ключи таблицы MySQL (по колонкам; группируем по имени индекса). */
+export function mysqlTableDetailIndexesSql(table: string): string {
+  const t = sqlLiteral(table);
+  return (
+    `SELECT index_name AS name, column_name AS col, non_unique AS non_unique\n` +
+    `FROM information_schema.statistics\n` +
+    `WHERE table_schema = DATABASE() AND table_name = ${t}\n` +
+    `ORDER BY index_name, seq_in_index`
+  );
+}
+
+function columnKeyFromConstraints(constraints: string): DbColumnDetail['key'] {
+  const c = constraints.toUpperCase();
+  if (c.includes('PRIMARY KEY')) return 'pk';
+  if (c.includes('UNIQUE')) return 'uq';
+  if (c.includes('FOREIGN KEY')) return 'fk';
+  return null;
+}
+
+function mysqlKeyFromColumnKey(k: string): DbColumnDetail['key'] {
+  if (k === 'PRI') return 'pk';
+  if (k === 'UNI') return 'uq';
+  if (k === 'MUL') return 'fk';
+  return null;
+}
+
+/** Колонки индекса из `pg_get_indexdef` — первая сбалансированная скобочная группа. */
+export function parseIndexColumnsFromDef(def: string): string[] {
+  const open = def.indexOf('(');
+  if (open === -1) return [];
+  let depth = 0;
+  for (let i = open; i < def.length; i++) {
+    if (def[i] === '(') depth++;
+    else if (def[i] === ')') {
+      depth--;
+      if (depth === 0) {
+        return def
+          .slice(open + 1, i)
+          .split(',')
+          .map((c) => c.trim())
+          .filter(Boolean);
+      }
+    }
+  }
+  return [];
+}
+
+/** Разбирает вывод запроса полей в `DbColumnDetail[]`. */
+export function parseColumnDetail(parsed: ParsedTable, engine: DbEngine): DbColumnDetail[] {
+  const cols = parsed.columns;
+  const out: DbColumnDetail[] = [];
+  for (const row of parsed.rows) {
+    const name = row[cols.indexOf('name')] ?? '';
+    if (!name) continue;
+    const rawType = row[cols.indexOf('type')] ?? '';
+    const nullable = (row[cols.indexOf('nullable')] ?? '').toUpperCase() === 'YES';
+    const rawDefault = row[cols.indexOf('default')] ?? '';
+    const def = rawDefault === '' || rawDefault === 'NULL' || rawDefault === '\\N' ? null : rawDefault;
+    const key =
+      engine === 'postgres'
+        ? columnKeyFromConstraints(row[cols.indexOf('constraints')] ?? '')
+        : mysqlKeyFromColumnKey(row[cols.indexOf('key')] ?? '');
+    out.push({ name, type: rawType, nullable, default: def, key });
+  }
+  return out;
+}
+
+/** Разбирает вывод запроса индексов в `DbIndexDetail[]`. */
+export function parseIndexDetail(parsed: ParsedTable, engine: DbEngine): DbIndexDetail[] {
+  const cols = parsed.columns;
+  const out: DbIndexDetail[] = [];
+  if (engine === 'postgres') {
+    for (const row of parsed.rows) {
+      const name = row[cols.indexOf('index_name')] ?? '';
+      if (!name) continue;
+      const uni = row[cols.indexOf('is_unique')] ?? '';
+      const pri = row[cols.indexOf('is_primary')] ?? '';
+      out.push({
+        name,
+        columns: parseIndexColumnsFromDef(row[cols.indexOf('def')] ?? ''),
+        unique: uni === 't' || uni === 'true' || uni === '1',
+        primary: pri === 't' || pri === 'true' || pri === '1',
+      });
+    }
+    return out;
+  }
+  // MySQL: группируем строки по имени индекса
+  const byName = new Map<string, DbIndexDetail>();
+  for (const row of parsed.rows) {
+    const name = row[cols.indexOf('name')] ?? '';
+    if (!name) continue;
+    let d = byName.get(name);
+    if (!d) {
+      d = {
+        name,
+        columns: [],
+        unique: row[cols.indexOf('non_unique')] === '0',
+        primary: name === 'PRIMARY',
+      };
+      byName.set(name, d);
+    }
+    const col = row[cols.indexOf('col')] ?? '';
+    if (col) d.columns.push(col);
+  }
+  return [...byName.values()];
+}
+
+/** Детали таблицы: поля + индексы (два служебных запроса). */
+export async function fetchDbTableDetail(
+  profile: Profile,
+  target: DbExecTarget,
+  database: string,
+  schema: string,
+  table: string,
+): Promise<DbTableDetail> {
+  const colsSql =
+    target.engine === 'postgres'
+      ? pgTableDetailColumnsSql(schema, table)
+      : mysqlTableDetailColumnsSql(table);
+  const idxSql =
+    target.engine === 'postgres'
+      ? pgTableDetailIndexesSql(schema, table)
+      : mysqlTableDetailIndexesSql(table);
+  const [colsTable, idxTable] = await Promise.all([
+    runDbMetaQuery(profile, target, database, colsSql),
+    runDbMetaQuery(profile, target, database, idxSql),
+  ]);
+  return {
+    schema,
+    table,
+    columns: parseColumnDetail(colsTable, target.engine),
+    indexes: parseIndexDetail(idxTable, target.engine),
+  };
+}

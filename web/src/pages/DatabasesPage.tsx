@@ -8,6 +8,7 @@ import {
   fetchDbDiscovery,
   fetchDbOverview,
   fetchDbTables,
+  fetchDbTableDetail,
   formatSize,
   runDbQuery,
   testDbConnection,
@@ -21,6 +22,7 @@ import {
   type DbQueryErrorInfo,
   type DbQueryResult,
   type DbSuggestion,
+  type DbTableDetail,
   type DbTableInfo,
   type MysqlFlavor,
 } from '../api';
@@ -476,6 +478,12 @@ export function DatabasesPage({
   /** Сервер обрезал колонки по лимиту (4000) — пометка в промпте. */
   const [columnsTruncated, setColumnsTruncated] = useState(false);
 
+  // Раскрытие таблицы (поля + индексы): ключ `${schema}.${name}` → детали.
+  const [expandedTable, setExpandedTable] = useState<string | null>(null);
+  const [tableDetails, setTableDetails] = useState<Record<string, DbTableDetail>>({});
+  const [tableDetailLoading, setTableDetailLoading] = useState<Record<string, boolean>>({});
+  const tableDetailKey = (t: DbTableInfo) => `${t.schema}.${t.name}`;
+
   // Консоль
   const [sql, setSql] = useState('');
   /** Только чтение: защита от случайности (серверный SET перед запросом),
@@ -699,6 +707,27 @@ export function DatabasesPage({
     setSql(`SELECT *\nFROM ${quote(t.schema)}.${quote(t.name)}\nLIMIT 100;`);
   };
 
+  // Раскрытие таблицы: показать/скрыть поля и индексы (деталь кэшируется).
+  const toggleTableDetail = async (t: DbTableInfo) => {
+    const key = tableDetailKey(t);
+    if (expandedTable === key) {
+      setExpandedTable(null);
+      return;
+    }
+    setExpandedTable(key);
+    if (!tableDetails[key] && connection && database) {
+      setTableDetailLoading((prev) => ({ ...prev, [key]: true }));
+      try {
+        const detail = await fetchDbTableDetail(profile.id, connection.id, database, t.schema, t.name);
+        setTableDetails((prev) => ({ ...prev, [key]: detail }));
+      } catch (err) {
+        showError((err as Error).message);
+      } finally {
+        setTableDetailLoading((prev) => ({ ...prev, [key]: false }));
+      }
+    }
+  };
+
   // «Спросить агента»: промпт собираем здесь (движок, версия, черновик,
   // схема с колонками ≤4 КБ), AgentPage отправляет его как есть (mode
   // 'send'). Выполняет сгенерированный запрос всегда пользователь.
@@ -901,17 +930,77 @@ export function DatabasesPage({
                   <p className="muted db-sidebar-empty">Таблиц нет</p>
                 )}
                 <div className="db-tables">
-                  {tables?.map((t) => (
-                    <button
-                      key={`${t.schema}.${t.name}`}
-                      type="button"
-                      className="db-table-item"
-                      onClick={() => prefillTable(t)}
-                      title="Вставить SELECT * … LIMIT 100 в редактор"
-                    >
-                      {t.schema}.{t.name}
-                    </button>
-                  ))}
+                  {tables?.map((t) => {
+                    const key = tableDetailKey(t);
+                    const open = expandedTable === key;
+                    const detail = tableDetails[key];
+                    const loading = tableDetailLoading[key];
+                    return (
+                      <div key={key} className={`db-table-row${open ? ' open' : ''}`}>
+                        <div className="db-table-line">
+                          <button
+                            type="button"
+                            className="db-table-chev"
+                            onClick={() => void toggleTableDetail(t)}
+                            title="Поля и индексы таблицы"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M9 6l6 6-6 6" />
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            className="db-table-item"
+                            onClick={() => prefillTable(t)}
+                            title="Вставить SELECT * … LIMIT 100 в редактор"
+                          >
+                            {t.name}
+                          </button>
+                        </div>
+                        {open && (
+                          <div className="db-table-detail">
+                            {loading && !detail && <p className="muted db-detail-loading">Загрузка…</p>}
+                            {detail && (
+                              <>
+                                {detail.columns.length > 0 && (
+                                  <>
+                                    <p className="db-detail-label">Поля</p>
+                                    <div className="db-detail-cols">
+                                      {detail.columns.map((c) => (
+                                        <div key={c.name} className="db-detail-col">
+                                          <span className="cname">{c.name}</span>
+                                          <span className="ctype">{c.type}</span>
+                                          {c.key && <span className={`ckey ${c.key}`}>{c.key === 'pk' ? 'PK' : c.key === 'fk' ? 'FK' : 'UQ'}</span>}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </>
+                                )}
+                                {detail.indexes.length > 0 && (
+                                  <>
+                                    <p className="db-detail-label">Индексы</p>
+                                    <div className="db-detail-idx">
+                                      {detail.indexes.map((ix) => (
+                                        <div key={ix.name} className="db-detail-idx-row">
+                                          <span className="iname">{ix.name}</span>
+                                          <span className="icols">({ix.columns.join(', ')})</span>
+                                          {ix.primary && <span className="ckey pk">PK</span>}
+                                          {!ix.primary && ix.unique && <span className="ckey uq">UQ</span>}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </>
+                                )}
+                                {detail.columns.length === 0 && detail.indexes.length === 0 && (
+                                  <p className="muted db-detail-empty">Нет данных</p>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </>
             )}

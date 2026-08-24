@@ -5,11 +5,18 @@ import {
   buildStdinSql,
   ensureTerminator,
   mysqlArgs,
-  parseCsvTable,
+  parseColumnDetail,
   parseColumnList,
+  parseCsvTable,
   parseDatabaseList,
+  parseIndexColumnsFromDef,
+  parseIndexDetail,
   parseTableList,
   parseTsvTable,
+  mysqlTableDetailColumnsSql,
+  mysqlTableDetailIndexesSql,
+  pgTableDetailColumnsSql,
+  pgTableDetailIndexesSql,
   psqlArgs,
   unescapeMysql,
   isSystemDatabase,
@@ -417,5 +424,88 @@ describe('isSystemDatabase / parseDatabaseList / parseTableList', () => {
 
     const my: ParsedTable = parseTsvTable('schema\tname\nshop\torders\nsys\tfoo\n');
     expect(parseTableList(my, 'mysql')).toEqual([{ schema: 'shop', name: 'orders' }]);
+  });
+});
+
+describe('parseColumnDetail / parseIndexDetail / table-detail SQL', () => {
+  it('parses PG column detail (types, nullable, default, key)', () => {
+    const parsed = parseCsvTable(
+      'name,type,nullable,default,constraints\n' +
+        'id,integer,NO,,PRIMARY KEY\n' +
+        'review_id,integer,YES,,FOREIGN KEY\n' +
+        'lang,character varying,YES,,UNIQUE\n' +
+        'description,text,YES,,\n',
+    );
+    expect(parseColumnDetail(parsed, 'postgres')).toEqual([
+      { name: 'id', type: 'integer', nullable: false, default: null, key: 'pk' },
+      { name: 'review_id', type: 'integer', nullable: true, default: null, key: 'fk' },
+      { name: 'lang', type: 'character varying', nullable: true, default: null, key: 'uq' },
+      { name: 'description', type: 'text', nullable: true, default: null, key: null },
+    ]);
+  });
+
+  it('parses MySQL column detail (COLUMN_KEY → key)', () => {
+    const parsed = parseTsvTable(
+      'name\ttype\tnullable\tdefault\tkey\n' +
+        'id\tint\tNO\tNULL\tPRI\n' +
+        'lang\tvarchar(5)\tYES\tNULL\tUNI\n' +
+        'review_id\tint\tYES\tNULL\tMUL\n' +
+        'description\ttext\tYES\tNULL\t\n',
+    );
+    expect(parseColumnDetail(parsed, 'mysql')).toEqual([
+      { name: 'id', type: 'int', nullable: false, default: null, key: 'pk' },
+      { name: 'lang', type: 'varchar(5)', nullable: true, default: null, key: 'uq' },
+      { name: 'review_id', type: 'int', nullable: true, default: null, key: 'fk' },
+      { name: 'description', type: 'text', nullable: true, default: null, key: null },
+    ]);
+  });
+
+  it('parses PG index detail (columns from indexdef)', () => {
+    const parsed = parseCsvTable(
+      'index_name,is_primary,is_unique,def\n' +
+        'PK_users,t,t,"CREATE UNIQUE INDEX PK_users ON public.users USING btree (id)"\n' +
+        'idx_email,f,t,"CREATE UNIQUE INDEX idx_email ON public.users USING btree (email)"\n' +
+        'idx_name,f,f,"CREATE INDEX idx_name ON public.users USING btree (last_name, first_name)"\n',
+    );
+    expect(parseIndexDetail(parsed, 'postgres')).toEqual([
+      { name: 'PK_users', columns: ['id'], unique: true, primary: true },
+      { name: 'idx_email', columns: ['email'], unique: true, primary: false },
+      { name: 'idx_name', columns: ['last_name', 'first_name'], unique: false, primary: false },
+    ]);
+  });
+
+  it('parses MySQL index detail grouped by index name', () => {
+    const parsed = parseTsvTable(
+      'name\tcol\tnon_unique\n' +
+        'PRIMARY\tid\t0\n' +
+        'idx_review\treview_id\t1\n' +
+        'uq_lang\tlang\t0\n' +
+        'uq_lang\ttitle\t0\n',
+    );
+    expect(parseIndexDetail(parsed, 'mysql')).toEqual([
+      { name: 'PRIMARY', columns: ['id'], unique: true, primary: true },
+      { name: 'idx_review', columns: ['review_id'], unique: false, primary: false },
+      { name: 'uq_lang', columns: ['lang', 'title'], unique: true, primary: false },
+    ]);
+  });
+
+  it('index column list from indexdef handles nested parens (function index)', () => {
+    expect(parseIndexColumnsFromDef('CREATE INDEX i ON t USING btree (lower(email))')).toEqual(['lower(email)']);
+    expect(parseIndexColumnsFromDef('CREATE INDEX i ON t USING btree (a, b)')).toEqual(['a', 'b']);
+    expect(parseIndexColumnsFromDef('CREATE INDEX i ON t')).toEqual([]);
+  });
+
+  it('builds table-detail SQL with escaped literals', () => {
+    expect(pgTableDetailColumnsSql('public', 'users')).toContain("table_schema = 'public'");
+    expect(pgTableDetailColumnsSql('public', 'users')).toContain("table_name = 'users'");
+    expect(pgTableDetailColumnsSql("p''x", 't')).toContain("'p''''x'");
+    expect(pgTableDetailIndexesSql('public', 'users')).toContain("nspname = 'public'");
+    expect(pgTableDetailIndexesSql('public', 'users')).toContain("relname = 'users'");
+    expect(mysqlTableDetailColumnsSql('users')).toContain(
+      "table_schema = DATABASE() AND table_name = 'users'",
+    );
+    expect(mysqlTableDetailIndexesSql('orders')).toContain(
+      "table_schema = DATABASE() AND table_name = 'orders'",
+    );
   });
 });

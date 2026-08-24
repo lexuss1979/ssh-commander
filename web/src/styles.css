@@ -4308,8 +4308,54 @@ body.resizing-agent {
   gap: 1px;
 }
 
+/* Строка таблицы: шеврон (раскрытие) + имя (вставка SELECT) */
+.db-table-row {
+  border-radius: 6px;
+}
+
+.db-table-line {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.db-table-line:hover {
+  background: var(--bg-hover);
+  border-radius: 6px;
+}
+
+.db-table-chev {
+  flex-shrink: 0;
+  width: 22px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.db-table-chev svg {
+  width: 12px;
+  height: 12px;
+  transition: transform 0.15s;
+}
+
+.db-table-row.open .db-table-chev svg {
+  transform: rotate(90deg);
+}
+
+.db-table-chev:hover {
+  color: var(--accent);
+}
+
 .db-table-item {
-  padding: 4px 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px 4px 2px;
   background: transparent;
   border: none;
   border-radius: 6px;
@@ -4326,6 +4372,113 @@ body.resizing-agent {
 .db-table-item:hover {
   background: var(--bg-hover);
   color: var(--accent);
+}
+
+/* Раскрытая деталь таблицы: поля + индексы */
+.db-table-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 6px 10px 26px;
+}
+
+.db-detail-loading {
+  margin: 0;
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.db-detail-label {
+  margin: 6px 0 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.db-detail-cols,
+.db-detail-idx {
+  display: flex;
+  flex-direction: column;
+}
+
+.db-detail-col {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.db-detail-col:last-child {
+  border-bottom: none;
+}
+
+.db-detail-col .cname {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-detail-col .ctype {
+  font-family: Menlo, Consolas, "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.db-detail-idx-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.db-detail-idx-row .iname {
+  font-family: Menlo, Consolas, "JetBrains Mono", monospace;
+  font-size: 11px;
+}
+
+.db-detail-idx-row .icols {
+  color: var(--muted);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ckey {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border-soft);
+  color: var(--muted);
+}
+
+.ckey.pk {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+}
+
+.ckey.fk {
+  color: var(--accent);
+  border-color: var(--accent-soft-border);
+}
+
+.ckey.uq {
+  color: var(--ok);
+  border-color: var(--ok-soft-border);
+}
+
+.db-detail-empty {
+  margin: 0;
+  font-size: 12px;
 }
 
 /* Правая колонка: редактор + результат */
