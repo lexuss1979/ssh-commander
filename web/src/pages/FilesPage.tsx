@@ -65,6 +65,14 @@ const EYE_ICON = (
     <circle cx="12" cy="12" r="3" />
   </svg>
 );
+// «Просмотр» — read-only с подсветкой по расширению (лупа-инспекция), отличимо
+// от глаза (живой tail) и карандаша (редактирование).
+const VIEW_ICON = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <circle cx="11" cy="11" r="7" />
+    <line x1="20.5" y1="20.5" x2="16" y2="16" />
+  </svg>
+);
 // Переименование — «карандаш на поле имени» (отличимо от карандаша
 // редактирования содержимого) и наглядно читается в 13px.
 const RENAME_ICON = (
@@ -96,6 +104,12 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
   const [editTarget, setEditTarget] = useState<FileEntry | null>(null);
   const [editContent, setEditContent] = useState('');
   const [editLoading, setEditLoading] = useState(false);
+  // «Просмотр» — read-only файл с подсветкой синтаксиса по расширению.
+  const [viewTarget, setViewTarget] = useState<FileEntry | null>(null);
+  const [viewContent, setViewContent] = useState('');
+  const [viewLoading, setViewLoading] = useState(false);
+  // Стабильный no-op для read-only CodeMirror (onChange обязательный).
+  const noop = useCallback(() => {}, []);
   const [promptState, setPromptState] = useState<{ title: string; value: string; action: 'mkdir' | 'rename' | 'chmod' | 'newfile'; target?: FileEntry } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const archiveInputRef = useRef<HTMLInputElement>(null);
@@ -411,6 +425,24 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
       setEditTarget(null);
     } finally {
       setEditLoading(false);
+    }
+  };
+
+  // «Просмотр» (read-only): тот же /api/files/read, но в редакторе с readOnly
+  // и подсветкой по расширению — без сохранения.
+  const openView = async (entry: FileEntry) => {
+    setViewTarget(entry);
+    setViewLoading(true);
+    setViewContent('');
+    try {
+      const params = new URLSearchParams({ profileId: profile.id, path: entry.path });
+      const data = await api<{ content: string }>(`/api/files/read?${params}`);
+      setViewContent(data.content);
+    } catch (err) {
+      showError((err as Error).message);
+      setViewTarget(null);
+    } finally {
+      setViewLoading(false);
     }
   };
 
@@ -783,6 +815,13 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
                         <a className="btn btn-mini" href={downloadUrl(profile.id, entry.path)} title="Скачать">
                           {DOWN_ICON}
                         </a>
+                        <button
+                          className="btn btn-mini"
+                          title="Просмотр (read-only, с подсветкой)"
+                          onClick={() => void openView(entry)}
+                        >
+                          {VIEW_ICON}
+                        </button>
                         <button className="btn btn-mini" title="Редактировать" onClick={() => void openEditor(entry)}>
                           {EDIT_ICON}
                         </button>
@@ -841,6 +880,23 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
               <div className="modal-actions">
                 <button className="btn btn-primary" onClick={() => void saveEdit()}>Сохранить</button>
                 <button className="btn" onClick={() => setEditTarget(null)}>Отмена</button>
+              </div>
+            </>
+          )}
+        </Modal>
+      )}
+
+      {viewTarget && (
+        <Modal title={`Просмотр: ${viewTarget.name}`} onClose={() => setViewTarget(null)} wide>
+          {viewLoading ? (
+            <p className="muted">Загрузка файла…</p>
+          ) : (
+            <>
+              <Suspense fallback={<p className="muted">Загрузка редактора…</p>}>
+                <CodeEditor value={viewContent} fileName={viewTarget.name} onChange={noop} readOnly />
+              </Suspense>
+              <div className="modal-actions">
+                <button className="btn" onClick={() => setViewTarget(null)}>Закрыть</button>
               </div>
             </>
           )}
