@@ -92,7 +92,6 @@ function TargetCell({ site }: { site: NginxSite }) {
   return (
     <td className="nginx-target">
       <span className="muted">{label}</span> {valueNode}
-      {site.locationsCount >= 2 && <span className="muted nginx-loc-count">+{site.locationsCount} location</span>}
     </td>
   );
 }
@@ -107,48 +106,55 @@ function SitesTable({ sites }: { sites: NginxSite[] }) {
             <th>Слушает</th>
             <th>Куда смотрит</th>
             <th>Сертификат</th>
-            <th>Файл конфига</th>
           </tr>
         </thead>
         <tbody>
-          {sites.map((site, i) => (
-            <tr key={`${site.file}-${i}`}>
-              <td>
-                <div className="nginx-server-name">
-                  {site.serverNames.length > 0 ? (
-                    site.serverNames.map((n) => (
-                      <code key={n} className="nginx-sn">
-                        {n}
-                      </code>
-                    ))
-                  ) : (
-                    <span className="muted">—</span>
-                  )}
-                  {site.isDefault && (
-                    <span className="scope-badge loopback nginx-default-badge">default_server</span>
-                  )}
-                </div>
-              </td>
-              <td className="nginx-listen">
-                {site.listens.map((l, j) => (
-                  <div key={j}>
-                    <code>{formatListen(l)}</code>
-                    {l.ssl && <span className="nginx-ssl-mark" title="listen ... ssl">SSL</span>}
+          {sites.map((site, i) => {
+            const names = site.serverNames.join(', ');
+            return (
+              <tr key={`${site.file}-${i}`}>
+                <td>
+                  <div className="cell-main">
+                    <div className="cell-top">
+                      {site.isDefault && (
+                        <span className="scope-badge loopback nginx-default-badge">default_server</span>
+                      )}
+                      {site.locationsCount >= 1 && (
+                        <span className="muted nginx-loc-count">{site.locationsCount} location</span>
+                      )}
+                    </div>
+                    <span className="name" title={names || undefined}>
+                      {names || '—'}
+                    </span>
+                    <span className="image" title={site.file || undefined}>
+                      {site.file || '—'}
+                    </span>
                   </div>
-                ))}
-              </td>
-              <TargetCell site={site} />
-              <td>
-                <CertBadge cert={site.cert} />
-              </td>
-              <td className="nginx-file" title={site.file}>
-                <code>{site.file}</code>
-              </td>
-            </tr>
-          ))}
+                </td>
+                <td>
+                  <div className="port-list">
+                    {site.listens.length === 0 ? (
+                      <span className="muted">—</span>
+                    ) : (
+                      site.listens.map((l, j) => (
+                        <span key={j} className={`port-chip${l.ssl ? ' ssl' : ''}`}>
+                          {formatListen(l)}
+                          {l.ssl && <span className="chip-ssl">SSL</span>}
+                        </span>
+                      ))
+                    )}
+                  </div>
+                </td>
+                <TargetCell site={site} />
+                <td>
+                  <CertBadge cert={site.cert} />
+                </td>
+              </tr>
+            );
+          })}
           {sites.length === 0 && (
             <tr>
-              <td colSpan={5} className="muted">
+              <td colSpan={4} className="muted">
                 server-блоков нет
               </td>
             </tr>
@@ -308,6 +314,7 @@ export function NginxPage({ profile, visible, showError }: Props) {
                   </h3>
                   <div className="nginx-source-actions">
                     <ConfigTestBadge source={source} />
+                    <span className="action-sep" />
                     <button
                       className="btn btn-ghost btn-small"
                       disabled={busy}

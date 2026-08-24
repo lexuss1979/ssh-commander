@@ -4039,35 +4039,25 @@ body.resizing-agent {
   border-color: var(--danger-soft-border);
 }
 
-.nginx-server-name {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.nginx-server-name .nginx-sn:not(:last-child)::after {
-  content: ',';
-  color: var(--muted);
-}
-
 .nginx-default-badge {
   margin-left: 6px;
 }
 
-.nginx-listen code {
-  white-space: nowrap;
+/* Слушающий сокет — чип (как порты контейнера); ssl подсвечен зелёным. */
+.port-chip.ssl {
+  color: var(--ok);
+  border-color: var(--ok-soft-border);
 }
 
-.nginx-ssl-mark {
-  display: inline-block;
-  margin-left: 4px;
-  padding: 0 5px;
-  border-radius: 4px;
-  font-size: 10px;
-  line-height: 16px;
-  color: var(--ok);
+.chip-ssl {
+  font-style: normal;
+  font-size: 9px;
+  margin-left: 5px;
+  padding: 0 4px;
+  border-radius: 3px;
   border: 1px solid var(--ok-soft-border);
+  color: var(--ok);
+  vertical-align: 1px;
 }
 
 .nginx-target {
@@ -4076,16 +4066,7 @@ body.resizing-agent {
 }
 
 .nginx-loc-count {
-  display: block;
   font-size: 11px;
-  margin-top: 2px;
-}
-
-.nginx-file {
-  max-width: 320px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* ИИ-расходы (docs/ai-costs-plan.md) */
