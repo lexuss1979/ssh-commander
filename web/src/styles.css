@@ -498,7 +498,91 @@ button {
 .sidebar-footer {
   display: flex;
   flex-direction: column;
+  gap: 12px;
   margin-top: auto;
+}
+
+/* Переключатель темы — прямоугольный свитч с иконками луна/солнце */
+.theme-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.theme-switch-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.theme-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 84px;
+  height: 30px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+  cursor: pointer;
+}
+
+.theme-switch .ts-icon {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+  transition: color 0.2s;
+}
+
+.theme-switch .ts-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.theme-switch .ts-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 36px;
+  height: calc(100% - 6px);
+  background: var(--accent);
+  border-radius: 6px;
+  transition: transform 0.2s ease;
+}
+
+.theme-switch.light .ts-knob {
+  transform: translateX(38px);
+}
+
+.theme-switch.dark .ts-moon {
+  color: var(--on-accent);
+}
+
+.theme-switch.light .ts-sun {
+  color: var(--on-accent);
+}
+
+/* Кнопка «Выйти» — полноширинная, с иконкой */
+.logout-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logout-ic {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+}
+
+.logout-ic svg {
+  width: 14px;
+  height: 14px;
 }
 
 /* Список серверов в сайдбаре (вместо выпадающего списка) */
