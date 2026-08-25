@@ -316,9 +316,7 @@ button {
 }
 
 .alerts-panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
+  position: fixed;
   width: 310px;
   max-width: calc(100vw - 32px);
   background: var(--bg-raised);

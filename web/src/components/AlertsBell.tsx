@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Profile } from '../types';
 import {
   DEFAULT_ALERTS_SETTINGS,
@@ -34,6 +34,27 @@ export function AlertsBell({ alerts, settings, profiles, onOpenProfile, onSaveSe
   const [open, setOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const bellRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Позиция панели (fixed), чтобы она не выходила за край экрана: считается по
+  // колокольчику при открытии и клампится по ширине/высоте вьюпорта.
+  const [panelPos, setPanelPos] = useState<{ left: number; top: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPanelPos(null);
+      return;
+    }
+    const bell = bellRef.current;
+    const panel = panelRef.current;
+    if (!bell || !panel) return;
+    const b = bell.getBoundingClientRect();
+    const p = panel.getBoundingClientRect();
+    const margin = 8;
+    const left = Math.max(margin, Math.min(b.left, window.innerWidth - p.width - margin));
+    const top = Math.max(margin, Math.min(b.bottom + margin, window.innerHeight - p.height - margin));
+    setPanelPos({ left, top });
+  }, [open]);
 
   // Панель закрывается по клику вне неё и по Escape (паттерн меню «В чат ▾»).
   useEffect(() => {
@@ -65,6 +86,7 @@ export function AlertsBell({ alerts, settings, profiles, onOpenProfile, onSaveSe
   return (
     <div className="alerts-bell-root" ref={rootRef}>
       <button
+        ref={bellRef}
         type="button"
         className={`alerts-bell${settings.enabled ? '' : ' disabled'}`}
         onClick={() => setOpen((o) => !o)}
@@ -77,7 +99,11 @@ export function AlertsBell({ alerts, settings, profiles, onOpenProfile, onSaveSe
       </button>
 
       {open && (
-        <div className="alerts-panel">
+        <div
+          className="alerts-panel"
+          ref={panelRef}
+          style={panelPos ? { left: panelPos.left, top: panelPos.top } : undefined}
+        >
           <div className="alerts-panel-head">
             <span className="alerts-panel-title">Алерты</span>
             <button
