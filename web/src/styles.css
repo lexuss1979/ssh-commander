@@ -515,12 +515,10 @@ button {
 
 .theme-switch {
   position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: space-between;
+  display: flex;
+  align-items: stretch;
   width: 84px;
   height: 30px;
-  padding: 0 7px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-input);
@@ -530,9 +528,10 @@ button {
 .theme-switch .ts-icon {
   position: relative;
   z-index: 1;
+  flex: 1;
   display: inline-flex;
-  width: 14px;
-  height: 14px;
+  align-items: center;
+  justify-content: center;
   color: var(--muted);
   transition: color 0.2s;
 }
@@ -540,13 +539,14 @@ button {
 .theme-switch .ts-icon svg {
   width: 14px;
   height: 14px;
+  display: block;
 }
 
 .theme-switch .ts-knob {
   position: absolute;
   top: 3px;
   left: 3px;
-  width: 36px;
+  width: calc(50% - 3px);
   height: calc(100% - 6px);
   background: var(--accent);
   border-radius: 6px;
@@ -554,7 +554,7 @@ button {
 }
 
 .theme-switch.light .ts-knob {
-  transform: translateX(38px);
+  transform: translateX(100%);
 }
 
 .theme-switch.dark .ts-moon {
@@ -1939,6 +1939,11 @@ body.resizing-agent {
   display: flex;
   gap: 10px;
   margin-top: 16px;
+}
+
+/* Кнопки-футер вне `.modal-body` (напр. «Настройки алертов») — отступ от краёв. */
+.modal > .modal-actions {
+  padding: 0 18px 18px;
 }
 
 .editor {
