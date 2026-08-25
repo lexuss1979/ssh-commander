@@ -686,7 +686,9 @@ button {
 /* Вкладок стало много (в т.ч. «Службы») — при открытой панели агента таббар
    не должен уводить крайние вкладки за экран: скролл вместо обрезки. */
 .topbar-tabs {
+  align-self: stretch;
   display: flex;
+  align-items: stretch;
   gap: 2px;
   min-width: 0;
   overflow-x: auto;
@@ -703,6 +705,8 @@ button {
   border-bottom: 2px solid transparent;
   color: var(--muted);
   padding: 12px 14px 10px;
+  /* Подчёркивание на 1px «наезжает» на нижнюю линию топбара — стык без зазора. */
+  margin-bottom: -1px;
   font-size: 13px;
   cursor: pointer;
   white-space: nowrap;
