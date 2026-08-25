@@ -1,8 +1,20 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { fetchNginx, nginxSourceKey, reloadNginx, testNginx } from '../api';
+import { Suspense, lazy, useEffect, useRef, useState, type ReactNode } from 'react';
+import { fetchNginx, fetchNginxConfig, nginxSourceKey, reloadNginx, testNginx } from '../api';
 import type { NginxCert, NginxListen, NginxSite, NginxSnapshot, NginxSourceSnapshot } from '../api';
 import type { Profile } from '../types';
 import { Modal } from '../components/Modal';
+
+// Редактор с подсветкой (nginx-конфиг по полному пути) — ленивый чанк.
+const CodeEditor = lazy(() => import('../components/CodeEditor'));
+
+// Открыть конфиг — «квадрат со стрелкой наружу» (в стиле приложения).
+const OPEN_ICON = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+    <path d="M15 3h6v6" />
+    <path d="M10 14L21 3" />
+  </svg>
+);
 
 /**
  * Вкладка «Nginx» (docs/nginx-plan.md): сайты сервера из `nginx -T`.
@@ -96,7 +108,16 @@ function TargetCell({ site }: { site: NginxSite }) {
   );
 }
 
-function SitesTable({ sites }: { sites: NginxSite[] }) {
+function SitesTable({
+  sites,
+  sourceKey,
+  onOpenFile,
+}: {
+  sites: NginxSite[];
+  /** Ключ источника (nginxSourceKey): 'native' | 'container:<id>'. */
+  sourceKey: string;
+  onOpenFile: (path: string, sourceKey: string) => void;
+}) {
   return (
     <div className="ports-scroll">
       <table className="data-table">
@@ -106,6 +127,7 @@ function SitesTable({ sites }: { sites: NginxSite[] }) {
             <th>Слушает</th>
             <th>Куда смотрит</th>
             <th>Сертификат</th>
+            <th className="col-narrow">Действия</th>
           </tr>
         </thead>
         <tbody>
@@ -149,12 +171,25 @@ function SitesTable({ sites }: { sites: NginxSite[] }) {
                 <td>
                   <CertBadge cert={site.cert} />
                 </td>
+                <td className="col-narrow">
+                  {site.file ? (
+                    <button
+                      className="btn btn-mini"
+                      title="Открыть конфиг с подсветкой"
+                      onClick={() => onOpenFile(site.file, sourceKey)}
+                    >
+                      {OPEN_ICON}
+                    </button>
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
+                </td>
               </tr>
             );
           })}
           {sites.length === 0 && (
             <tr>
-              <td colSpan={4} className="muted">
+              <td colSpan={5} className="muted">
                 server-блоков нет
               </td>
             </tr>
@@ -187,6 +222,11 @@ export function NginxPage({ profile, visible, showError }: Props) {
   // Информационное сообщение (успех test/reload) — без красной рамки ошибки.
   const [notice, setNotice] = useState('');
   const noticeTimer = useRef<number | null>(null);
+  // Модалка «Открыть конфиг»: содержимое файла из nginx -T, с подсветкой.
+  const [fileModal, setFileModal] = useState<{ path: string } | null>(null);
+  const [fileContent, setFileContent] = useState('');
+  const [fileLoading, setFileLoading] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
 
   const showNotice = (msg: string) => {
     setNotice(msg);
@@ -258,6 +298,24 @@ export function NginxPage({ profile, visible, showError }: Props) {
       }
     } finally {
       setBusyKey(null);
+    }
+  };
+
+  // «Открыть конфиг»: прочитать содержимое файла (native cat / docker exec cat).
+  const openConfigFile = async (path: string, sourceKey: string) => {
+    setFileModal({ path });
+    setFileLoading(true);
+    setFileError(null);
+    setFileContent('');
+    try {
+      const { content } = await fetchNginxConfig(profile.id, sourceKey, path);
+      setFileContent(content);
+    } catch (err) {
+      const e = err as Error & { status?: number };
+      setFileError(e.status === 502 ? 'Сервер недоступен' : e.message);
+      setFileContent('');
+    } finally {
+      setFileLoading(false);
     }
   };
 
@@ -334,7 +392,7 @@ export function NginxPage({ profile, visible, showError }: Props) {
                 {source.error && (
                   <OutputBlock text={source.error} />
                 )}
-                <SitesTable sites={source.sites} />
+                <SitesTable sites={source.sites} sourceKey={key} onOpenFile={openConfigFile} />
               </div>
             );
           })}
@@ -369,6 +427,25 @@ export function NginxPage({ profile, visible, showError }: Props) {
           <OutputBlock text={outputModal.output} />
           <div className="modal-actions">
             <button className="btn btn-primary" onClick={() => setOutputModal(null)}>
+              Закрыть
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {fileModal && (
+        <Modal title={`Конфиг: ${fileModal.path}`} onClose={() => setFileModal(null)} wide>
+          {fileLoading ? (
+            <p className="muted">Загрузка конфига…</p>
+          ) : fileError ? (
+            <OutputBlock text={fileError} />
+          ) : (
+            <Suspense fallback={<p className="muted">Загрузка редактора…</p>}>
+              <CodeEditor value={fileContent} fileName={fileModal.path} onChange={() => {}} readOnly />
+            </Suspense>
+          )}
+          <div className="modal-actions">
+            <button className="btn btn-primary" onClick={() => setFileModal(null)}>
               Закрыть
             </button>
           </div>

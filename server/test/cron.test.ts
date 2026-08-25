@@ -3,6 +3,7 @@ import {
   applyCrontabOp,
   CronConflictError,
   describeSchedule,
+  isValidCronUser,
   parseCrontab,
   validateCronFields,
 } from '../src/services/cron.js';
@@ -125,8 +126,27 @@ describe('describeSchedule', () => {
   });
 });
 
-describe('validateCronFields', () => {
-  it('accepts valid schedules', () => {
+describe('isValidCronUser', () => {
+  it('accepts common Linux login names', () => {
+    expect(isValidCronUser('root')).toBe(true);
+    expect(isValidCronUser('www-data')).toBe(true);
+    expect(isValidCronUser('deploy')).toBe(true);
+    expect(isValidCronUser('web_1')).toBe(true);
+    expect(isValidCronUser('a')).toBe(true);
+  });
+
+  it('rejects names that could break the shell', () => {
+    expect(isValidCronUser('web; rm -rf /')).toBe(false);
+    expect(isValidCronUser('a b')).toBe(false);
+    expect(isValidCronUser('../etc/passwd')).toBe(false);
+    expect(isValidCronUser('user/name')).toBe(false);
+    expect(isValidCronUser('a$(id)')).toBe(false);
+    expect(isValidCronUser('')).toBe(false);
+    expect(isValidCronUser('a'.repeat(40))).toBe(false);
+  });
+});
+
+describe('validateCronFields', () => {  it('accepts valid schedules', () => {
     expect(validateCronFields('0 3 * * *')).toBeNull();
     expect(validateCronFields('*/15 0-23/2 1,15 jan,Feb mon-fri')).toBeNull();
     expect(validateCronFields('@reboot')).toBeNull();

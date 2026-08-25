@@ -1,4 +1,5 @@
 import { exec } from '../ssh/manager.js';
+import { shq } from '../util/shell.js';
 import type { Profile } from '../types.js';
 
 export interface CronEntry {
@@ -28,8 +29,12 @@ export interface ParsedCrontab {
 export interface CronSnapshot {
   /** Момент снимка (мс, серверное время ssh-commander). */
   timestamp: number;
-  /** Имя SSH-пользователя (владелец пользовательского crontab). */
+  /** Владелец показанного в `userCrontab` (текущий SSH-юзер или выбранный другой). */
   username: string;
+  /** SSH-пользователь, чей crontab можно мутировать (владелец сессии). */
+  currentUser: string;
+  /** true, когда `username === currentUser` — crontab редактируемый; иначе read-only. */
+  editable: boolean;
   /** null — crontab пользователя отсутствует. */
   userCrontab: (ParsedCrontab & { raw: string }) | null;
   /** /etc/crontab, null — файла нет или не читается. */
@@ -279,6 +284,55 @@ async function fetchUserCrontab(profile: Profile): Promise<string | null> {
   return r.stdout;
 }
 
+/** Спал-каталоги персональных crontab разных дистрибутивов (Debian/cronie/BusyBox). */
+const CRON_SPOOL_DIRS = ['/var/spool/cron/crontabs', '/var/spool/cron', '/etc/crontabs'];
+
+/** Безопасное имя Linux-пользователя: латиница/цифры/точка/дефис/подчёркивание, без слэшей и пробелов. */
+const SAFE_USER_RE = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,31}$/;
+
+/** Разрешено ли подставлять `user` в кроновские команды (защита от инъекции в `crontab -u`). */
+export function isValidCronUser(user: string): boolean {
+  return SAFE_USER_RE.test(user);
+}
+
+/** Текущий SSH-пользователь и его uid (uid 0 = root). */
+async function whoami(profile: Profile): Promise<{ name: string; uid: string }> {
+  const r = await exec(profile, 'echo "$(id -u) $(id -un)"');
+  const [uid, name] = r.stdout.trim().split(/\s+/);
+  return { uid: uid || '', name: name || profile.username };
+}
+
+/** Пользователи, у которых есть персональный crontab (имя файла в spool-каталоге). */
+async function listCronUsers(profile: Profile): Promise<string[]> {
+  const dirs = CRON_SPOOL_DIRS.map(shq).join(' ');
+  const cmd = `for d in ${dirs}; do [ -d "$d" ] && ls -1 "$d"; done 2>/dev/null | sort -u`;
+  const r = await exec(profile, cmd);
+  if (r.code !== 0) return [];
+  return r.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Список пользователей для селектора. Возвращается пустым, когда чтение чужих
+ * crontab невозможно (SSH-пользователь не root). Иначе — текущий пользователь +
+ * все, у кого есть персональный crontab (файл в spool-каталоге).
+ */
+export async function fetchCronUsers(profile: Profile): Promise<string[]> {
+  const who = await whoami(profile);
+  if (who.uid !== '0') return [];
+  const set = new Set<string>([who.name, ...await listCronUsers(profile)]);
+  return Array.from(set);
+}
+
+/** Чтение персонального crontab конкретного пользователя (root): `crontab -u <user> -l`, фолбэк — spool-файл. */
+async function fetchUserCrontabFor(profile: Profile, user: string): Promise<string | null> {
+  const r = await exec(profile, `crontab -u ${shq(user)} -l 2>/dev/null`);
+  if (r.code === 0) return r.stdout;
+  const cat = `for d in ${CRON_SPOOL_DIRS.map(shq).join(' ')}; do f="$d/${user}"; if [ -f "$f" ]; then cat "$f"; break; fi; done`;
+  const fr = await exec(profile, cat);
+  if (fr.code === 0) return fr.stdout;
+  return null;
+}
+
 /** /etc/crontab и /etc/cron.d/* одной командой; недоступные файлы — пусто. */
 async function fetchSystemCron(profile: Profile): Promise<{ crontab: string | null; cronD: { file: string; text: string }[] }> {
   const cmd =
@@ -302,15 +356,33 @@ async function fetchSystemCron(profile: Profile): Promise<{ crontab: string | nu
   return { crontab, cronD: files.filter((f) => f.file !== '/etc/crontab') };
 }
 
-async function collectCronUncached(profile: Profile): Promise<CronSnapshot> {
-  const [userRaw, system, whoami] = await Promise.all([
-    fetchUserCrontab(profile),
-    fetchSystemCron(profile),
-    exec(profile, 'id -un'),
-  ]);
+async function collectCronUncached(profile: Profile, user?: string): Promise<CronSnapshot> {
+  const [who, system] = await Promise.all([whoami(profile), fetchSystemCron(profile)]);
+  const currentName = who.name || profile.username;
+  const canReadOthers = who.uid === '0';
+
+  let targetUser = user || currentName;
+  let editable = true;
+  let userRaw: string | null;
+
+  if (user && user !== currentName) {
+    if (canReadOthers && (await listCronUsers(profile)).includes(user)) {
+      editable = false;
+      userRaw = await fetchUserCrontabFor(profile, user);
+    } else {
+      // Не root или неизвестный пользователь — безопасно показываем свой crontab.
+      targetUser = currentName;
+      userRaw = await fetchUserCrontab(profile);
+    }
+  } else {
+    userRaw = await fetchUserCrontab(profile);
+  }
+
   return {
     timestamp: Date.now(),
-    username: whoami.stdout.trim() || profile.username,
+    username: targetUser,
+    currentUser: currentName,
+    editable,
     userCrontab: userRaw === null ? null : { ...parseCrontab(userRaw, { system: false }), raw: userRaw },
     systemCrontab: system.crontab === null ? null : parseCrontab(system.crontab, { system: true }),
     cronD: system.cronD.map((f) => ({ file: f.file, entries: parseCrontab(f.text, { system: true }).entries })),
@@ -320,18 +392,21 @@ async function collectCronUncached(profile: Profile): Promise<CronSnapshot> {
 /**
  * Снимок cron-задач сервера. Кэш 2 с на профиль (параллельные вызовы делят
  * одни exec'и) — как у портов/метрик, чтобы polling не плодил SSH-команды.
+ * `user` — опционально: снимок персонального crontab конкретного пользователя
+ * (read-only, если это не текущий SSH-пользователь).
  */
-export function collectCron(profile: Profile): Promise<CronSnapshot> {
+export function collectCron(profile: Profile, user?: string): Promise<CronSnapshot> {
   const now = Date.now();
-  const hit = cache.get(profile.id);
+  const key = user ? `${profile.id}::${user}` : profile.id;
+  const hit = cache.get(key);
   if (hit && now - hit.at < CACHE_TTL_MS) {
     return hit.promise;
   }
-  const promise = collectCronUncached(profile);
-  cache.set(profile.id, { at: now, promise });
+  const promise = collectCronUncached(profile, user);
+  cache.set(key, { at: now, promise });
   promise.catch(() => {
-    if (cache.get(profile.id)?.promise === promise) {
-      cache.delete(profile.id);
+    if (cache.get(key)?.promise === promise) {
+      cache.delete(key);
     }
   });
   return promise;
@@ -349,5 +424,7 @@ export async function mutateUserCrontab(profile: Profile, op: CronOp): Promise<v
     const detail = (r.stderr || r.stdout).trim();
     throw new Error(`crontab отклонил файл (код ${r.code})${detail ? `: ${detail}` : ''}`);
   }
-  cache.delete(profile.id);
+  for (const key of cache.keys()) {
+    if (key === profile.id || key.startsWith(`${profile.id}::`)) cache.delete(key);
+  }
 }

@@ -3,10 +3,20 @@ import CodeMirror from '@uiw/react-codemirror';
 import { EditorView, keymap } from '@codemirror/view';
 import { Prec } from '@codemirror/state';
 import { search } from '@codemirror/search';
-import { LanguageDescription } from '@codemirror/language';
+import { LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language';
 import { languages } from '@codemirror/language-data';
+import { nginx as nginxMode } from '@codemirror/legacy-modes/mode/nginx';
 import { oneDark } from '@codemirror/theme-one-dark';
 import type { Extension } from '@codemirror/state';
+
+/** Подсветка nginx-конфигов по полному пути (не только name *.conf):
+ *  открытые из файлового менеджера `/etc/nginx/sites-available/…` или
+ *  `/etc/nginx/conf.d/*.conf` не содержат «nginx» в баснейме. */
+const NGINX_LANG = LanguageDescription.of({
+  name: 'Nginx',
+  filename: /(^|\/)nginx\/|(^|\/)sites-(available|enabled)\//i,
+  load: async () => new LanguageSupport(StreamLanguage.define(nginxMode)),
+});
 
 interface Props {
   value: string;
@@ -38,10 +48,16 @@ export default function CodeEditor({ value, fileName, onChange, readOnly, onRun 
     return () => observer.disconnect();
   }, []);
 
-  // Подсветка по имени/расширению файла (language-data грузит режимы лениво)
+  // Подсветка по имени/расширению файла (language-data грузит режимы лениво).
+  // Сначала пробуем баснейм (Dockerfile/sh/json и т.п. матчатся по расширению
+  // и специальным именам), затем — nginx по полному пути (conf.d/sites-*).
   useEffect(() => {
     let cancelled = false;
-    const desc = LanguageDescription.matchFilename(languages, fileName);
+    const base = fileName.split('/').pop() ?? fileName;
+    let desc = LanguageDescription.matchFilename(languages, base);
+    if (!desc && base !== fileName) {
+      desc = LanguageDescription.matchFilename([NGINX_LANG], fileName);
+    }
     if (!desc) {
       setLangExtension(null);
       return;

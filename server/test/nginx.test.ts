@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
   buildCertBatchCmd,
   buildDumpCmd,
+  buildReadConfigCmd,
   buildReloadCmd,
   buildTestCmd,
   buildVersionCmd,
@@ -435,6 +436,15 @@ describe('билдеры команд', () => {
     expect(cmd).toContain('echo "=== $f"');
     const containerCmd = buildCertBatchCmd(container, ['/etc/ssl/c.pem']);
     expect(containerCmd).toEqual(['exec', 'abc123def', 'sh', '-c', expect.stringContaining('/etc/ssl/c.pem')]);
+  });
+
+  it('buildReadConfigCmd: native cat -- с shq, container — docker exec sh -c', () => {
+    expect(buildReadConfigCmd(native, '/etc/nginx/sites-available/default')).toBe(
+      "cat -- '/etc/nginx/sites-available/default'",
+    );
+    expect(buildReadConfigCmd(native, '/etc/nginx/a b.conf')).toBe("cat -- '/etc/nginx/a b.conf'");
+    const containerCmd = buildReadConfigCmd(container, '/etc/nginx/nginx.conf');
+    expect(containerCmd).toEqual(['exec', 'abc123def', 'sh', '-c', expect.stringContaining('/etc/nginx/nginx.conf')]);
   });
 });
 

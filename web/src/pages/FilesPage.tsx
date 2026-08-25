@@ -27,6 +27,8 @@ interface Props {
   /** Одноразовый переход на путь (из навигатора «Что занимает»); App сбрасывает через onFilesPathConsumed. */
   openPath?: string | null;
   onFilesPathConsumed?: () => void;
+  /** «Открыть в терминале» — открыть terminal-вкладку профиля с cd в директорию пути. */
+  onOpenInTerminal?: (path: string) => void;
 }
 
 function fileQuery(profileId: string, path: string): string {
@@ -92,13 +94,47 @@ const X_ICON = (
     <path d="M18 6L6 18M6 6l12 12" />
   </svg>
 );
+// Скопировать путь — иконка «два листа» (отличима от карандаша редактирования).
+const COPY_ICON = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <rect x="9" y="9" width="13" height="13" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+);
+// Галочка — краткая обратная связь «скопировано».
+const CHECK_ICON = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M20 6L9 17l-5-5" />
+  </svg>
+);
+// Открыть в терминале — приглашение shell.
+const TERMINAL_ICON = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M4 17l6-5-6-5" />
+    <path d="M12 19h8" />
+  </svg>
+);
+// «Дополнительно» — три точки (оверфлоу-меню редко используемых действий).
+const MORE_ICON = (
+  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+    <circle cx="5" cy="12" r="1.6" />
+    <circle cx="12" cy="12" r="1.6" />
+    <circle cx="19" cy="12" r="1.6" />
+  </svg>
+);
 
-export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesChanged, openPath, onFilesPathConsumed }: Props) {
+export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesChanged, openPath, onFilesPathConsumed, onOpenInTerminal }: Props) {
   const [path, setPath] = useState('/');
   // Редактируемая адресная строка: draft синхронизирован с path, Enter — переход.
   const [pathDraft, setPathDraft] = useState('/');
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<number | null>(null);
+  // Путь только что скопированного элемента — короткая подсветка иконки copy.
+  const [copiedPath, setCopiedPath] = useState<string | null>(null);
+  const copiedPathTimer = useRef<number | null>(null);
+  // Оверфлоу-меню «Дополнительно» (редко используемые действия строки).
+  const [overflowMenu, setOverflowMenu] = useState<{ path: string; x: number; y: number } | null>(null);
+  const overflowMenuRef = useRef<HTMLDivElement>(null);
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [editTarget, setEditTarget] = useState<FileEntry | null>(null);
@@ -301,6 +337,56 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
     copiedTimer.current = window.setTimeout(() => setCopied(false), 1500);
   };
 
+  // Копировать путь конкретного элемента; подсветка иконки copy в строке.
+  const copyEntryPath = async (entry: FileEntry) => {
+    try {
+      await navigator.clipboard.writeText(entry.path);
+    } catch {
+      /* clipboard может быть недоступен */
+    }
+    setCopiedPath(entry.path);
+    if (copiedPathTimer.current) window.clearTimeout(copiedPathTimer.current);
+    copiedPathTimer.current = window.setTimeout(() => setCopiedPath(null), 1500);
+  };
+
+  // «Открыть в терминале»: для директории — сама директория, для файла — родитель.
+  const openInTerminal = (entry: FileEntry) => {
+    const cwd = entry.isDirectory ? entry.path : entry.path.replace(/\/[^/]*$/, '') || '/';
+    onOpenInTerminal?.(cwd);
+  };
+
+  // Оверфлоу-меню «Дополнительно»: позиционируем по trigger-кнопке (fixed-меню
+  // вне скролл-контейнера, чтобы не обрезалось).
+  const openOverflowMenu = (e: React.MouseEvent, path: string) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const w = Math.min(240, window.innerWidth);
+    const h = 240;
+    setOverflowMenu({
+      path,
+      x: Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8)),
+      y: Math.max(8, Math.min(r.bottom + 4, window.innerHeight - h)),
+    });
+  };
+
+  // Закрытие оверфлоу-меню по клику вне и по Esc.
+  useEffect(() => {
+    if (!overflowMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if (overflowMenuRef.current && !overflowMenuRef.current.contains(e.target as Node)) {
+        setOverflowMenu(null);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOverflowMenu(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [overflowMenu]);
+
   // Переход по введённому пути (Enter в адресной строке).
   const commitPathDraft = () => {
     const v = pathDraft.trim();
@@ -496,7 +582,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
   }[promptState?.action ?? 'mkdir'];
 
   return (
-    <div className="page">
+    <div className="page files-page">
       <div className="toolbar files-toolbar">
         <div className="addr-row">
           <div className="addr-bar">
@@ -808,7 +894,8 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
                 <td className="col-narrow mono">{entry.mode}</td>
                 <td className="col-narrow">
                   <div className="row-actions">
-                    {entry.isDirectory && (
+                    {/* Важные действия — одной строкой; остальное в «…» (overflowMenu). */}
+                    {entry.isDirectory ? (
                       <a
                         className="btn btn-mini"
                         href={downloadDirUrl(profile.id, entry.path)}
@@ -816,8 +903,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
                       >
                         {DOWN_ICON}
                       </a>
-                    )}
-                    {!entry.isDirectory && (
+                    ) : (
                       <>
                         <a className="btn btn-mini" href={downloadUrl(profile.id, entry.path)} title="Скачать">
                           {DOWN_ICON}
@@ -832,36 +918,26 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
                         <button className="btn btn-mini" title="Редактировать" onClick={() => void openEditor(entry)}>
                           {EDIT_ICON}
                         </button>
-                        {/* симлинки можно: серверный stat следует по ссылке */}
-                        <button
-                          className="btn btn-mini"
-                          title="Смотреть хвост (tail -F)"
-                          onClick={() => setTailTarget(entry.path)}
-                        >
-                          {EYE_ICON}
-                        </button>
                       </>
                     )}
-                    <button
-                      className="btn btn-mini"
-                      title="Переименовать"
-                      onClick={() =>
-                        setPromptState({ title: 'Переименовать', value: entry.name, action: 'rename', target: entry })
-                      }
-                    >
-                      {RENAME_ICON}
-                    </button>
-                    <button
-                      className="btn btn-mini"
-                      title="Права доступа (chmod)"
-                      onClick={() =>
-                        setPromptState({ title: 'Права доступа', value: '755', action: 'chmod', target: entry })
-                      }
-                    >
-                      {LOCK_ICON}
-                    </button>
+                    {entry.isDirectory && (
+                      <button
+                        className="btn btn-mini"
+                        title="Открыть в терминале (cd в директорию)"
+                        onClick={() => openInTerminal(entry)}
+                      >
+                        {TERMINAL_ICON}
+                      </button>
+                    )}
                     <button className="btn btn-mini btn-danger" title="Удалить" onClick={() => void remove(entry)}>
                       {X_ICON}
+                    </button>
+                    <button
+                      className="btn btn-mini icon-btn"
+                      title="Дополнительно"
+                      onClick={(e) => openOverflowMenu(e, entry.path)}
+                    >
+                      {MORE_ICON}
                     </button>
                   </div>
                 </td>
@@ -870,6 +946,52 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
           </tbody>
         </table>
       </div>
+
+      {overflowMenu &&
+        (() => {
+          const entry = sortedEntries.find((en) => en.path === overflowMenu.path);
+          if (!entry) return null;
+          const close = () => setOverflowMenu(null);
+          return (
+            <div
+              className="files-overflow-menu"
+              ref={overflowMenuRef}
+              style={{ left: overflowMenu.x, top: overflowMenu.y }}
+            >
+              {!entry.isDirectory && (
+                <button className="files-overflow-item" onClick={() => { setTailTarget(entry.path); close(); }}>
+                  <span className="files-overflow-ic">{EYE_ICON}</span> Смотреть хвост (tail -F)
+                </button>
+              )}
+              <button className="files-overflow-item" onClick={() => { void copyEntryPath(entry); close(); }}>
+                <span className="files-overflow-ic">{copiedPath === entry.path ? CHECK_ICON : COPY_ICON}</span> Скопировать путь
+              </button>
+              {!entry.isDirectory && (
+                <button className="files-overflow-item" onClick={() => { openInTerminal(entry); close(); }}>
+                  <span className="files-overflow-ic">{TERMINAL_ICON}</span> Открыть в терминале
+                </button>
+              )}
+              <button
+                className="files-overflow-item"
+                onClick={() => {
+                  setPromptState({ title: 'Переименовать', value: entry.name, action: 'rename', target: entry });
+                  close();
+                }}
+              >
+                <span className="files-overflow-ic">{RENAME_ICON}</span> Переименовать
+              </button>
+              <button
+                className="files-overflow-item"
+                onClick={() => {
+                  setPromptState({ title: 'Права доступа', value: '755', action: 'chmod', target: entry });
+                  close();
+                }}
+              >
+                <span className="files-overflow-ic">{LOCK_ICON}</span> Права доступа (chmod)
+              </button>
+            </div>
+          );
+        })()}
 
       {editTarget && (
         <Modal title={`Редактирование: ${editTarget.name}`} onClose={() => setEditTarget(null)} wide>
@@ -880,7 +1002,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
               <Suspense fallback={<p className="muted">Загрузка редактора…</p>}>
                 <CodeEditor
                   value={editContent}
-                  fileName={editTarget.name}
+                  fileName={editTarget.path}
                   onChange={setEditContent}
                 />
               </Suspense>
@@ -900,7 +1022,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
           ) : (
             <>
               <Suspense fallback={<p className="muted">Загрузка редактора…</p>}>
-                <CodeEditor value={viewContent} fileName={viewTarget.name} onChange={noop} readOnly />
+                <CodeEditor value={viewContent} fileName={viewTarget.path} onChange={noop} readOnly />
               </Suspense>
               <div className="modal-actions">
                 <button className="btn" onClick={() => setViewTarget(null)}>Закрыть</button>

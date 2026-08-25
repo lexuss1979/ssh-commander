@@ -380,14 +380,26 @@ export interface ParsedCrontab {
 export interface CronSnapshot {
   timestamp: number;
   username: string;
+  /** SSH-пользователь, чей crontab можно мутировать (владелец сессии). */
+  currentUser: string;
+  /** true, когда `username === currentUser` — crontab можно править; иначе read-only. */
+  editable: boolean;
   userCrontab: (ParsedCrontab & { raw: string }) | null;
   systemCrontab: ParsedCrontab | null;
   cronD: { file: string; entries: CronEntry[] }[];
 }
 
-/** Cron-задачи сервера (вкладка «Cron»). */
-export function fetchCron(profileId: string): Promise<CronSnapshot> {
-  return api<CronSnapshot>(`/api/cron?profileId=${encodeURIComponent(profileId)}`);
+/** Cron-задачи сервера (вкладка «Cron»). `user` — персональный crontab конкретного пользователя (read-only). */
+export function fetchCron(profileId: string, user?: string): Promise<CronSnapshot> {
+  const params = new URLSearchParams({ profileId });
+  if (user) params.set('user', user);
+  return api<CronSnapshot>(`/api/cron?${params.toString()}`);
+}
+
+/** Список пользователей для селектора; пустой, когда чтение чужих crontab невозможно (не root). */
+export async function fetchCronUsers(profileId: string): Promise<string[]> {
+  const res = await api<{ users: string[] }>(`/api/cron/users?profileId=${encodeURIComponent(profileId)}`);
+  return res.users;
 }
 
 export function addCronEntry(
@@ -502,6 +514,12 @@ export function fetchNginx(profileId: string): Promise<NginxSnapshot> {
 /** Ключ источника для test/reload: 'native' | 'container:<id>'. */
 export function nginxSourceKey(source: NginxSourceSnapshot): string {
   return source.type === 'native' ? 'native' : `container:${source.containerId}`;
+}
+
+/** Содержимое одного конфиг-файла источника (кнопка «Открыть»). */
+export function fetchNginxConfig(profileId: string, source: string, path: string): Promise<{ content: string }> {
+  const params = new URLSearchParams({ profileId, source, path });
+  return api<{ content: string }>(`/api/nginx/config?${params.toString()}`);
 }
 
 /** `nginx -t` по источнику: `{ok, output}` (вывод — stderr + stdout).

@@ -85,6 +85,10 @@ export default function App() {
     containerId: string;
     name: string;
   } | null>(null);
+  // Одноразовый запрос «Открыть в терминале cd <путь>» из файлового менеджера:
+  // TerminalPage открывает/активирует host-вкладку и сбрасывает через
+  // onOpenInTerminalConsumed.
+  const [hostTerminalRequest, setHostTerminalRequest] = useState<{ cwd: string } | null>(null);
   const [showProfiles, setShowProfiles] = useState(false);
   const [toast, setToast] = useState('');
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -376,6 +380,14 @@ export default function App() {
     setTab('files');
   }, []);
 
+  // «Открыть в терминале» из файлового менеджера: открыть terminal-вкладку
+  // профиля с cd в директорию пути (профиль уже активный — FilesPage для
+  // activeProfile, TerminalPage смонтирован keep-alive).
+  const handleOpenInTerminal = useCallback((cwd: string) => {
+    setHostTerminalRequest({ cwd });
+    setTab('terminal');
+  }, []);
+
   // Drag-разделитель панели агента: ширина считается от правого края окна.
   const onResizerMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -614,6 +626,8 @@ export default function App() {
                     visible={tab === 'terminal'}
                     openContainerRequest={terminalOpenRequest}
                     onOpenContainerConsumed={() => setTerminalOpenRequest(null)}
+                    openInTerminalRequest={hostTerminalRequest}
+                    onOpenInTerminalConsumed={() => setHostTerminalRequest(null)}
                     onAskAgent={handleAskAgent}
                   />
                 </div>
@@ -627,6 +641,7 @@ export default function App() {
                     onProfilesChanged={handleProfilesChanged}
                     openPath={filesOpenPath}
                     onFilesPathConsumed={() => setFilesOpenPath(null)}
+                    onOpenInTerminal={handleOpenInTerminal}
                   />
                 </div>
                 <div className={`tab-page ${tab === 'docker' ? '' : 'hidden'}`}>

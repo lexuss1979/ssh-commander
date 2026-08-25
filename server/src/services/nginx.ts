@@ -83,6 +83,34 @@ export function buildCertBatchCmd(source: NginxSourceRef, paths: string[]): Ngin
   return ['exec', source.containerId, 'sh', '-c', loop];
 }
 
+/** Лимит чтения одного конфиг-файла: реальный конфиг редко больше пары сотен КБ. */
+const CONFIG_MAX_OUTPUT = 2 * 1024 * 1024;
+
+/** Прочитать один конфиг-файл: native — `cat` на хосте, контейнер — `docker exec … cat`. */
+export function buildReadConfigCmd(source: NginxSourceRef, path: string): NginxCmd {
+  const cat = `cat -- ${shq(path)}`;
+  if (source.type === 'native') return cat;
+  return ['exec', source.containerId, 'sh', '-c', cat];
+}
+
+/**
+ * Чтение одного конфига (кнопка «Открыть» в панели Nginx). Путь — из маркера
+ * `# configuration file <путь>:` дампа `nginx -T`, поэтому это реальный файл,
+ * который nginx загрузил (для контейнера — путь внутри контейнера).
+ */
+export async function readNginxConfig(
+  profile: Profile,
+  source: NginxSourceRef,
+  path: string,
+): Promise<{ content: string }> {
+  const r = await runSource(profile, buildReadConfigCmd(source, path), { maxOutput: CONFIG_MAX_OUTPUT });
+  if (r.code !== 0) {
+    const detail = (r.stderr || r.stdout).trim();
+    throw new Error(`Не удалось прочитать ${path}${detail ? `: ${detail}` : ''}`);
+  }
+  return { content: r.stdout };
+}
+
 /** Выполнение команды источника: строка — exec, массив — dockerExec. */
 async function runSource(
   profile: Profile,

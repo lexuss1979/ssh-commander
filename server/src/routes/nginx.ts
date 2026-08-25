@@ -5,6 +5,7 @@ import {
   findSource,
   getNginxSnapshot,
   NginxTestFailedError,
+  readNginxConfig,
   reloadNginx,
   testNginxConfig,
 } from '../services/nginx.js';
@@ -66,8 +67,27 @@ nginxRouter.get('/', async (req, res) => {
   }
 });
 
-/** `nginx -t` по источнику: `{ok, output}` (вывод — stderr + stdout). */
-nginxRouter.post('/test', async (req, res) => {
+// Чтение одного конфиг-файла (кнопка «Открыть»): `{content}`.
+nginxRouter.get('/config', async (req, res) => {
+  const profile = profileFromQuery(req, res);
+  if (!profile) return;
+  const q = req.query as Record<string, unknown>;
+  const rawSource = String(q.source ?? '');
+  const rawPath = String(q.path ?? '');
+  if (!rawPath.startsWith('/') || rawPath.includes('\n')) {
+    res.status(400).json({ error: 'Некорректный путь к конфигу' });
+    return;
+  }
+  try {
+    const source = await sourceFromBody(profile, rawSource, res);
+    if (!source) return;
+    res.json(await readNginxConfig(profile, source, rawPath));
+  } catch (err) {
+    sendExecError(res, err);
+  }
+});
+
+/** `nginx -t` по источнику: `{ok, output}` (вывод — stderr + stdout). */nginxRouter.post('/test', async (req, res) => {
   const profile = profileFromQuery(req, res);
   if (!profile) return;
   const parsed = sourceSchema.safeParse((req.body as Record<string, unknown> | undefined)?.source);

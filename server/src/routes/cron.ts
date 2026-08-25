@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { requireProfile } from '../profiles.js';
 import {
   collectCron,
+  fetchCronUsers,
+  isValidCronUser,
   mutateUserCrontab,
   validateCronFields,
   CronConflictError,
@@ -62,8 +64,25 @@ function checkSchedule(schedule: string, res: import('express').Response): boole
 cronRouter.get('/', async (req, res) => {
   const profile = profileFrom(req, res);
   if (!profile) return;
+  const rawUser = String((req.query as Record<string, unknown>).user ?? '');
+  const user = rawUser || undefined;
+  if (user && !isValidCronUser(user)) {
+    res.status(400).json({ error: 'Некорректное имя пользователя' });
+    return;
+  }
   try {
-    res.json(await collectCron(profile));
+    res.json(await collectCron(profile, user));
+  } catch (err) {
+    res.status(502).json({ error: `Сервер недоступен: ${(err as Error).message}` });
+  }
+});
+
+// Список пользователей для селектора (пусто, если чтение чужих crontab невозможно).
+cronRouter.get('/users', async (req, res) => {
+  const profile = profileFrom(req, res);
+  if (!profile) return;
+  try {
+    res.json({ users: await fetchCronUsers(profile) });
   } catch (err) {
     res.status(502).json({ error: `Сервер недоступен: ${(err as Error).message}` });
   }

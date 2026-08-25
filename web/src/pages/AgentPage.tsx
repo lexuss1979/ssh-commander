@@ -54,6 +54,40 @@ interface ChatMessageView {
 
 let nextId = 1;
 
+// Иконки для кнопки копирования сообщения агента.
+function CopyIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="9" y="9" width="13" height="13" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M20 6L9 17l-5-5" />
+    </svg>
+  );
+}
+
 // Шаблон запроса по выводу терминала (режимы 'explain' и 'new-dialogue').
 function terminalContextMessage(text: string, serverName: string): string {
   return `Объясни этот вывод терминала (сервер ${serverName}):\n\`\`\`\n${text}\n\`\`\``;
@@ -61,6 +95,7 @@ function terminalContextMessage(text: string, serverName: string): string {
 
 export function AgentPage({ profile, showError, agentRequest, onAgentRequestConsumed, onActivity, onSqlInsert }: Props) {
   const [messages, setMessages] = useState<ChatMessageView[]>([]);
+  const [copiedId, setCopiedId] = useState<number | null>(null);
   const [input, setInput] = useState('');
   const [connected, setConnected] = useState(false);
   const [running, setRunning] = useState(false);
@@ -579,6 +614,20 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     [onSqlInsert, profile.id],
   );
 
+  // Копирование текста сообщения агента (кнопка в бабле при наведении).
+  const handleCopyMessage = useCallback(async (m: ChatMessageView) => {
+    const text = m.content ?? '';
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // clipboard может быть недоступен (http) — молча игнорируем.
+      return;
+    }
+    setCopiedId(m.id);
+    setTimeout(() => setCopiedId((c) => (c === m.id ? null : c)), 1600);
+  }, []);
+
   // Подключённые серверы для чипов и модалки аудита: до события `servers`
   // показываем только домашний профиль.
   const attachedServers: AttachedServer[] = serversInfo?.attached ?? [
@@ -901,6 +950,15 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                     content={m.content}
                     onInsertSql={sqlInsertEnabled && onSqlInsert ? handleSqlInsert : undefined}
                   />
+                  {m.role === 'assistant' && !m.streaming && (
+                    <button
+                      className={`copy-bubble-btn ${copiedId === m.id ? 'copied' : ''}`}
+                      onClick={() => handleCopyMessage(m)}
+                      title="Скопировать сообщение"
+                    >
+                      {copiedId === m.id ? <CheckIcon /> : <CopyIcon />}
+                    </button>
+                  )}
                 </div>
               )}
               {m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0 && (

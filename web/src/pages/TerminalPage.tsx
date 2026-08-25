@@ -39,6 +39,11 @@ function collectTerminalContext(term: Terminal): string {
   return lines.join('\n');
 }
 
+/** POSIX-экранирование одинарными кавычками для команды в терминале. */
+function shq(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
 interface WsMessage {
   type: string;
   data?: string;
@@ -161,6 +166,8 @@ interface TerminalViewProps {
   closeOnUnmountRef: { current: boolean };
   /** Статус WS/shell — точка в заголовке вкладки. */
   onStatus: (key: string, status: TerminalStatus) => void;
+  /** Одноразовые `cd` для вкладок «Открыть в терминале» (по terminalTabKey). */
+  pendingCwdRef: React.MutableRefObject<Map<string, string>>;
 }
 
 /** Идентификатор вкладки на клиенте — пара (tabId, container), как и ключ
@@ -180,6 +187,7 @@ function TerminalView({
   onAskAgent,
   closeOnUnmountRef,
   onStatus,
+  pendingCwdRef,
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -343,7 +351,15 @@ function TerminalView({
       try {
         const msg = JSON.parse(e.data) as WsMessage;
         if (msg.type === 'output' && msg.data) term.write(msg.data);
-        if (msg.type === 'connected') setStatus('connected');
+        if (msg.type === 'connected') {
+          setStatus('connected');
+          // «Открыть в терминале»: однократно выполняем cd в директорию.
+          const cwd = pendingCwdRef.current.get(terminalTabKey(tab));
+          if (cwd) {
+            pendingCwdRef.current.delete(terminalTabKey(tab));
+            send({ type: 'input', data: `cd ${shq(cwd)}\r` });
+          }
+        }
         if (msg.type === 'close') {
           setStatus('closed');
           term.write('\r\n\x1b[31m[сессия завершена]\x1b[0m\r\n');
@@ -400,7 +416,7 @@ function TerminalView({
       fitRef.current = null;
       sendInputRef.current = () => {};
     };
-  }, [profile.id, sessionKey, showError, containerId, tab.id, closeOnUnmountRef]);
+  }, [profile.id, sessionKey, showError, containerId, tab.id, tab, pendingCwdRef, closeOnUnmountRef]);
 
   // При display:none xterm теряет размеры — пересчитываем, когда вкладка
   // терминалов видима и внутренняя вкладка активна (оба случая скрытия).
@@ -535,6 +551,9 @@ interface Props {
    * запрос через onOpenContainerConsumed (паттерн sqlInsert). */
   openContainerRequest: { containerId: string; name: string } | null;
   onOpenContainerConsumed: () => void;
+  /** Одноразовый запрос «Открыть в терминале cd <путь>» из файлового менеджера. */
+  openInTerminalRequest: { cwd: string } | null;
+  onOpenInTerminalConsumed: () => void;
   onAskAgent?: (text: string, mode?: AgentAskMode) => void;
 }
 
@@ -606,6 +625,8 @@ export function TerminalPage({
   visible,
   openContainerRequest,
   onOpenContainerConsumed,
+  openInTerminalRequest,
+  onOpenInTerminalConsumed,
   onAskAgent,
 }: Props) {
   const [tabsState, setTabsState] = useState<TabsState>(() => loadTabsState(profile.id));
@@ -614,6 +635,9 @@ export function TerminalPage({
   // Флаги «вкладку закрыл пользователь»: TerminalView читает ref в cleanup
   // и решает, слать ли close-фрейм (unmount по другой причине — grace).
   const closeFlags = useRef(new Map<string, { current: boolean }>());
+  // Одноразовый `cd` для новой host-вкладки («Открыть в терминале»):
+  // ключ — terminalTabKey; consumed в TerminalView после 'connected'.
+  const pendingCwdRef = useRef(new Map<string, string>());
 
   // Вкладки переживают F5: пишем при каждом изменении.
   useEffect(() => {
@@ -723,6 +747,24 @@ export function TerminalPage({
     });
   }, [openContainerRequest, onOpenContainerConsumed]);
 
+  // «Открыть в терминале» из файлового менеджера: создаём/активируем новую
+  // host-вкладку (без контейнера) и запоминаем cd для однократной вставки
+  // после подключения (см. TerminalView на 'connected').
+  useEffect(() => {
+    if (!openInTerminalRequest) return;
+    const { cwd } = openInTerminalRequest;
+    onOpenInTerminalConsumed();
+    setTabsState((prev) => {
+      const id = prev.nextId;
+      pendingCwdRef.current.set(`${id}:host`, cwd);
+      return {
+        tabs: [...prev.tabs, { id }],
+        nextId: id + 1,
+        activeId: `${id}:host`,
+      };
+    });
+  }, [openInTerminalRequest, onOpenInTerminalConsumed]);
+
   const addTab = () => {
     setTabsState((prev) => {
       if (prev.tabs.length >= limit) return prev;
@@ -822,6 +864,7 @@ export function TerminalPage({
             onAskAgent={onAskAgent}
             closeOnUnmountRef={getCloseFlag(terminalTabKey(t))}
             onStatus={handleStatus}
+            pendingCwdRef={pendingCwdRef}
           />
         ))
       )}
