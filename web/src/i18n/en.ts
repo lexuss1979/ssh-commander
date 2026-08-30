@@ -17,6 +17,11 @@ export const en: typeof ru = {
   'login.submit': 'Sign in',
   'login.submitting': 'Signing in…',
 
+  'markdown.copyTitle': 'Copy',
+  'markdown.copyAria': 'Copy code',
+  'markdown.insertSqlTitle': 'Insert SQL into the editor on the "Databases" tab',
+  'markdown.insertSqlAria': 'Insert SQL into the editor',
+
   'time.justNow': 'just now',
   'time.minutesAgo': (n: number) => `${n} min ago`,
   'time.hoursAgo': (n: number) => `${n} hour${n === 1 ? '' : 's'} ago`,

@@ -29,6 +29,11 @@ export const ru = {
   'login.submit': 'Войти',
   'login.submitting': 'Вход…',
 
+  'markdown.copyTitle': 'Копировать',
+  'markdown.copyAria': 'Копировать код',
+  'markdown.insertSqlTitle': 'Вставить SQL в редактор на вкладке «Базы данных»',
+  'markdown.insertSqlAria': 'Вставить SQL в редактор',
+
   'time.justNow': 'только что',
   'time.minutesAgo': (n: number) => `${n} мин назад`,
   'time.hoursAgo': (n: number) => `${n} ${plural(n, 'час', 'часа', 'часов')} назад`,
