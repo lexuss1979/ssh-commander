@@ -11,6 +11,9 @@ export const en: typeof ru = {
   'common.close': 'Close',
   'common.language': 'Language',
   'common.errorRequest': 'Request failed',
+  'common.refresh': 'Refresh',
+  'common.updated': 'Updated {time}',
+  'common.of': 'of',
 
   'login.hint': 'Enter the password to access the web interface',
   'login.passwordPlaceholder': 'Password',
@@ -36,4 +39,15 @@ export const en: typeof ru = {
     const rest = min % 60;
     return rest > 0 ? `last ${h} h ${rest} min` : `last ${h} h`;
   },
+
+  'servers.openOverview': 'Open {name} overview',
+  'servers.externalIp': 'External IP',
+  'servers.memory': 'Memory',
+  'servers.disk': 'Disk',
+  'servers.uptime': 'Uptime',
+  'servers.containers': 'Containers',
+  'servers.dockerNoData': 'Docker: no data',
+  'servers.unavailable': 'Unavailable',
+  'servers.noData': 'no data',
+  'servers.empty': 'No servers added. Add a server via "Server management" in the left panel.',
 };

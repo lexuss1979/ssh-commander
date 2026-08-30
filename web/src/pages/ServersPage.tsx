@@ -5,6 +5,7 @@ import type { AgentAskMode, Profile } from '../types';
 import { Sparkline } from '../components/Sparkline';
 import { SnippetsSection } from '../components/SnippetsSection';
 import { Meter, formatBytes, formatPct, formatUptime } from './OverviewPage';
+import { useT } from '../i18n';
 
 interface Props {
   showError: (msg: string) => void;
@@ -32,6 +33,7 @@ function ServerCard({
   history: HistorySample[];
   onOpen: (profileId: string) => void;
 }) {
+  const { t } = useT();
   const mem = entry.metrics?.memory;
   const disk = mainDisk(entry);
 
@@ -40,7 +42,7 @@ function ServerCard({
       type="button"
       className={`overview-card server-card${entry.ok ? '' : ' down'}`}
       onClick={() => onOpen(entry.id)}
-      title={`Открыть обзор ${entry.name}`}
+      title={t('servers.openOverview', { name: entry.name })}
     >
       <div className="server-card-head">
         <span className={`status-dot ${entry.ok ? 'connected' : 'error'}`} />
@@ -50,7 +52,7 @@ function ServerCard({
         </span>
       </div>
       {entry.externalIp && (
-        <div className="server-ip muted">Внешний IP: {entry.externalIp}</div>
+        <div className="server-ip muted">{t('servers.externalIp')}: {entry.externalIp}</div>
       )}
 
       {entry.ok && entry.metrics ? (
@@ -65,9 +67,9 @@ function ServerCard({
           </div>
           <div className="server-metric">
             <div className="server-metric-head">
-              <span>Память</span>
+              <span>{t('servers.memory')}</span>
               <span>
-                {formatPct(mem?.usedPercent ?? null)} · {formatBytes(mem?.usedBytes ?? null)} из{' '}
+                {formatPct(mem?.usedPercent ?? null)} · {formatBytes(mem?.usedBytes ?? null)} {t('common.of')}{' '}
                 {formatBytes(mem?.totalBytes ?? null)}
               </span>
             </div>
@@ -76,32 +78,33 @@ function ServerCard({
           </div>
           <div className="server-metric">
             <div className="server-metric-head">
-              <span>Диск {disk ? disk.mount : ''}</span>
+              <span>{t('servers.disk')} {disk ? disk.mount : ''}</span>
               <span>
                 {disk
-                  ? `${formatPct(disk.usedPercent)} · ${formatBytes(disk.usedBytes)} из ${formatBytes(disk.totalBytes)}`
+                  ? `${formatPct(disk.usedPercent)} · ${formatBytes(disk.usedBytes)} ${t('common.of')} ${formatBytes(disk.totalBytes)}`
                   : '—'}
               </span>
             </div>
             <Meter percent={disk?.usedPercent ?? null} />
           </div>
           <div className="server-card-footer">
-            <span>Аптайм: {formatUptime(entry.metrics.uptimeSeconds)}</span>
+            <span>{t('servers.uptime')}: {formatUptime(entry.metrics.uptimeSeconds)}</span>
             <span>
               {entry.docker
-                ? `Контейнеры: ${entry.docker.containersRunning}/${entry.docker.containersTotal}`
-                : 'Docker: нет данных'}
+                ? `${t('servers.containers')}: ${entry.docker.containersRunning}/${entry.docker.containersTotal}`
+                : t('servers.dockerNoData')}
             </span>
           </div>
         </>
       ) : (
-        <div className="server-error">Недоступен: {entry.error ?? 'нет данных'}</div>
+        <div className="server-error">{t('servers.unavailable')}: {entry.error ?? t('servers.noData')}</div>
       )}
     </button>
   );
 }
 
 export function ServersPage({ showError, visible, onOpenProfile, onAskAgent, profiles }: Props) {
+  const { t, locale } = useT();
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [history, setHistory] = useState<Map<string, HistorySample[]>>(new Map());
   const [reloadKey, setReloadKey] = useState(0);
@@ -140,12 +143,12 @@ export function ServersPage({ showError, visible, onOpenProfile, onAskAgent, pro
       <div className="toolbar">
         <span className="status-text">
           {data
-            ? `Обновлено ${new Date(data.timestamp).toLocaleTimeString('ru-RU')}`
-            : 'Загрузка…'}
+            ? t('common.updated', { time: new Date(data.timestamp).toLocaleTimeString(locale) })
+            : t('common.loading')}
         </span>
         <div className="toolbar-actions">
           <button className="btn btn-ghost" onClick={() => setReloadKey((k) => k + 1)}>
-            Обновить
+            {t('common.refresh')}
           </button>
         </div>
       </div>
@@ -153,7 +156,7 @@ export function ServersPage({ showError, visible, onOpenProfile, onAskAgent, pro
       <div className="overview-scroll">
         {data && data.servers.length === 0 && (
           <div className="empty-state">
-            <p>Серверы не добавлены. Добавьте сервер через «Управление серверами» в левой панели.</p>
+            <p>{t('servers.empty')}</p>
           </div>
         )}
         <div className="servers-grid">

@@ -23,6 +23,9 @@ export const ru = {
   'common.close': 'Закрыть',
   'common.language': 'Язык',
   'common.errorRequest': 'Ошибка запроса',
+  'common.refresh': 'Обновить',
+  'common.updated': 'Обновлено {time}',
+  'common.of': 'из',
 
   'login.hint': 'Введите пароль для доступа к веб-интерфейсу',
   'login.passwordPlaceholder': 'Пароль',
@@ -48,4 +51,15 @@ export const ru = {
     const rest = min % 60;
     return rest > 0 ? `за ${h} ч ${rest} мин` : `за ${h} ч`;
   },
+
+  'servers.openOverview': 'Открыть обзор {name}',
+  'servers.externalIp': 'Внешний IP',
+  'servers.memory': 'Память',
+  'servers.disk': 'Диск',
+  'servers.uptime': 'Аптайм',
+  'servers.containers': 'Контейнеры',
+  'servers.dockerNoData': 'Docker: нет данных',
+  'servers.unavailable': 'Недоступен',
+  'servers.noData': 'нет данных',
+  'servers.empty': 'Серверы не добавлены. Добавьте сервер через «Управление серверами» в левой панели.',
 };
