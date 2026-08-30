@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { fetchAiUsage, formatUsd } from '../api';
 import type { AiUsageAgg, AiUsageDay, AiUsageReport } from '../api';
+import { useT } from '../i18n';
+import type { I18nKey, I18nParams } from '../i18n';
 
 /**
  * Вкладка «ИИ-расходы» (docs/ai-costs-plan.md): глобальная страница вне
@@ -13,13 +15,15 @@ interface Props {
   visible: boolean;
 }
 
+type TFn = (key: I18nKey, params?: I18nParams | number) => string;
+
 const POLL_INTERVAL_MS = 60_000;
 
-const PERIODS: Array<{ label: string; value: number | 'all' }> = [
-  { label: '7 дней', value: 7 },
-  { label: '30 дней', value: 30 },
-  { label: '90 дней', value: 90 },
-  { label: 'Всё время', value: 'all' },
+const PERIODS: Array<{ labelKey: I18nKey; value: number | 'all' }> = [
+  { labelKey: 'aiCosts.period7', value: 7 },
+  { labelKey: 'aiCosts.period30', value: 30 },
+  { labelKey: 'aiCosts.period90', value: 90 },
+  { labelKey: 'aiCosts.periodAll', value: 'all' },
 ];
 
 const emptyAgg = (): AiUsageAgg => ({
@@ -45,32 +49,33 @@ function sumAgg(aggs: Array<AiUsageAgg | undefined>): AiUsageAgg {
   return total;
 }
 
-function cellTooltip(agg: AiUsageAgg): string {
+function cellTooltip(agg: AiUsageAgg, t: TFn, locale: string): string {
   const parts = [
-    `Запросов: ${agg.calls}`,
-    `Вход: ${agg.promptTokens.toLocaleString('ru-RU')} токенов`,
-    `Кэш входа: ${agg.cachedTokens.toLocaleString('ru-RU')} токенов`,
-    `Выход: ${agg.completionTokens.toLocaleString('ru-RU')} токенов`,
+    t('aiCosts.tipCalls', { n: agg.calls }),
+    t('aiCosts.tipPrompt', { n: agg.promptTokens.toLocaleString(locale) }),
+    t('aiCosts.tipCached', { n: agg.cachedTokens.toLocaleString(locale) }),
+    t('aiCosts.tipCompletion', { n: agg.completionTokens.toLocaleString(locale) }),
   ];
   if (agg.unpricedCalls > 0) {
-    parts.push(`Неполная сумма: ${agg.unpricedCalls} вызовов без цены`);
+    parts.push(t('aiCosts.tipUnpriced', { n: agg.unpricedCalls }));
   }
   return parts.join('\n');
 }
 
 /** Ячейка матрицы: стоимость; запросы и токены — в tooltip. */
 function CostCell({ agg }: { agg: AiUsageAgg }) {
+  const { t, locale } = useT();
   return (
-    <span className="cost-cell" title={cellTooltip(agg)}>
+    <span className="cost-cell" title={cellTooltip(agg, t, locale)}>
       {formatUsd(agg.costUsd)}
       {agg.unpricedCalls > 0 ? '*' : ''}
     </span>
   );
 }
 
-function formatDay(iso: string): string {
+function formatDay(iso: string, locale: string): string {
   const [y, m, d] = iso.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('ru-RU', {
+  return new Date(y, m - 1, d).toLocaleDateString(locale, {
     day: '2-digit',
     month: '2-digit',
     year: '2-digit',
@@ -78,6 +83,7 @@ function formatDay(iso: string): string {
 }
 
 export function AiCostsPage({ visible }: Props) {
+  const { t, locale } = useT();
   const [report, setReport] = useState<AiUsageReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [days, setDays] = useState<number | 'all'>(30);
@@ -125,35 +131,35 @@ export function AiCostsPage({ visible }: Props) {
         <span className={`status-dot ${error ? 'error' : 'connected'}`} />
         <span className="status-text">
           {error
-            ? `Нет связи: ${error}`
+            ? t('aiCosts.noConnection', { error })
             : report
-              ? `Обновлено ${new Date(updatedAt).toLocaleTimeString('ru-RU')}`
-              : 'Загрузка…'}
+              ? t('common.updated', { time: new Date(updatedAt).toLocaleTimeString(locale) })
+              : t('common.loading')}
         </span>
         <select
           className="search-input"
           value={String(days)}
           onChange={(e) => setDays(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-          title="Период отчёта"
+          title={t('aiCosts.periodTitle')}
         >
           {PERIODS.map((p) => (
             <option key={String(p.value)} value={String(p.value)}>
-              {p.label}
+              {t(p.labelKey)}
             </option>
           ))}
         </select>
         <div className="toolbar-actions">
           <button className="btn btn-ghost" onClick={() => setReloadKey((k) => k + 1)}>
-            Обновить
+            {t('common.refresh')}
           </button>
         </div>
       </div>
 
       {error && !report ? (
         <div className="empty-state">
-          <p>Не удалось загрузить отчёт о расходах: {error}</p>
+          <p>{t('aiCosts.loadFailed', { error })}</p>
           <button className="btn btn-primary" onClick={() => setReloadKey((k) => k + 1)}>
-            Повторить
+            {t('common.retry')}
           </button>
         </div>
       ) : (
@@ -162,43 +168,43 @@ export function AiCostsPage({ visible }: Props) {
             <>
               <div className="cost-cards">
                 <div className="cost-card">
-                  <div className="cost-card-label">Всего за период</div>
+                  <div className="cost-card-label">{t('aiCosts.totalForPeriod')}</div>
                   <div className="cost-card-value">{formatUsd(report.totals.costUsd)}</div>
                 </div>
                 <div className="cost-card">
-                  <div className="cost-card-label">Среднее в день</div>
+                  <div className="cost-card-label">{t('aiCosts.avgPerDay')}</div>
                   <div className="cost-card-value">
                     {formatUsd(report.days.length ? report.totals.costUsd / report.days.length : 0)}
                   </div>
                 </div>
                 <div className="cost-card">
-                  <div className="cost-card-label">Запросов</div>
-                  <div className="cost-card-value">{report.totals.calls.toLocaleString('ru-RU')}</div>
+                  <div className="cost-card-label">{t('aiCosts.calls')}</div>
+                  <div className="cost-card-value">{report.totals.calls.toLocaleString(locale)}</div>
                 </div>
               </div>
               {report.totals.unpricedCalls > 0 && (
                 <p className="muted costs-hint">
-                  * {report.totals.unpricedCalls} вызовов без цены модели — суммы неполны. Добавьте цены
-                  в <code>data/ai-prices.json</code>.
+                  * {t('aiCosts.unpricedHint', { n: report.totals.unpricedCalls })}{' '}
+                  <code>data/ai-prices.json</code>.
                 </p>
               )}
               <div className="costs-scroll">
                 <table className="data-table cost-matrix">
                   <thead>
                     <tr>
-                      <th className="col-date">Дата</th>
+                      <th className="col-date">{t('aiCosts.date')}</th>
                       {report.profiles.map((p) => (
                         <th key={p.id} title={p.name}>
                           {p.name}
                         </th>
                       ))}
-                      <th>Итого</th>
+                      <th>{t('aiCosts.total')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {report.days.map((day: AiUsageDay) => (
                       <tr key={day.date}>
-                        <td className="muted cost-date">{formatDay(day.date)}</td>
+                        <td className="muted cost-date">{formatDay(day.date, locale)}</td>
                         {report.profiles.map((p) => {
                           const agg = day.byProfile[p.id];
                           return (
@@ -215,7 +221,7 @@ export function AiCostsPage({ visible }: Props) {
                     {report.days.length === 0 && (
                       <tr>
                         <td colSpan={report.profiles.length + 2} className="muted">
-                          За выбранный период расходов нет
+                          {t('aiCosts.emptyPeriod')}
                         </td>
                       </tr>
                     )}
@@ -223,7 +229,7 @@ export function AiCostsPage({ visible }: Props) {
                   {report.days.length > 0 && (
                     <tfoot>
                       <tr>
-                        <td className="muted">Итого</td>
+                        <td className="muted">{t('aiCosts.total')}</td>
                         {profileTotals.map(({ profile, total }) => (
                           <td key={profile.id} className="cost-cell-td">
                             {total.calls > 0 ? <CostCell agg={total} /> : '—'}
@@ -241,7 +247,7 @@ export function AiCostsPage({ visible }: Props) {
           )}
           {!report && !error && (
             <div className="empty-state">
-              <p>Загрузка отчёта о расходах…</p>
+              <p>{t('aiCosts.loading')}</p>
             </div>
           )}
         </>
