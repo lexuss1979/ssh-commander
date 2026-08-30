@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useT } from '../i18n';
 
 interface Props {
   title: string;
@@ -14,12 +15,13 @@ interface Props {
 }
 
 export function Modal({ title, onClose, children, wide, dismissable = true }: Props) {
+  const { t } = useT();
   return (
     <div className="modal-overlay" onClick={dismissable ? onClose : undefined}>
       <div className={`modal ${wide ? 'modal-wide' : ''}`} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>{title}</h2>
-          <button className="btn btn-ghost" onClick={onClose}>
+          <button className="btn btn-ghost" onClick={onClose} aria-label={t('common.close')}>
             ✕
           </button>
         </div>
