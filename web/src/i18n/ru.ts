@@ -292,4 +292,15 @@ export const ru = {
   'ports.containerTitle': 'Контейнер {name}',
   'ports.noPorts': 'Прослушиваемых портов не найдено',
   'ports.hostHint': 'Имена процессов других пользователей видны только при подключении под root — без прав колонка «Процесс» остаётся пустой. Опубликованные порты контейнеров видны как безымянный docker-proxy — аннотация «docker: …» закрывает эту дыру.',
+
+  'logViewer.statusDone': 'завершено',
+  'logViewer.statusStopped': 'остановлено',
+  'logViewer.statusConnected': 'подключено…',
+  'logViewer.follow': 'Следовать',
+  'logViewer.autoscroll': 'Автоскролл',
+  'logViewer.filterPlaceholder': 'Фильтр (подстрока)…',
+  'logViewer.copy': 'Скопировать',
+  'logViewer.toChat': 'В чат',
+  'logViewer.reconnect': 'Переподключиться',
+  'logViewer.linesCount': '{n} строк',
 };

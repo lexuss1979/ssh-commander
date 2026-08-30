@@ -280,4 +280,15 @@ export const en: typeof ru = {
   'ports.containerTitle': 'Container {name}',
   'ports.noPorts': 'No listening ports found',
   'ports.hostHint': 'Process names of other users are only visible when connected as root — without privileges the "Process" column stays empty. Published container ports appear as a nameless docker-proxy — the "docker: …" annotation closes this gap.',
+
+  'logViewer.statusDone': 'finished',
+  'logViewer.statusStopped': 'stopped',
+  'logViewer.statusConnected': 'connected…',
+  'logViewer.follow': 'Follow',
+  'logViewer.autoscroll': 'Autoscroll',
+  'logViewer.filterPlaceholder': 'Filter (substring)…',
+  'logViewer.copy': 'Copy',
+  'logViewer.toChat': 'To chat',
+  'logViewer.reconnect': 'Reconnect',
+  'logViewer.linesCount': '{n} lines',
 };
