@@ -25,4 +25,15 @@ export const en: typeof ru = {
   'time.justNow': 'just now',
   'time.minutesAgo': (n: number) => `${n} min ago`,
   'time.hoursAgo': (n: number) => `${n} hour${n === 1 ? '' : 's'} ago`,
+
+  'sparkline.collecting': 'Collecting history…',
+  'sparkline.statMin': 'min',
+  'sparkline.statAvg': 'avg',
+  'sparkline.statMax': 'max',
+  'sparkline.span': (min: number) => {
+    if (min < 60) return `last ${min} min`;
+    const h = Math.floor(min / 60);
+    const rest = min % 60;
+    return rest > 0 ? `last ${h} h ${rest} min` : `last ${h} h`;
+  },
 };

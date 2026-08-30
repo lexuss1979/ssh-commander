@@ -37,4 +37,15 @@ export const ru = {
   'time.justNow': 'только что',
   'time.minutesAgo': (n: number) => `${n} мин назад`,
   'time.hoursAgo': (n: number) => `${n} ${plural(n, 'час', 'часа', 'часов')} назад`,
+
+  'sparkline.collecting': 'История собирается…',
+  'sparkline.statMin': 'мин',
+  'sparkline.statAvg': 'сред',
+  'sparkline.statMax': 'макс',
+  'sparkline.span': (min: number) => {
+    if (min < 60) return `за ${min} мин`;
+    const h = Math.floor(min / 60);
+    const rest = min % 60;
+    return rest > 0 ? `за ${h} ч ${rest} мин` : `за ${h} ч`;
+  },
 };
