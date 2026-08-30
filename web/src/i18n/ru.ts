@@ -24,6 +24,11 @@ export const ru = {
   'common.language': 'Язык',
   'common.errorRequest': 'Ошибка запроса',
 
+  'login.hint': 'Введите пароль для доступа к веб-интерфейсу',
+  'login.passwordPlaceholder': 'Пароль',
+  'login.submit': 'Войти',
+  'login.submitting': 'Вход…',
+
   'time.justNow': 'только что',
   'time.minutesAgo': (n: number) => `${n} мин назад`,
   'time.hoursAgo': (n: number) => `${n} ${plural(n, 'час', 'часа', 'часов')} назад`,
