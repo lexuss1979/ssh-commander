@@ -3,6 +3,7 @@ import { fetchDiskUsage, fetchDiskUsageFiles, formatSize } from '../api';
 import type { DiskUsageFilesResponse, DiskUsageSnapshot } from '../api';
 import type { Profile } from '../types';
 import { Modal } from './Modal';
+import { useT } from '../i18n';
 
 interface Props {
   profile: Profile;
@@ -20,6 +21,7 @@ interface Props {
  * файлов с переходом в FilesPage.
  */
 export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }: Props) {
+  const { t } = useT();
   const [path, setPath] = useState(initialPath);
   const [mode, setMode] = useState<'dirs' | 'files'>('dirs');
   const [data, setData] = useState<DiskUsageSnapshot | null>(null);
@@ -97,7 +99,7 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
   const lastCrumbPath = crumbs[crumbs.length - 1].path;
 
   return (
-    <Modal title={`Что занимает · ${profile.name}`} onClose={onClose} wide>
+    <Modal title={t('diskUsage.title', { name: profile.name })} onClose={onClose} wide>
       <div className="du-toolbar">
         <nav className="breadcrumbs">
           <button className="btn btn-ghost" onClick={() => setPath('/')} disabled={path === '/'}>
@@ -118,18 +120,18 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
         <div className="du-toolbar-actions">
           <div className="du-mode">
             <button className={mode === 'dirs' ? 'active' : ''} onClick={() => setMode('dirs')}>
-              Каталоги
+              {t('diskUsage.modeDirs')}
             </button>
             <button className={mode === 'files' ? 'active' : ''} onClick={() => setMode('files')}>
-              Файлы
+              {t('diskUsage.modeFiles')}
             </button>
           </div>
           <button
             className="btn btn-ghost btn-mini"
             onClick={() => onOpenInFiles(path)}
-            title="Открыть этот путь во вкладке «Файлы»"
+            title={t('diskUsage.openInFilesTitle')}
           >
-            Открыть в файлах
+            {t('diskUsage.openInFiles')}
           </button>
         </div>
       </div>
@@ -138,7 +140,7 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
         <div className="empty-state">
           <p>{error}</p>
           <button className="btn btn-primary" onClick={() => setReloadKey((k) => k + 1)}>
-            Повторить
+            {t('common.retry')}
           </button>
         </div>
       )}
@@ -147,9 +149,9 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
 
       {!error && !loading && cancelled && (
         <div className="du-hint">
-          Опрос отменён.{' '}
+          {t('diskUsage.cancelled')}{' '}
           <button className="btn btn-ghost" onClick={() => setReloadKey((k) => k + 1)}>
-            Повторить
+            {t('common.retry')}
           </button>
         </div>
       )}
@@ -157,12 +159,12 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
       {!error && !cancelled && mode === 'dirs' && data && (
         <>
           {data.incomplete && (
-            <div className="du-chip">Часть каталогов недоступна (нет прав) — цифры неполные</div>
+            <div className="du-chip">{t('diskUsage.incompleteDirs')}</div>
           )}
-          {data.truncated && <div className="du-chip">Вывод du обрезан — сумма неполная</div>}
+          {data.truncated && <div className="du-chip">{t('diskUsage.truncatedDu')}</div>}
           <div className="du-list">
             <div className="du-row du-row-total">
-              <span className="du-row-name">Всего</span>
+              <span className="du-row-name">{t('diskUsage.total')}</span>
               {/* truncated — сумма посчитана по детям, «100%» было бы враньём */}
               <span className="du-pct">{data.truncated ? '—' : '100%'}</span>
               <span className="du-size">{formatSize(data.totalBytes)}</span>
@@ -172,7 +174,7 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
                 <button
                   className="link-cell du-row-name"
                   onClick={() => setPath(child.path)}
-                  title={`Открыть ${child.path}`}
+                  title={t('diskUsage.openPath', { path: child.path })}
                 >
                   {child.name}
                 </button>
@@ -188,13 +190,13 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
             ))}
             {data.directBytes > 0 && (
               <div className="du-row du-muted">
-                <span className="du-row-name">файлы в этом каталоге</span>
+                <span className="du-row-name">{t('diskUsage.directFiles')}</span>
                 <span className="du-pct">—</span>
                 <span className="du-size">{formatSize(data.directBytes)}</span>
               </div>
             )}
             {data.children.length === 0 && data.directBytes === 0 && (
-              <div className="du-hint">Каталог пуст</div>
+              <div className="du-hint">{t('diskUsage.emptyDir')}</div>
             )}
           </div>
         </>
@@ -203,7 +205,7 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
       {!error && !cancelled && mode === 'files' && filesData && (
         <>
           {filesData.incomplete && (
-            <div className="du-chip">Часть каталогов недоступна (нет прав) — список неполный</div>
+            <div className="du-chip">{t('diskUsage.incompleteFiles')}</div>
           )}
           <div className="du-list">
             {filesData.files.map((f) => (
@@ -215,15 +217,15 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
                 <button
                   className="btn btn-ghost btn-mini"
                   onClick={() => onOpenInFiles(f.path.replace(/\/[^/]*$/, '') || '/')}
-                  title="Открыть родительский каталог во вкладке «Файлы»"
+                  title={t('diskUsage.openParentTitle')}
                 >
-                  В файлы
+                  {t('diskUsage.toFiles')}
                 </button>
               </div>
             ))}
-            {filesData.files.length === 0 && <div className="du-hint">Файлов не найдено</div>}
+            {filesData.files.length === 0 && <div className="du-hint">{t('diskUsage.noFiles')}</div>}
             {filesData.truncated && (
-              <div className="du-hint">Показаны первые {filesData.files.length}</div>
+              <div className="du-hint">{t('diskUsage.showingFirst', { n: filesData.files.length })}</div>
             )}
           </div>
         </>
@@ -244,22 +246,22 @@ function ScanStatusBar({
   elapsed: number;
   onCancel: () => void;
 }) {
+  const { t } = useT();
   return (
     <div className="du-scan">
       <div className="scan-status">
         <span className="spinner" />
-        <span>{mode === 'dirs' ? 'Сканирование каталогов…' : 'Поиск крупнейших файлов…'}</span>
+        <span>{t(mode === 'dirs' ? 'diskUsage.scanDirs' : 'diskUsage.scanFiles')}</span>
       </div>
       <div className="scan-bar" />
       <div className="scan-note">
-        <code>{mode === 'dirs' ? 'du -x -d 1' : 'find -printf'}</code> — опрос сервера может занять
-        десятки секунд; прогресс не передаётся, полоса показывает, что запрос выполняется.
+        <code>{mode === 'dirs' ? 'du -x -d 1' : 'find -printf'}</code> {t('diskUsage.scanNote')}
       </div>
       <div className="scan-foot">
-        <span className="scan-elapsed">{elapsed} с</span>
+        <span className="scan-elapsed">{t('diskUsage.elapsedSec', { n: elapsed })}</span>
         <span className="spacer" />
         <button className="btn" onClick={onCancel}>
-          Отмена
+          {t('common.cancel')}
         </button>
       </div>
     </div>
