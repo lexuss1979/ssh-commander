@@ -5,6 +5,10 @@ import {
   type ActiveAlert,
   type AlertsSettings,
 } from '../alerts';
+import { useT } from '../i18n';
+import type { I18nKey, I18nParams } from '../i18n';
+
+type TFn = (key: I18nKey, params?: I18nParams | number) => string;
 
 interface Props {
   alerts: ActiveAlert[];
@@ -15,13 +19,13 @@ interface Props {
   showError: (msg: string) => void;
 }
 
-function formatSince(since: number): string {
+function formatSince(since: number, t: TFn): string {
   const minutes = Math.floor((Date.now() - since) / 60000);
-  if (minutes < 1) return 'только что';
-  if (minutes < 60) return `уже ${minutes} мин`;
+  if (minutes < 1) return t('time.justNow');
+  if (minutes < 60) return t('alerts.sinceMinutes', minutes);
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `уже ${hours} ч`;
-  return `уже ${Math.floor(hours / 24)} дн`;
+  if (hours < 24) return t('alerts.sinceHours', hours);
+  return t('alerts.sinceDays', Math.floor(hours / 24));
 }
 
 /**
@@ -31,6 +35,7 @@ function formatSince(since: number): string {
  * приглушается.
  */
 export function AlertsBell({ alerts, settings, profiles, onOpenProfile, onSaveSettings, showError }: Props) {
+  const { t } = useT();
   const [open, setOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -90,7 +95,7 @@ export function AlertsBell({ alerts, settings, profiles, onOpenProfile, onSaveSe
         type="button"
         className={`alerts-bell${settings.enabled ? '' : ' disabled'}`}
         onClick={() => setOpen((o) => !o)}
-        title={settings.enabled ? 'Алерты по порогам' : 'Алерты выключены — открыть настройки'}
+        title={settings.enabled ? t('alerts.titleEnabled') : t('alerts.titleDisabled')}
       >
         🔔
         {settings.enabled && alerts.length > 0 && (
@@ -105,26 +110,26 @@ export function AlertsBell({ alerts, settings, profiles, onOpenProfile, onSaveSe
           style={panelPos ? { left: panelPos.left, top: panelPos.top } : undefined}
         >
           <div className="alerts-panel-head">
-            <span className="alerts-panel-title">Алерты</span>
+            <span className="alerts-panel-title">{t('alerts.panelTitle')}</span>
             <button
               type="button"
               className="alerts-gear"
               onClick={() => setSettingsOpen(true)}
-              title="Настройки алертов"
+              title={t('alerts.settingsTitle')}
             >
               ⚙
             </button>
           </div>
           {!settings.enabled ? (
             <div className="alerts-empty">
-              <span>Алерты выключены.</span>
-              <span className="field-hint">Включите их в настройках — шестерёнка выше.</span>
+              <span>{t('alerts.disabledText')}</span>
+              <span className="field-hint">{t('alerts.disabledHint')}</span>
             </div>
           ) : sorted.length === 0 ? (
             <div className="alerts-empty">
-              <span>Активных алертов нет.</span>
+              <span>{t('alerts.empty')}</span>
               <span className="field-hint">
-                Пороги диска, памяти, load и недоступность сервера — в настройках.
+                {t('alerts.emptyHint')}
               </span>
             </div>
           ) : (
@@ -141,7 +146,7 @@ export function AlertsBell({ alerts, settings, profiles, onOpenProfile, onSaveSe
                 >
                   <span className="alert-item-head">
                     <strong>{profileName(a.profileId)}</strong>
-                    <span className="alert-item-since">{formatSince(a.since)}</span>
+                    <span className="alert-item-since">{formatSince(a.since, t)}</span>
                   </span>
                   <span className="alert-item-message">{a.message}</span>
                 </button>
@@ -182,6 +187,7 @@ const clampNum = (raw: string, min: number, max: number, fallback: number): numb
 // Закрытие — только кнопками: overlay не закрывает, чтобы заполненные
 // пороги не терялись случайным кликом.
 function AlertsSettingsModal({ settings, onClose, onSave, showError }: ModalProps) {
+  const { t } = useT();
   const [enabled, setEnabled] = useState(settings.enabled);
   const [disk, setDisk] = useState(String(settings.disk));
   const [mem, setMem] = useState(String(settings.mem));
@@ -214,11 +220,11 @@ function AlertsSettingsModal({ settings, onClose, onSave, showError }: ModalProp
         setNotify(true);
       } else {
         setNotify(false);
-        showError('Разрешение на уведомления не выдано');
+        showError(t('alerts.notifyDenied'));
       }
     } catch {
       setNotify(false);
-      showError('Разрешение на уведомления не выдано');
+      showError(t('alerts.notifyDenied'));
     }
   };
 
@@ -242,7 +248,7 @@ function AlertsSettingsModal({ settings, onClose, onSave, showError }: ModalProp
     <div className="modal-overlay">
       <div className="modal">
         <div className="modal-header">
-          <h2>Настройки алертов</h2>
+          <h2>{t('alerts.settingsTitle')}</h2>
         </div>
         <div className="modal-body">
           <div className="alerts-settings">
@@ -252,12 +258,12 @@ function AlertsSettingsModal({ settings, onClose, onSave, showError }: ModalProp
                 checked={enabled}
                 onChange={(e) => setEnabled(e.target.checked)}
               />
-              Алерты включены
+              {t('alerts.enabledLabel')}
             </label>
 
             <div className="alerts-fields">
               <label className="alerts-field">
-                <span>Порог диска, %</span>
+                <span>{t('alerts.diskThreshold')}</span>
                 <input
                   type="number"
                   min={50}
@@ -268,7 +274,7 @@ function AlertsSettingsModal({ settings, onClose, onSave, showError }: ModalProp
                 />
               </label>
               <label className="alerts-field">
-                <span>Порог памяти, %</span>
+                <span>{t('alerts.memThreshold')}</span>
                 <input
                   type="number"
                   min={50}
@@ -279,7 +285,7 @@ function AlertsSettingsModal({ settings, onClose, onSave, showError }: ModalProp
                 />
               </label>
               <label className="alerts-field">
-                <span>Порог load на ядро</span>
+                <span>{t('alerts.loadThreshold')}</span>
                 <input
                   type="number"
                   min={0.5}
@@ -291,9 +297,7 @@ function AlertsSettingsModal({ settings, onClose, onSave, showError }: ModalProp
               </label>
             </div>
             <span className="field-hint">
-              Алерт срабатывает при достижении порога и снимается, когда значение
-              упадёт ниже порога минус дельта (5% у диска и памяти, 0.5 у load) —
-              на границе уведомления не сыплются каждые 10 с.
+              {t('alerts.hysteresisHint')}
             </span>
 
             {notifySupported ? (
@@ -303,25 +307,25 @@ function AlertsSettingsModal({ settings, onClose, onSave, showError }: ModalProp
                   checked={notify}
                   onChange={(e) => void toggleNotify(e.target.checked)}
                 />
-                Браузерные уведомления
-                <span className="field-hint">только когда вкладка неактивна</span>
+                {t('alerts.notifyLabel')}
+                <span className="field-hint">{t('alerts.notifyHint')}</span>
               </label>
             ) : (
               <span className="field-hint">
-                Браузерные уведомления не поддерживаются этим браузером.
+                {t('alerts.notifyUnsupported')}
               </span>
             )}
           </div>
         </div>
         <div className="modal-actions">
           <button className="btn btn-primary" onClick={save}>
-            Сохранить
+            {t('common.save')}
           </button>
-          <button className="btn btn-ghost" onClick={resetDefaults} title="Вернуть пороги 90 / 90 / 2">
-            Сбросить пороги
+          <button className="btn btn-ghost" onClick={resetDefaults} title={t('alerts.resetTitle')}>
+            {t('alerts.reset')}
           </button>
           <button className="btn btn-ghost" onClick={onClose}>
-            Отмена
+            {t('common.cancel')}
           </button>
         </div>
       </div>
