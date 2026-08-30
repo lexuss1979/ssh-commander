@@ -3,6 +3,8 @@ import { fetchNginx, fetchNginxConfig, nginxSourceKey, reloadNginx, testNginx } 
 import type { NginxCert, NginxListen, NginxSite, NginxSnapshot, NginxSourceSnapshot } from '../api';
 import type { Profile } from '../types';
 import { Modal } from '../components/Modal';
+import { useT } from '../i18n';
+import type { I18nKey, I18nParams } from '../i18n';
 
 // Редактор с подсветкой (nginx-конфиг по полному пути) — ленивый чанк.
 const CodeEditor = lazy(() => import('../components/CodeEditor'));
@@ -33,24 +35,29 @@ const POLL_INTERVAL_MS = 5000;
 /** ≤ этого срока сертификат подсвечивается жёлтым (просрочен — красным). */
 const CERT_WARN_DAYS = 14;
 
-function sourceTitle(source: NginxSourceSnapshot): string {
-  return source.type === 'native' ? 'nginx (хост)' : `контейнер ${source.containerName ?? source.containerId}`;
+type TFn = (key: I18nKey, params?: I18nParams | number) => string;
+
+function sourceTitle(source: NginxSourceSnapshot, t: TFn): string {
+  return source.type === 'native'
+    ? t('nginx.sourceHost')
+    : t('nginx.sourceContainer', { name: source.containerName ?? source.containerId ?? '' });
 }
 
 /** Бейдж `nginx -t`: «конфиг цел» / «конфиг с ошибками»; permission denied
  * (конфиг может быть цел, но не читается) — отдельный честный текст. */
 function ConfigTestBadge({ source }: { source: NginxSourceSnapshot }) {
+  const { t } = useT();
   if (source.configTest.ok) {
     return (
       <span className="scope-badge loopback" title={source.configTest.output}>
-        конфиг цел
+        {t('nginx.badgeConfigOk')}
       </span>
     );
   }
   const noPerm = /permission denied/i.test(source.configTest.output);
   return (
     <span className="scope-badge public" title={source.configTest.output}>
-      {noPerm ? 'нет прав на чтение конфига' : 'конфиг с ошибками'}
+      {noPerm ? t('nginx.badgeNoPerm') : t('nginx.badgeConfigErrors')}
     </span>
   );
 }
@@ -62,26 +69,27 @@ function formatListen(l: NginxListen): string {
 }
 
 function CertBadge({ cert }: { cert: NginxCert | null }) {
+  const { t, locale } = useT();
   if (!cert) return <span className="muted">—</span>;
   if ('error' in cert) {
     return (
       <span className="cert-badge muted" title={cert.error}>
-        недоступен
+        {t('nginx.certUnavailable')}
       </span>
     );
   }
   const { daysLeft, notAfter } = cert;
-  const date = new Date(notAfter).toLocaleDateString('ru-RU');
-  let text = `осталось ${daysLeft} дн.`;
+  const date = new Date(notAfter).toLocaleDateString(locale);
+  let text = t('nginx.certDaysLeft', { n: daysLeft });
   let cls = 'ok';
   if (daysLeft < 0) {
-    text = `просрочен ${-daysLeft} дн.`;
+    text = t('nginx.certExpired', { n: -daysLeft });
     cls = 'crit';
   } else if (daysLeft <= CERT_WARN_DAYS) {
     cls = 'warn';
   }
   return (
-    <span className={`cert-badge ${cls}`} title={`до ${date}`}>
+    <span className={`cert-badge ${cls}`} title={t('nginx.certUntil', { date })}>
       {text}
     </span>
   );
@@ -118,16 +126,17 @@ function SitesTable({
   sourceKey: string;
   onOpenFile: (path: string, sourceKey: string) => void;
 }) {
+  const { t } = useT();
   return (
     <div className="ports-scroll">
       <table className="data-table">
         <thead>
           <tr>
-            <th>Сайт</th>
-            <th>Слушает</th>
-            <th>Куда смотрит</th>
-            <th>Сертификат</th>
-            <th className="col-narrow">Действия</th>
+            <th>{t('nginx.colSite')}</th>
+            <th>{t('nginx.colListen')}</th>
+            <th>{t('nginx.colTarget')}</th>
+            <th>{t('nginx.colCert')}</th>
+            <th className="col-narrow">{t('nginx.colActions')}</th>
           </tr>
         </thead>
         <tbody>
@@ -175,7 +184,7 @@ function SitesTable({
                   {site.file ? (
                     <button
                       className="btn btn-mini"
-                      title="Открыть конфиг с подсветкой"
+                      title={t('nginx.openConfigTitle')}
                       onClick={() => onOpenFile(site.file, sourceKey)}
                     >
                       {OPEN_ICON}
@@ -190,7 +199,7 @@ function SitesTable({
           {sites.length === 0 && (
             <tr>
               <td colSpan={5} className="muted">
-                server-блоков нет
+                {t('nginx.noServerBlocks')}
               </td>
             </tr>
           )}
@@ -210,6 +219,7 @@ function OutputBlock({ text }: { text: string }) {
 }
 
 export function NginxPage({ profile, visible, showError }: Props) {
+  const { t, locale } = useT();
   const [snapshot, setSnapshot] = useState<NginxSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -265,9 +275,9 @@ export function NginxPage({ profile, visible, showError }: Props) {
     try {
       const result = await testNginx(profile.id, key);
       if (result.ok) {
-        showNotice(`Конфигурация ${sourceTitle(source)} в порядке`);
+        showNotice(t('nginx.configOk', { title: sourceTitle(source, t) }));
       } else {
-        setOutputModal({ title: `nginx -t: ${sourceTitle(source)}`, output: result.output });
+        setOutputModal({ title: t('nginx.testOutputTitle', { title: sourceTitle(source, t) }), output: result.output });
       }
     } catch (err) {
       showError((err as Error).message);
@@ -282,7 +292,7 @@ export function NginxPage({ profile, visible, showError }: Props) {
     try {
       const result = await reloadNginx(profile.id, key);
       if (result.ok) {
-        showNotice('nginx перезагружен');
+        showNotice(t('nginx.reloaded'));
         // Свежий снапшот: бейдж конфиг-теста и сертификаты.
         setReloadKey((k) => k + 1);
       } else {
@@ -292,7 +302,7 @@ export function NginxPage({ profile, visible, showError }: Props) {
       const e = err as Error & { status?: number; output?: string };
       if (e.status === 409) {
         // Guard: конфиг красный — reload не выполнялся, показываем вывод теста.
-        setOutputModal({ title: 'nginx -t не прошёл — перезагрузка отменена', output: e.output ?? e.message });
+        setOutputModal({ title: t('nginx.testFailedTitle'), output: e.output ?? e.message });
       } else {
         showError(e.message);
       }
@@ -312,7 +322,7 @@ export function NginxPage({ profile, visible, showError }: Props) {
       setFileContent(content);
     } catch (err) {
       const e = err as Error & { status?: number };
-      setFileError(e.status === 502 ? 'Сервер недоступен' : e.message);
+      setFileError(e.status === 502 ? t('common.serverUnavailablePlain') : e.message);
       setFileContent('');
     } finally {
       setFileLoading(false);
@@ -327,35 +337,33 @@ export function NginxPage({ profile, visible, showError }: Props) {
         <span className={`status-dot ${error ? 'error' : 'connected'}`} />
         <span className="status-text">
           {error
-            ? `Нет связи: ${error}`
+            ? t('common.noConnection', { error })
             : snapshot
-              ? `Обновлено ${new Date(snapshot.timestamp).toLocaleTimeString('ru-RU')}`
-              : 'Загрузка…'}
+              ? t('common.updated', { time: new Date(snapshot.timestamp).toLocaleTimeString(locale) })
+              : t('common.loading')}
         </span>
         <div className="toolbar-actions">
           <button className="btn btn-ghost" onClick={() => setReloadKey((k) => k + 1)}>
-            Обновить
+            {t('common.refresh')}
           </button>
         </div>
       </div>
 
       {error && !snapshot ? (
         <div className="empty-state">
-          <p>Сервер недоступен: {error}</p>
+          <p>{t('common.serverUnavailable', { error })}</p>
           <button className="btn btn-primary" onClick={() => setReloadKey((k) => k + 1)}>
-            Повторить
+            {t('common.retry')}
           </button>
         </div>
       ) : sources.length === 0 ? (
         <div className="empty-state">
-          <p>Nginx не обнаружен</p>
+          <p>{t('nginx.notFound')}</p>
           <p className="muted">
-            На сервере не найден ни бинарь nginx на хосте, ни контейнер с nginx.
-            Контейнер с нестандартным образом или именем (без «nginx» в названии)
-            не обнаруживается.
+            {t('nginx.notFoundHint')}
           </p>
           <button className="btn btn-ghost" onClick={() => setReloadKey((k) => k + 1)}>
-            Проверить ещё раз
+            {t('nginx.recheck')}
           </button>
         </div>
       ) : (
@@ -367,7 +375,7 @@ export function NginxPage({ profile, visible, showError }: Props) {
               <div className="cron-section" key={key}>
                 <div className="nginx-source-header">
                   <h3 className="section-title">
-                    {sourceTitle(source)}
+                    {sourceTitle(source, t)}
                     {source.version && <span className="muted nginx-version">nginx {source.version}</span>}
                   </h3>
                   <div className="nginx-source-actions">
@@ -378,14 +386,14 @@ export function NginxPage({ profile, visible, showError }: Props) {
                       disabled={busy}
                       onClick={() => handleTest(source)}
                     >
-                      Проверить конфиг
+                      {t('nginx.testConfig')}
                     </button>
                     <button
                       className="btn btn-ghost btn-small"
                       disabled={busy}
-                      onClick={() => setConfirmReload({ key, title: sourceTitle(source) })}
+                      onClick={() => setConfirmReload({ key, title: sourceTitle(source, t) })}
                     >
-                      Перезагрузить
+                      {t('nginx.reload')}
                     </button>
                   </div>
                 </div>
@@ -401,22 +409,21 @@ export function NginxPage({ profile, visible, showError }: Props) {
 
       {confirmReload && (
         <Modal
-          title="Перезагрузить nginx"
+          title={t('nginx.reloadModalTitle')}
           onClose={() => setConfirmReload(null)}
         >
           <p>
-            Выполнить <code>nginx -s reload</code> для источника «{confirmReload.title}»?
+            {t('nginx.reloadConfirmPre')} <code>nginx -s reload</code> {t('nginx.reloadConfirmPost', { title: confirmReload.title })}
           </p>
           <p className="muted" style={{ fontSize: 12 }}>
-            Перед перезагрузкой сервер проверяет конфиг (<code>nginx -t</code>); при
-            ошибке перезагрузка не выполняется.
+            {t('nginx.reloadHintPre')}<code>nginx -t</code>{t('nginx.reloadHintPost')}
           </p>
           <div className="modal-actions">
             <button className="btn btn-ghost" onClick={() => setConfirmReload(null)}>
-              Отмена
+              {t('common.cancel')}
             </button>
             <button className="btn btn-primary" onClick={() => handleReloadConfirm(confirmReload.key)}>
-              Перезагрузить
+              {t('nginx.reload')}
             </button>
           </div>
         </Modal>
@@ -427,26 +434,26 @@ export function NginxPage({ profile, visible, showError }: Props) {
           <OutputBlock text={outputModal.output} />
           <div className="modal-actions">
             <button className="btn btn-primary" onClick={() => setOutputModal(null)}>
-              Закрыть
+              {t('common.close')}
             </button>
           </div>
         </Modal>
       )}
 
       {fileModal && (
-        <Modal title={`Конфиг: ${fileModal.path}`} onClose={() => setFileModal(null)} wide>
+        <Modal title={t('nginx.configFileTitle', { path: fileModal.path })} onClose={() => setFileModal(null)} wide>
           {fileLoading ? (
-            <p className="muted">Загрузка конфига…</p>
+            <p className="muted">{t('nginx.configLoading')}</p>
           ) : fileError ? (
             <OutputBlock text={fileError} />
           ) : (
-            <Suspense fallback={<p className="muted">Загрузка редактора…</p>}>
+            <Suspense fallback={<p className="muted">{t('nginx.editorLoading')}</p>}>
               <CodeEditor value={fileContent} fileName={fileModal.path} onChange={() => {}} readOnly />
             </Suspense>
           )}
           <div className="modal-actions">
             <button className="btn btn-primary" onClick={() => setFileModal(null)}>
-              Закрыть
+              {t('common.close')}
             </button>
           </div>
         </Modal>
