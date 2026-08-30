@@ -23,6 +23,7 @@ import { DockerPage } from './pages/DockerPage';
 import { AgentPage } from './pages/AgentPage';
 import { ProfileModal } from './components/ProfileModal';
 import { AlertsBell } from './components/AlertsBell';
+import { useT } from './i18n';
 
 // Иконки футера сайдбара (луна/солнце/выход) — в фирменном SVG-стиле.
 const MOON_ICON = (
@@ -93,6 +94,7 @@ function loadAgentOpen(): boolean {
 }
 
 export default function App() {
+  const { lang, setLang, t } = useT();
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [activeProfileId, setActiveProfileId] = useState('');
@@ -563,6 +565,23 @@ export default function App() {
         </div>
 
         <div className="sidebar-footer">
+          <div className="theme-switch-row">
+            <span className="theme-switch-label">{t('common.language')}</span>
+            <div className="lang-switch" role="group" aria-label={t('common.language')}>
+              <button
+                className={`lang-switch-btn ${lang === 'ru' ? 'active' : ''}`}
+                onClick={() => setLang('ru')}
+              >
+                RU
+              </button>
+              <button
+                className={`lang-switch-btn ${lang === 'en' ? 'active' : ''}`}
+                onClick={() => setLang('en')}
+              >
+                EN
+              </button>
+            </div>
+          </div>
           <div className="theme-switch-row">
             <span className="theme-switch-label">Тема</span>
             <button
