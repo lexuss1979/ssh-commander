@@ -9,6 +9,8 @@ import type {
 } from '../api';
 import type { Profile } from '../types';
 import { useSortBy, SortableTh } from '../hooks/useSortBy';
+import { useT } from '../i18n';
+import type { I18nKey, I18nParams } from '../i18n';
 
 interface Props {
   profile: Profile;
@@ -18,10 +20,12 @@ interface Props {
 
 const POLL_INTERVAL_MS = 5000;
 
-const SCOPE_LABEL: Record<PortListener['scope'], string> = {
-  public: 'наружу',
-  loopback: 'локально',
-  interface: 'интерфейс',
+type TFn = (key: I18nKey, params?: I18nParams | number) => string;
+
+const SCOPE_LABEL: Record<PortListener['scope'], I18nKey> = {
+  public: 'ports.scopePublic',
+  loopback: 'ports.scopeLoopback',
+  interface: 'ports.scopeInterface',
 };
 
 function matchesHostFilter(p: PortListener, filter: string): boolean {
@@ -52,13 +56,13 @@ function matchesContainerFilter(c: ContainerPortEntry, filter: string): boolean 
   );
 }
 
-function containerAccessLabel(b: ContainerPortBinding, networkMode: string): string {
-  if (networkMode === 'host') return 'сеть хоста';
+function containerAccessLabel(t: TFn, b: ContainerPortBinding, networkMode: string): string {
+  if (networkMode === 'host') return t('ports.accessHostNetwork');
   if (b.hostPort !== null) {
     const ip = b.hostIp && b.hostIp !== '0.0.0.0' ? `${b.hostIp}:` : '';
-    return `опубликован на ${ip}${b.hostPort}`;
+    return t('ports.accessPublished', { target: `${ip}${b.hostPort}` });
   }
-  return 'только сеть контейнера';
+  return t('ports.accessContainerOnly');
 }
 
 // Модалка создания туннеля
@@ -73,6 +77,7 @@ function TunnelModal({
   portRange: { min: number; max: number };
   prefill?: { targetHost: string; targetPort: number };
 }) {
+  const { t } = useT();
   const [localPort, setLocalPort] = useState('0');
   const [targetHost, setTargetHost] = useState(prefill?.targetHost ?? '');
   const [targetPort, setTargetPort] = useState(prefill?.targetPort ? String(prefill.targetPort) : '');
@@ -99,10 +104,10 @@ function TunnelModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Проброс порта (SSH-туннель)</h2>
+        <h2>{t('ports.tunnelModalTitle')}</h2>
         <div className="modal-body">
           <label>
-            Локальный порт (0 = авто):
+            {t('ports.localPortLabel')}
             <input
               type="number"
               value={localPort}
@@ -112,20 +117,20 @@ function TunnelModal({
               placeholder="0"
             />
             <span className="muted" style={{ fontSize: 12 }}>
-              {' '}Диапазон: {portRange.min}–{portRange.max}
+              {' '}{t('ports.portRange', { min: portRange.min, max: portRange.max })}
             </span>
           </label>
           <label>
-            Целевой хост:
+            {t('ports.targetHostLabel')}
             <input
               type="text"
               value={targetHost}
               onChange={(e) => setTargetHost(e.target.value)}
-              placeholder="172.17.0.2 или localhost"
+              placeholder={t('ports.targetHostPlaceholder')}
             />
           </label>
           <label>
-            Целевой порт:
+            {t('ports.targetPortLabel')}
             <input
               type="number"
               value={targetPort}
@@ -137,16 +142,15 @@ function TunnelModal({
           </label>
           {error && <p className="error-text">{error}</p>}
           <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-            Туннель слушает на 127.0.0.1 и перенаправляет трафик через SSH к целевому хосту.
-            UDP не поддерживается.
+            {t('ports.tunnelHint')}
           </p>
         </div>
         <div className="modal-actions">
           <button className="btn btn-ghost" onClick={onClose} disabled={loading}>
-            Отмена
+            {t('common.cancel')}
           </button>
           <button className="btn btn-primary" onClick={handleSubmit} disabled={loading}>
-            {loading ? 'Создание…' : 'Создать'}
+            {loading ? t('ports.creating') : t('ports.create')}
           </button>
         </div>
       </div>
@@ -162,48 +166,49 @@ function TunnelsSection({
   tunnels: Tunnel[];
   onStop: (id: string) => void;
 }) {
+  const { t } = useT();
   if (tunnels.length === 0) return null;
 
   return (
     <div className="tunnels-section">
-      <h3 className="section-title">Активные туннели</h3>
+      <h3 className="section-title">{t('ports.tunnelsTitle')}</h3>
       <div className="ports-scroll">
         <table className="data-table">
           <thead>
             <tr>
-              <th>Локально</th>
+              <th>{t('ports.colLocal')}</th>
               <th>→</th>
-              <th>Удалённо</th>
-              <th className="col-narrow">Статус</th>
-              <th className="col-narrow">Действия</th>
+              <th>{t('ports.colRemote')}</th>
+              <th className="col-narrow">{t('ports.colStatus')}</th>
+              <th className="col-narrow">{t('ports.colActions')}</th>
             </tr>
           </thead>
           <tbody>
-            {tunnels.map((t) => (
-              <tr key={t.id} className={t.status === 'closed' ? 'tunnel-closed' : ''}>
+            {tunnels.map((tn) => (
+              <tr key={tn.id} className={tn.status === 'closed' ? 'tunnel-closed' : ''}>
                 <td className="tunnel-local">
-                  <a href={`http://127.0.0.1:${t.localPort}`} target="_blank" rel="noopener noreferrer">
-                    127.0.0.1:{t.localPort}
+                  <a href={`http://127.0.0.1:${tn.localPort}`} target="_blank" rel="noopener noreferrer">
+                    127.0.0.1:{tn.localPort}
                   </a>
                 </td>
                 <td className="tunnel-arrow">→</td>
                 <td className="tunnel-target">
-                  {t.targetHost}:{t.targetPort}
+                  {tn.targetHost}:{tn.targetPort}
                 </td>
                 <td>
-                  <span className={`status-dot ${t.status === 'active' ? 'connected' : 'error'}`} />
-                  {t.status === 'closed' && t.error && (
-                    <span className="muted" title={t.error}> ошибка</span>
+                  <span className={`status-dot ${tn.status === 'active' ? 'connected' : 'error'}`} />
+                  {tn.status === 'closed' && tn.error && (
+                    <span className="muted" title={tn.error}> {t('ports.tunnelError')}</span>
                   )}
                 </td>
                 <td>
-                  {t.status === 'active' ? (
-                    <button className="btn btn-ghost btn-small" onClick={() => onStop(t.id)}>
-                      Стоп
+                  {tn.status === 'active' ? (
+                    <button className="btn btn-ghost btn-small" onClick={() => onStop(tn.id)}>
+                      {t('ports.tunnelStop')}
                     </button>
                   ) : (
-                    <button className="btn btn-ghost btn-small" onClick={() => onStop(t.id)}>
-                      Удалить
+                    <button className="btn btn-ghost btn-small" onClick={() => onStop(tn.id)}>
+                      {t('common.delete')}
                     </button>
                   )}
                 </td>
@@ -225,22 +230,23 @@ function ContainerPortsSection({
   filter: string;
   onForward: (targetHost: string, targetPort: number) => void;
 }) {
+  const { t } = useT();
   const filtered = containers.filter((c) => matchesContainerFilter(c, filter));
 
   if (containers.length === 0) return null;
 
   return (
     <div className="container-ports-section">
-      <h3 className="section-title">Порты контейнеров</h3>
+      <h3 className="section-title">{t('ports.containersTitle')}</h3>
       <div className="ports-scroll">
         <table className="data-table">
           <thead>
             <tr>
-              <th>Контейнер</th>
+              <th>{t('ports.colContainer')}</th>
               <th className="col-narrow">IP</th>
-              <th className="col-narrow">Порт</th>
-              <th className="col-narrow">Протокол</th>
-              <th>Доступ</th>
+              <th className="col-narrow">{t('ports.colPort')}</th>
+              <th className="col-narrow">{t('ports.colProto')}</th>
+              <th>{t('ports.colAccess')}</th>
               <th className="col-narrow"></th>
             </tr>
           </thead>
@@ -262,7 +268,7 @@ function ContainerPortsSection({
                     <td className="port-proto">{b.proto}</td>
                     <td>
                       <span className="container-access">
-                        {containerAccessLabel(b, c.networkMode)}
+                        {containerAccessLabel(t, b, c.networkMode)}
                       </span>
                     </td>
                     <td>
@@ -270,12 +276,12 @@ function ContainerPortsSection({
                         <button
                           className="btn btn-ghost btn-small"
                           onClick={() => onForward(targetHost, b.containerPort)}
-                          title="Пробросить порт"
+                          title={t('ports.forwardTitle')}
                         >
-                          Пробросить
+                          {t('ports.forward')}
                         </button>
                       ) : (
-                        <span className="muted" title="SSH-туннели только TCP">—</span>
+                        <span className="muted" title={t('ports.tcpOnlyTitle')}>—</span>
                       )}
                     </td>
                   </tr>
@@ -285,7 +291,7 @@ function ContainerPortsSection({
             {filtered.length === 0 && (
               <tr>
                 <td colSpan={6} className="muted">
-                  Ничего не найдено по фильтру
+                  {t('ports.filterEmpty')}
                 </td>
               </tr>
             )}
@@ -293,13 +299,14 @@ function ContainerPortsSection({
         </table>
       </div>
       <p className="muted ports-hint">
-        Контейнеры с host-сетью видны в основной таблице слушателей.
+        {t('ports.containersHint')}
       </p>
     </div>
   );
 }
 
 export function PortsPage({ profile, visible, showError }: Props) {
+  const { t, locale } = useT();
   const [snapshot, setSnapshot] = useState<PortsSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
@@ -403,40 +410,40 @@ export function PortsPage({ profile, visible, showError }: Props) {
         <span className={`status-dot ${error ? 'error' : 'connected'}`} />
         <span className="status-text">
           {error
-            ? `Нет связи: ${error}`
+            ? t('common.noConnection', { error })
             : snapshot
-              ? `Обновлено ${new Date(snapshot.timestamp).toLocaleTimeString('ru-RU')}`
-              : 'Загрузка…'}
+              ? t('common.updated', { time: new Date(snapshot.timestamp).toLocaleTimeString(locale) })
+              : t('common.loading')}
         </span>
         <input
           className="search-input ports-filter"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="Фильтр: порт, адрес, процесс, контейнер…"
+          placeholder={t('ports.filterPlaceholder')}
         />
         <div className="toolbar-actions">
           {snapshot && (
             <span className="muted">
-              {snapshot.ports.length} слушателей
-              {publicCount > 0 ? ` · ${publicCount} наружу` : ''}
-              {containersWithPorts ? ` · ${containersWithPorts.length} контейнеров` : ''}
-              {activeTunnels.length > 0 ? ` · ${activeTunnels.length} туннелей` : ''}
+              {t('ports.listenersCount', snapshot.ports.length)}
+              {publicCount > 0 ? t('ports.publicSuffix', publicCount) : ''}
+              {containersWithPorts ? t('ports.containersSuffix', containersWithPorts.length) : ''}
+              {activeTunnels.length > 0 ? t('ports.tunnelsSuffix', activeTunnels.length) : ''}
             </span>
           )}
           <button className="btn btn-ghost" onClick={() => setShowTunnelModal(true)}>
-            Проброс порта
+            {t('ports.tunnelButton')}
           </button>
           <button className="btn btn-ghost" onClick={() => setReloadKey((k) => k + 1)}>
-            Обновить
+            {t('common.refresh')}
           </button>
         </div>
       </div>
 
       {error && !snapshot ? (
         <div className="empty-state">
-          <p>Сервер недоступен: {error}</p>
+          <p>{t('common.serverUnavailable', { error })}</p>
           <button className="btn btn-primary" onClick={() => setReloadKey((k) => k + 1)}>
-            Повторить
+            {t('common.retry')}
           </button>
         </div>
       ) : (
@@ -449,12 +456,12 @@ export function PortsPage({ profile, visible, showError }: Props) {
             <table className="data-table">
               <thead>
                 <tr>
-                  <SortableTh sortKey="proto" currentSort={portSort} onToggle={togglePortSort} className="col-narrow">Протокол</SortableTh>
-                  <SortableTh sortKey="port" currentSort={portSort} onToggle={togglePortSort} className="col-narrow">Порт</SortableTh>
-                  <SortableTh sortKey="host" currentSort={portSort} onToggle={togglePortSort}>Адрес</SortableTh>
-                  <SortableTh sortKey="process" currentSort={portSort} onToggle={togglePortSort}>Процесс</SortableTh>
+                  <SortableTh sortKey="proto" currentSort={portSort} onToggle={togglePortSort} className="col-narrow">{t('ports.colProto')}</SortableTh>
+                  <SortableTh sortKey="port" currentSort={portSort} onToggle={togglePortSort} className="col-narrow">{t('ports.colPort')}</SortableTh>
+                  <SortableTh sortKey="host" currentSort={portSort} onToggle={togglePortSort}>{t('ports.colHost')}</SortableTh>
+                  <SortableTh sortKey="process" currentSort={portSort} onToggle={togglePortSort}>{t('ports.colProcess')}</SortableTh>
                   <SortableTh sortKey="pid" currentSort={portSort} onToggle={togglePortSort} className="col-narrow">PID</SortableTh>
-                  <SortableTh sortKey="scope" currentSort={portSort} onToggle={togglePortSort} className="col-narrow">Доступ</SortableTh>
+                  <SortableTh sortKey="scope" currentSort={portSort} onToggle={togglePortSort} className="col-narrow">{t('ports.colAccess')}</SortableTh>
                   <th className="col-narrow"></th>
                 </tr>
               </thead>
@@ -469,24 +476,24 @@ export function PortsPage({ profile, visible, showError }: Props) {
                       <td className="port-host" title={p.host}>{p.host}</td>
                       <td className="port-process" title={p.process ?? undefined}>
                         {p.container
-                          ? <span className="docker-process" title={`Контейнер ${p.container.name}`}>docker: {p.container.name}</span>
+                          ? <span className="docker-process" title={t('ports.containerTitle', { name: p.container.name })}>docker: {p.container.name}</span>
                           : (p.process ?? <span className="muted">—</span>)}
                       </td>
                       <td>{p.pid ?? '—'}</td>
                       <td>
-                        <span className={`scope-badge ${p.scope}`}>{SCOPE_LABEL[p.scope]}</span>
+                        <span className={`scope-badge ${p.scope}`}>{t(SCOPE_LABEL[p.scope])}</span>
                       </td>
                       <td>
                         {isTcp ? (
                           <button
                             className="btn btn-ghost btn-small"
                             onClick={() => handleForward(targetHost, p.port)}
-                            title="Пробросить порт"
+                            title={t('ports.forwardTitle')}
                           >
-                            Пробросить
+                            {t('ports.forward')}
                           </button>
                         ) : (
-                          <span className="muted" title="SSH-туннели только TCP">—</span>
+                          <span className="muted" title={t('ports.tcpOnlyTitle')}>—</span>
                         )}
                       </td>
                     </tr>
@@ -495,23 +502,21 @@ export function PortsPage({ profile, visible, showError }: Props) {
                 {snapshot && ports.length === 0 && (
                   <tr>
                     <td colSpan={7} className="muted">
-                      {filter.trim() ? 'Ничего не найдено по фильтру' : 'Прослушиваемых портов не найдено'}
+                      {filter.trim() ? t('ports.filterEmpty') : t('ports.noPorts')}
                     </td>
                   </tr>
                 )}
                 {!snapshot && (
                   <tr>
                     <td colSpan={7} className="muted">
-                      Загрузка…
+                      {t('common.loading')}
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
             <p className="muted ports-hint">
-              Имена процессов других пользователей видны только при подключении под root — без прав
-              колонка «Процесс» остаётся пустой. Опубликованные порты контейнеров видны как
-              безымянный docker-proxy — аннотация «docker: …» закрывает эту дыру.
+              {t('ports.hostHint')}
             </p>
           </div>
 
