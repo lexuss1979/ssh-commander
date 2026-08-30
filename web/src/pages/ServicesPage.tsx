@@ -12,6 +12,8 @@ import {
 import type { Profile } from '../types';
 import { Modal } from '../components/Modal';
 import { SortableTh, useSortBy } from '../hooks/useSortBy';
+import { useT } from '../i18n';
+import type { I18nKey, I18nParams } from '../i18n';
 
 interface Props {
   profile: Profile;
@@ -21,14 +23,16 @@ interface Props {
 
 const POLL_INTERVAL_MS = 5000;
 
-const ACTION_LABELS: Record<ServiceAction, string> = {
-  start: 'Запустить',
-  stop: 'Остановить',
-  restart: 'Перезапустить',
-  reload: 'Перезагрузить',
-  enable: 'Включить автозапуск',
-  disable: 'Выключить автозапуск',
-  'reset-failed': 'Сбросить failed',
+type TFn = (key: I18nKey, params?: I18nParams | number) => string;
+
+const ACTION_LABELS: Record<ServiceAction, I18nKey> = {
+  start: 'services.actionStart',
+  stop: 'services.actionStop',
+  restart: 'services.actionRestart',
+  reload: 'services.actionReload',
+  enable: 'services.actionEnable',
+  disable: 'services.actionDisable',
+  'reset-failed': 'services.actionResetFailed',
 };
 
 // Точное имя или префикс до `.service` — только усиливает confirm-текст, не блокирует.
@@ -91,24 +95,24 @@ function autoToggleable(enabled: UnitInfo['enabled']): boolean {
 }
 
 /** Подсказка под switch, когда enable/disable неприменимы. */
-function autoHint(enabled: UnitInfo['enabled']): string {
-  if (enabled === 'masked') return 'замаскирован — нужен unmask';
+function autoHint(t: TFn, enabled: UnitInfo['enabled']): string {
+  if (enabled === 'masked') return t('services.autoHintMasked');
   if (enabled === 'static' || enabled === 'indirect' || enabled === 'alias' || enabled === 'generated') {
-    return `автозапуск: ${enabled} — управляется системой`;
+    return t('services.autoHintSystem', { mode: enabled });
   }
   return '';
 }
 
-const DETAIL_FIELDS: Array<{ key: string; label: string }> = [
-  { key: 'MainPID', label: 'PID' },
-  { key: 'ActiveState', label: 'Состояние' },
-  { key: 'Restart', label: 'Рестарт' },
-  { key: 'NRestarts', label: 'Перезапусков' },
-  { key: 'Result', label: 'Результат' },
-  { key: 'FragmentPath', label: 'Файл unit' },
-  { key: 'MemoryCurrent', label: 'Память' },
-  { key: 'TasksCurrent', label: 'Задачи' },
-  { key: 'ActiveEnterTimestamp', label: 'Запущен' },
+const DETAIL_FIELDS: Array<{ key: string; label: I18nKey }> = [
+  { key: 'MainPID', label: 'services.fieldPid' },
+  { key: 'ActiveState', label: 'services.fieldState' },
+  { key: 'Restart', label: 'services.fieldRestart' },
+  { key: 'NRestarts', label: 'services.fieldRestarts' },
+  { key: 'Result', label: 'services.fieldResult' },
+  { key: 'FragmentPath', label: 'services.fieldUnitFile' },
+  { key: 'MemoryCurrent', label: 'services.fieldMemory' },
+  { key: 'TasksCurrent', label: 'services.fieldTasks' },
+  { key: 'ActiveEnterTimestamp', label: 'services.fieldStarted' },
 ];
 
 /** Цель подтверждения: действие + unit + необязательный откат (для switch автозапуска). */
@@ -119,6 +123,7 @@ interface ConfirmTarget {
 }
 
 export function ServicesPage({ profile, visible, showError }: Props) {
+  const { t, locale } = useT();
   const [snapshot, setSnapshot] = useState<ServicesSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -270,7 +275,7 @@ export function ServicesPage({ profile, visible, showError }: Props) {
       setConfirm(null);
       setAutoFlip(null);
       showNotice(
-        `${ACTION_LABELS[confirm.action]}: ${confirm.unit.name}${result.output ? ` — ${result.output}` : ''}`,
+        `${t(ACTION_LABELS[confirm.action])}: ${confirm.unit.name}${result.output ? ` — ${result.output}` : ''}`,
       );
       // Немедленный refetch снимка (кэш сброшен на сервере после мутации).
       setReloadKey((k) => k + 1);
@@ -289,7 +294,7 @@ export function ServicesPage({ profile, visible, showError }: Props) {
   const flipping = autoFlip?.name === selectedUnit?.name;
   const autoOn = flipping ? (autoFlip?.value ?? false) : selEnabled === 'enabled';
   const autoDisabled = !(autoToggleable(selEnabled) || flipping);
-  const autoHintText = autoHint(selEnabled);
+  const autoHintText = autoHint(t, selEnabled);
 
   return (
     <div className="page services-page">
@@ -297,48 +302,48 @@ export function ServicesPage({ profile, visible, showError }: Props) {
         <span className={`status-dot ${error ? 'error' : 'connected'}`} />
         <span className="status-text">
           {error
-            ? `Нет связи: ${error}`
+            ? t('common.noConnection', { error })
             : snapshot
-              ? `Обновлено ${new Date(snapshot.timestamp).toLocaleTimeString('ru-RU')}`
-              : 'Загрузка…'}
+              ? t('common.updated', { time: new Date(snapshot.timestamp).toLocaleTimeString(locale) })
+              : t('common.loading')}
         </span>
         <input
           className="search-input"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="Фильтр по имени или описанию…"
+          placeholder={t('services.filterPlaceholder')}
         />
         <label className="check">
           <input type="checkbox" checked={onlyRunning} onChange={(e) => setOnlyRunning(e.target.checked)} />
-          только запущенные
+          {t('services.onlyRunning')}
         </label>
         <label className="check">
           <input type="checkbox" checked={onlyFailed} onChange={(e) => setOnlyFailed(e.target.checked)} />
-          только сбойные
+          {t('services.onlyFailed')}
         </label>
         <div className="toolbar-actions">
           <button className="btn btn-ghost" onClick={() => setReloadKey((k) => k + 1)}>
-            Обновить
+            {t('common.refresh')}
           </button>
         </div>
       </div>
 
       {!snapshot ? (
         <div className="empty-state">
-          <p>Загрузка списка служб…</p>
+          <p>{t('services.loadingList')}</p>
         </div>
       ) : error && snapshot.units.length === 0 ? (
         <div className="empty-state">
-          <p>Сервер недоступен: {error}</p>
+          <p>{t('common.serverUnavailable', { error })}</p>
           <button className="btn btn-primary" onClick={() => setReloadKey((k) => k + 1)}>
-            Повторить
+            {t('common.retry')}
           </button>
         </div>
       ) : !snapshot.available ? (
         <div className="empty-state">
-          <p>{snapshot.reason ?? 'systemd недоступен'}</p>
+          <p>{snapshot.reason ?? t('services.systemdUnavailable')}</p>
           <p className="muted">
-            systemd не обнаружен (Alpine/OpenRC/контейнер?) — управление службами недоступно
+            {t('services.systemdNotFoundHint')}
           </p>
         </div>
       ) : (
@@ -347,12 +352,12 @@ export function ServicesPage({ profile, visible, showError }: Props) {
             <thead>
               <tr>
                 <SortableTh sortKey="name" currentSort={sort} onToggle={toggle}>
-                  Служба
+                  {t('services.colService')}
                 </SortableTh>
                 <SortableTh sortKey="status" currentSort={sort} onToggle={toggle}>
-                  Статус
+                  {t('services.colStatus')}
                 </SortableTh>
-                <th className="col-actions">Действия</th>
+                <th className="col-actions">{t('services.colActions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -385,7 +390,7 @@ export function ServicesPage({ profile, visible, showError }: Props) {
                     <div className="row-actions">
                       <button
                         className="btn btn-mini icon-btn btn-primary"
-                        title="Перезапустить"
+                        title={t('services.actionRestart')}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleActionRequest(u, 'restart');
@@ -396,7 +401,7 @@ export function ServicesPage({ profile, visible, showError }: Props) {
                       <span className="action-sep" />
                       <button
                         className="btn btn-mini icon-btn btn-ghost"
-                        title="Журнал"
+                        title={t('services.logs')}
                         onClick={(e) => {
                           e.stopPropagation();
                           setLogsUnit(u);
@@ -412,8 +417,8 @@ export function ServicesPage({ profile, visible, showError }: Props) {
                 <tr>
                   <td colSpan={3} className="muted">
                     {filter.trim() !== '' || onlyRunning || onlyFailed
-                      ? 'Ничего не найдено по фильтру'
-                      : 'Служб нет'}
+                      ? t('services.filterEmpty')
+                      : t('services.noServices')}
                   </td>
                 </tr>
               )}
@@ -492,6 +497,7 @@ function ServiceDetailModal({
   onLogs: () => void;
   onClose: () => void;
 }) {
+  const { t } = useT();
   return (
     <Modal title={unit.name} onClose={onClose} wide>
       <div className="svc-head">
@@ -500,7 +506,7 @@ function ServiceDetailModal({
           {statusText(unit)}
         </span>
         <label className="svc-switch">
-          <span className="muted">автозапуск</span>
+          <span className="muted">{t('services.autostart')}</span>
           <span className="switch">
             <input
               type="checkbox"
@@ -520,40 +526,40 @@ function ServiceDetailModal({
 
       <div className="services-actions">
         <button className="btn btn-mini btn-primary" onClick={() => onAction(unit, 'start')}>
-          Запустить
+          {t(ACTION_LABELS.start)}
         </button>
         <button className="btn btn-mini btn-danger" onClick={() => onAction(unit, 'stop')}>
-          Остановить
+          {t(ACTION_LABELS.stop)}
         </button>
         <button className="btn btn-mini btn-ghost" onClick={() => onAction(unit, 'restart')}>
-          Перезапустить
+          {t(ACTION_LABELS.restart)}
         </button>
         <button className="btn btn-mini btn-ghost" onClick={() => onAction(unit, 'reload')}>
-          Перезагрузить
+          {t(ACTION_LABELS.reload)}
         </button>
         {isFailed(unit) && (
           <button className="btn btn-mini btn-danger" onClick={() => onAction(unit, 'reset-failed')}>
-            {ACTION_LABELS['reset-failed']}
+            {t(ACTION_LABELS['reset-failed'])}
           </button>
         )}
         <span className="action-sep" />
         <button className="btn btn-mini btn-ghost" onClick={onLogs}>
-          Журнал
+          {t('services.logs')}
         </button>
       </div>
 
-      {loading && !detail && <p className="muted services-detail-loading">Загрузка деталей…</p>}
+      {loading && !detail && <p className="muted services-detail-loading">{t('services.detailLoading')}</p>}
       {detail && (
         <>
           <div className="detail-grid">
             {DETAIL_FIELDS.map((f) => (
               <div className="detail-cell" key={f.key}>
-                <span className="muted">{f.label}</span>
+                <span className="muted">{t(f.label)}</span>
                 <span className="detail-value">{detail.show[f.key] ?? '—'}</span>
               </div>
             ))}
           </div>
-          <pre className="logs-view services-status">{detail.status || '(статус пуст)'}</pre>
+          <pre className="logs-view services-status">{detail.status || t('services.statusEmpty')}</pre>
         </>
       )}
     </Modal>
@@ -583,7 +589,8 @@ function ActionConfirmModal({
   onClose: () => void;
   onConfirm: () => void;
 }) {
-  const label = ACTION_LABELS[action];
+  const { t } = useT();
+  const label = t(ACTION_LABELS[action]);
   const critical = isCriticalUnit(unit.name);
   return (
     <Modal title={`${label}: ${unit.name}`} onClose={onClose}>
@@ -591,28 +598,28 @@ function ActionConfirmModal({
         {label} <code>{unit.name}</code>?
       </p>
       {critical && (
-        <p className="critical-warning">⚠ Это может оборвать SSH/сеть на сервере — продолжить?</p>
+        <p className="critical-warning">{t('services.criticalWarning')}</p>
       )}
       <label>
-        sudo-пароль (если нужны права)
+        {t('services.sudoPasswordLabel')}
         <input
           type="password"
           value={sudoPassword}
           onChange={(e) => onSudoPasswordChange(e.target.value)}
-          placeholder="оставьте пустым, если прав хватает"
+          placeholder={t('services.sudoPasswordPlaceholder')}
           autoComplete="off"
         />
         <span className="muted" style={{ fontSize: 12 }}>
-          {' '}передаётся только на этот запрос
+          {' '}{t('services.sudoPasswordHint')}
         </span>
       </label>
       {error && <p className="error-text">{error}</p>}
       <div className="modal-actions">
         <button className="btn btn-ghost" onClick={onClose} disabled={busy}>
-          Отмена
+          {t('common.cancel')}
         </button>
         <button className="btn btn-primary" onClick={onConfirm} disabled={busy}>
-          {busy ? 'Выполняется…' : label}
+          {busy ? t('services.actionRunning') : label}
         </button>
       </div>
     </Modal>
@@ -638,6 +645,7 @@ function ServiceLogsModal({
   onClose: () => void;
   showError: (msg: string) => void;
 }) {
+  const { t } = useT();
   const [follow, setFollow] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
   const [tail, setTail] = useState(500);
@@ -680,7 +688,7 @@ function ServiceLogsModal({
     })
       .then(async (res) => {
         if (res.status === 429) {
-          let message = 'достигнут лимит одновременных журналов на сервер';
+          let message = t('services.logsLimitReached');
           try {
             message = (await res.json()).error ?? message;
           } catch {
@@ -720,21 +728,21 @@ function ServiceLogsModal({
       cancelled = true;
       controller.abort();
     };
-  }, [profile.id, unit.name, tail, follow, visible, showError, append]);
+  }, [profile.id, unit.name, tail, follow, visible, showError, append, t]);
 
   return (
-    <Modal title={`Журнал: ${unit.name}`} onClose={onClose} wide>
+    <Modal title={t('services.logsTitle', { name: unit.name })} onClose={onClose} wide>
       <div className="logs-toolbar">
         <label className="check">
           <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
-          Следовать за логами
+          {t('services.followLogs')}
         </label>
         <label className="check">
           <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} />
-          Автоскролл
+          {t('services.autoscroll')}
         </label>
         <label>
-          Строк:{' '}
+          {t('services.tailLabel')}{' '}
           <select value={tail} onChange={(e) => setTail(Number(e.target.value))}>
             <option value={200}>200</option>
             <option value={500}>500</option>
@@ -742,18 +750,18 @@ function ServiceLogsModal({
             <option value={5000}>5000</option>
           </select>
         </label>
-        {started && <span className="muted">подключено…</span>}
+        {started && <span className="muted">{t('services.connected')}</span>}
       </div>
       <pre className="logs-view" ref={preRef} />
       {!started && !hasContent && !failed && (
         <p className="muted services-log-hint">
-          Журнал пуст или недоступен: для чтения системного журнала пользователь должен быть в группе{' '}
-          <code>adm</code> или <code>systemd-journal</code>
+          {t('services.logHintPre')}{' '}
+          <code>adm</code> {t('services.logHintOr')} <code>systemd-journal</code>
         </p>
       )}
       <div className="modal-actions">
         <button className="btn" onClick={onClose}>
-          Закрыть
+          {t('common.close')}
         </button>
       </div>
     </Modal>
