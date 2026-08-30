@@ -10,6 +10,8 @@ import {
 import type { CronEntry, CronSnapshot } from '../api';
 import type { Profile } from '../types';
 import { Modal } from '../components/Modal';
+import { useT } from '../i18n';
+import type { I18nKey } from '../i18n';
 
 interface Props {
   profile: Profile;
@@ -19,14 +21,14 @@ interface Props {
 
 const POLL_INTERVAL_MS = 5000;
 
-const PRESETS: Array<{ label: string; value: string }> = [
-  { label: 'Своё расписание', value: '' },
-  { label: 'При загрузке системы (@reboot)', value: '@reboot' },
-  { label: 'Ежечасно (@hourly)', value: '@hourly' },
-  { label: 'Ежедневно (@daily)', value: '@daily' },
-  { label: 'Еженедельно (@weekly)', value: '@weekly' },
-  { label: 'Ежемесячно (@monthly)', value: '@monthly' },
-  { label: 'Ежегодно (@yearly)', value: '@yearly' },
+const PRESETS: Array<{ labelKey: I18nKey; value: string }> = [
+  { labelKey: 'cron.presetCustom', value: '' },
+  { labelKey: 'cron.presetReboot', value: '@reboot' },
+  { labelKey: 'cron.presetHourly', value: '@hourly' },
+  { labelKey: 'cron.presetDaily', value: '@daily' },
+  { labelKey: 'cron.presetWeekly', value: '@weekly' },
+  { labelKey: 'cron.presetMonthly', value: '@monthly' },
+  { labelKey: 'cron.presetYearly', value: '@yearly' },
 ];
 
 function presetOf(schedule: string): string {
@@ -49,6 +51,7 @@ function CronEntryModal({
   onClose: () => void;
   onSave: (schedule: string, command: string) => Promise<void>;
 }) {
+  const { t } = useT();
   const initialPreset = entry ? presetOf(entry.schedule) : '';
   const [preset, setPreset] = useState(initialPreset);
   const [schedule, setSchedule] = useState(entry && initialPreset === '' ? entry.schedule : '0 3 * * *');
@@ -59,11 +62,11 @@ function CronEntryModal({
   const handleSubmit = async () => {
     const finalSchedule = preset || schedule.trim();
     if (!finalSchedule) {
-      setError('Укажите расписание');
+      setError(t('cron.errorNoSchedule'));
       return;
     }
     if (!command.trim()) {
-      setError('Укажите команду');
+      setError(t('cron.errorNoCommand'));
       return;
     }
     setLoading(true);
@@ -79,20 +82,20 @@ function CronEntryModal({
   };
 
   return (
-    <Modal title={entry ? 'Изменить задачу' : 'Новая cron-задача'} onClose={onClose}>
+    <Modal title={entry ? t('cron.editTitle') : t('cron.newTitle')} onClose={onClose}>
       <label>
-        Расписание:
+        {t('cron.scheduleLabel')}
         <select value={preset} onChange={(e) => setPreset(e.target.value)}>
           {PRESETS.map((p) => (
             <option key={p.value} value={p.value}>
-              {p.label}
+              {t(p.labelKey)}
             </option>
           ))}
         </select>
       </label>
       {preset === '' && (
         <label>
-          Выражение:
+          {t('cron.expressionLabel')}
           <input
             type="text"
             value={schedule}
@@ -100,12 +103,12 @@ function CronEntryModal({
             placeholder="0 3 * * *"
           />
           <span className="muted" style={{ fontSize: 12 }}>
-            {' '}5 полей: минута час день месяц день-недели
+            {' '}{t('cron.expressionHint')}
           </span>
         </label>
       )}
       <label>
-        Команда:
+        {t('cron.commandLabel')}
         <input
           type="text"
           value={command}
@@ -116,10 +119,10 @@ function CronEntryModal({
       {error && <p className="error-text">{error}</p>}
       <div className="modal-actions">
         <button className="btn btn-ghost" onClick={onClose} disabled={loading}>
-          Отмена
+          {t('common.cancel')}
         </button>
         <button className="btn btn-primary" onClick={handleSubmit} disabled={loading}>
-          {loading ? 'Сохранение…' : 'Сохранить'}
+          {loading ? t('cron.saving') : t('common.save')}
         </button>
       </div>
     </Modal>
@@ -211,11 +214,12 @@ function ScheduleCell({ entry }: { entry: CronEntry }) {
 // Системная read-only таблица (/etc/crontab, /etc/cron.d/*) с колонкой «Пользователь».
 function SystemCronTable({
   entries,
-  emptyText = 'Задач нет',
+  emptyText,
 }: {
   entries: CronEntry[];
   emptyText?: string;
 }) {
+  const { t } = useT();
   return (
     <table className="data-table">
       <colgroup>
@@ -226,10 +230,10 @@ function SystemCronTable({
       </colgroup>
       <thead>
         <tr>
-          <th>Расписание</th>
-          <th>Команда</th>
-          <th>Пользователь</th>
-          <th>Статус</th>
+          <th>{t('cron.colSchedule')}</th>
+          <th>{t('cron.colCommand')}</th>
+          <th>{t('cron.colUser')}</th>
+          <th>{t('cron.colStatus')}</th>
         </tr>
       </thead>
       <tbody>
@@ -248,7 +252,7 @@ function SystemCronTable({
         {entries.length === 0 && (
           <tr>
             <td colSpan={4} className="muted">
-              {emptyText}
+              {emptyText ?? t('cron.noEntries')}
             </td>
           </tr>
         )}
@@ -258,6 +262,7 @@ function SystemCronTable({
 }
 
 export function CronPage({ profile, visible, showError }: Props) {
+  const { t, locale } = useT();
   const [snapshot, setSnapshot] = useState<CronSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -317,7 +322,7 @@ export function CronPage({ profile, visible, showError }: Props) {
 
   const handleOpError = (err: unknown) => {
     const e = err as Error & { status?: number };
-    showError(e.status === 409 ? `${e.message} (данные обновлены)` : e.message);
+    showError(e.status === 409 ? t('cron.opErrorRefreshed', { message: e.message }) : e.message);
     setReloadKey((k) => k + 1);
   };
 
@@ -347,7 +352,7 @@ export function CronPage({ profile, visible, showError }: Props) {
   };
 
   const handleDelete = async (entry: CronEntry) => {
-    if (!window.confirm(`Удалить задачу «${entry.command}» (${entry.schedule})?`)) return;
+    if (!window.confirm(t('cron.deleteConfirm', { command: entry.command, schedule: entry.schedule }))) return;
     setBusyIndex(entry.index);
     try {
       applySnapshot(await deleteCronEntry(profile.id, entry.index, entry.raw));
@@ -391,20 +396,20 @@ export function CronPage({ profile, visible, showError }: Props) {
         <span className={`status-dot ${error ? 'error' : 'connected'}`} />
         <span className="status-text">
           {error
-            ? `Нет связи: ${error}`
+            ? t('common.noConnection', { error })
             : snapshot
-              ? `Обновлено ${new Date(snapshot.timestamp).toLocaleTimeString('ru-RU')}`
-              : 'Загрузка…'}
+              ? t('common.updated', { time: new Date(snapshot.timestamp).toLocaleTimeString(locale) })
+              : t('common.loading')}
         </span>
         <input
           className="search-input"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="Фильтр по команде…"
+          placeholder={t('cron.filterPlaceholder')}
         />
         {users.length > 0 && (
           <>
-            <span className="toolbar-label">Пользователь</span>
+            <span className="toolbar-label">{t('cron.colUser')}</span>
             <select
               className="user-select"
               value={selectorValue}
@@ -413,7 +418,7 @@ export function CronPage({ profile, visible, showError }: Props) {
               {users.map((u) => (
                 <option key={u} value={u}>
                   {u}
-                  {u === currentUser ? ' (текущий)' : ''}
+                  {u === currentUser ? t('cron.currentSuffix') : ''}
                 </option>
               ))}
             </select>
@@ -424,21 +429,21 @@ export function CronPage({ profile, visible, showError }: Props) {
             className="btn btn-primary"
             onClick={() => setModal({})}
             disabled={!editable}
-            title={editable ? '' : 'Мутации доступны только для вашего crontab'}
+            title={editable ? '' : t('cron.mutationsOwnOnly')}
           >
-            Добавить задачу
+            {t('cron.addEntry')}
           </button>
           <button className="btn btn-ghost" onClick={() => setReloadKey((k) => k + 1)}>
-            Обновить
+            {t('common.refresh')}
           </button>
         </div>
       </div>
 
       {error && !snapshot ? (
         <div className="empty-state">
-          <p>Сервер недоступен: {error}</p>
+          <p>{t('common.serverUnavailable', { error })}</p>
           <button className="btn btn-primary" onClick={() => setReloadKey((k) => k + 1)}>
-            Повторить
+            {t('common.retry')}
           </button>
         </div>
       ) : (
@@ -447,17 +452,17 @@ export function CronPage({ profile, visible, showError }: Props) {
           <div className="cron-section">
             <div className="section-head">
               <h3 className="section-title">
-                Задачи пользователя {snapshot ? <code>{snapshot.username}</code> : ''}
-                {!editable && <span className="readonly-tag">только чтение</span>}
+                {t('cron.userEntriesTitle')} {snapshot ? <code>{snapshot.username}</code> : ''}
+                {!editable && <span className="readonly-tag">{t('cron.readOnlyTag')}</span>}
               </h3>
               <div className="section-actions">
                 <button
                   className="btn btn-mini btn-ghost"
                   onClick={handleDownload}
                   disabled={!snapshot?.userCrontab}
-                  title="Скачать crontab-файл как .txt"
+                  title={t('cron.downloadTitle')}
                 >
-                  ⬇ Скачать
+                  ⬇ {t('cron.download')}
                 </button>
               </div>
             </div>
@@ -471,10 +476,10 @@ export function CronPage({ profile, visible, showError }: Props) {
                 </colgroup>
                 <thead>
                   <tr>
-                    <th>Расписание</th>
-                    <th>Команда</th>
-                    <th>Статус</th>
-                    {editable && <th>Действия</th>}
+                    <th>{t('cron.colSchedule')}</th>
+                    <th>{t('cron.colCommand')}</th>
+                    <th>{t('cron.colStatus')}</th>
+                    {editable && <th>{t('cron.colActions')}</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -503,7 +508,7 @@ export function CronPage({ profile, visible, showError }: Props) {
                               className="btn btn-mini icon-btn btn-ghost"
                               disabled={busyIndex === e.index}
                               onClick={() => setModal({ entry: e })}
-                              title="Изменить"
+                              title={t('cron.edit')}
                             >
                               <IconEdit />
                             </button>
@@ -511,7 +516,7 @@ export function CronPage({ profile, visible, showError }: Props) {
                               className="btn btn-mini icon-btn btn-ghost"
                               disabled={busyIndex === e.index}
                               onClick={() => handleDelete(e)}
-                              title="Удалить"
+                              title={t('common.delete')}
                             >
                               <IconDelete />
                             </button>
@@ -524,17 +529,17 @@ export function CronPage({ profile, visible, showError }: Props) {
                     <tr>
                       <td colSpan={editable ? 4 : 3} className="muted">
                         {filterActive
-                          ? 'Ничего не найдено по фильтру'
+                          ? t('cron.filterEmpty')
                           : snapshot.userCrontab === null
-                            ? 'Crontab пользователя отсутствует — добавьте первую задачу'
-                            : 'Задач нет'}
+                            ? t('cron.noCrontab')
+                            : t('cron.noEntries')}
                       </td>
                     </tr>
                   )}
                   {!snapshot && (
                     <tr>
                       <td colSpan={editable ? 4 : 3} className="muted">
-                        Загрузка…
+                        {t('common.loading')}
                       </td>
                     </tr>
                   )}
@@ -542,7 +547,7 @@ export function CronPage({ profile, visible, showError }: Props) {
               </table>
               {userEnv.length > 0 && (
                 <div className="env-box">
-                  <b>Переменные окружения:</b>{' '}
+                  <b>{t('cron.envTitle')}</b>{' '}
                   {userEnv.map((line) => {
                     const i = line.indexOf('=');
                     const k = i === -1 ? line : line.slice(0, i);
@@ -564,13 +569,13 @@ export function CronPage({ profile, visible, showError }: Props) {
             <div className="cron-section">
               <div className="section-head">
                 <h3 className="section-title">
-                  Системный <code>/etc/crontab</code> <span className="muted">(только чтение)</span>
+                  {t('cron.systemCrontab')} <code>/etc/crontab</code> <span className="muted">{t('cron.readOnlySuffix')}</span>
                 </h3>
               </div>
               <div className="ports-scroll">
                 <SystemCronTable
                   entries={systemEntries}
-                  emptyText={filterActive ? 'Ничего не найдено по фильтру' : undefined}
+                  emptyText={filterActive ? t('cron.filterEmpty') : undefined}
                 />
               </div>
             </div>
@@ -581,13 +586,13 @@ export function CronPage({ profile, visible, showError }: Props) {
             <div className="cron-section" key={f.file}>
               <div className="section-head">
                 <h3 className="section-title">
-                  <code>{f.file}</code> <span className="muted">(только чтение)</span>
+                  <code>{f.file}</code> <span className="muted">{t('cron.readOnlySuffix')}</span>
                 </h3>
               </div>
               <div className="ports-scroll">
                 <SystemCronTable
                   entries={f.entries}
-                  emptyText={filterActive ? 'Ничего не найдено по фильтру' : undefined}
+                  emptyText={filterActive ? t('cron.filterEmpty') : undefined}
                 />
               </div>
             </div>
