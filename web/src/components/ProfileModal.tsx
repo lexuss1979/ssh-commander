@@ -10,6 +10,7 @@ import {
   type KeyEntry,
 } from '../api';
 import type { Profile } from '../types';
+import { useT } from '../i18n';
 import { Modal } from './Modal';
 
 interface Props {
@@ -72,6 +73,7 @@ type BootstrapPhase =
   | { phase: 'error'; message: string; steps: BootstrapStep[] };
 
 export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileCreated }: Props) {
+  const { t } = useT();
   const [editingId, setEditingId] = useState<string | null>(null);
   // Режим правой панели: обычная форма профиля или bootstrap «root + пароль».
   const [mode, setMode] = useState<'form' | 'bootstrap'>('form');
@@ -109,7 +111,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
     try {
       let overwrite = false;
       if (keys.some((k) => k.name === file.name)) {
-        overwrite = window.confirm(`Ключ «${file.name}» уже есть в хранилище. Перезаписать?`);
+        overwrite = window.confirm(t('profileModal.keyOverwriteConfirm', { name: file.name }));
         if (!overwrite) return;
       }
       const content = await file.text();
@@ -182,15 +184,15 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
   // Общая валидация формы и сборка payload (для сохранения и теста соединения).
   function buildPayload(): Record<string, unknown> | null {
     if (!form.name || !form.host || !form.username) {
-      showError('Заполните имя, хост и пользователя');
+      showError(t('profileModal.errorRequiredFields'));
       return null;
     }
     if (form.authType === 'key' && !form.keyPath) {
-      showError('Укажите путь к SSH-ключу внутри контейнера (например /keys/id_rsa)');
+      showError(t('profileModal.errorKeyPath'));
       return null;
     }
     if (form.authType === 'password' && !form.password) {
-      showError('Укажите пароль');
+      showError(t('profileModal.errorPassword'));
       return null;
     }
     return {
@@ -226,7 +228,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
   };
 
   const remove = async (id: string) => {
-    if (!window.confirm('Удалить профиль?')) return;
+    if (!window.confirm(t('profileModal.deleteConfirm'))) return;
     try {
       await api(`/api/profiles/${id}`, { method: 'DELETE' });
       await onSaved();
@@ -239,9 +241,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
   // файл окажется открытым текстом.
   const exportBackup = async () => {
     if (!transferNoSecrets && !transferPassword) {
-      const ok = window.confirm(
-        'Бэкап с секретами без пароля шифрования сохранит пароли открытым текстом. Продолжить?',
-      );
+      const ok = window.confirm(t('profileModal.exportNoPasswordConfirm'));
       if (!ok) return;
     }
     setTransferBusy(true);
@@ -257,7 +257,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
       a.download = 'ssh-commander-profiles.json';
       a.click();
       URL.revokeObjectURL(url);
-      setTransferMsg('Бэкап сохранён.');
+      setTransferMsg(t('profileModal.exportDone'));
     } catch (err) {
       showError((err as Error).message);
     } finally {
@@ -273,20 +273,18 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
       const text = await file.text();
       const summary = await importProfilesBackup(text, transferPassword || undefined);
       await onSaved();
-      const parts = [`Импортировано профилей: ${summary.imported}`];
-      if (summary.keysSaved) parts.push(`ключей сохранено: ${summary.keysSaved}`);
+      const parts = [t('profileModal.importedProfiles', { n: summary.imported })];
+      if (summary.keysSaved) parts.push(t('profileModal.keysSaved', { n: summary.keysSaved }));
       if (summary.keysSkipped.length) {
-        parts.push(`ключей пропущено (уже есть): ${summary.keysSkipped.length}`);
+        parts.push(t('profileModal.keysSkipped', { n: summary.keysSkipped.length }));
       }
       if (summary.renamed.length) {
         parts.push(
-          `переименованы: ${summary.renamed.map((r) => `${r.from} → ${r.to}`).join(', ')}`,
+          t('profileModal.renamed', { names: summary.renamed.map((r) => `${r.from} → ${r.to}`).join(', ') }),
         );
       }
       if (summary.needSecrets.length) {
-        parts.push(
-          `задайте секреты вручную: ${summary.needSecrets.join(', ')}`,
-        );
+        parts.push(t('profileModal.needSecrets', { names: summary.needSecrets.join(', ') }));
       }
       setTransferMsg(parts.join('; '));
     } catch (err) {
@@ -300,18 +298,18 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
     setForm((f) => ({ ...f, [key]: value }));
 
   return (
-    <Modal title="Управление серверами" onClose={onClose} wide>
+    <Modal title={t('profileModal.title')} onClose={onClose} wide>
       <div className="profiles-layout">
         <div className="profiles-list">
           <button className="btn btn-primary btn-block" onClick={startCreate}>
-            + Новый сервер
+            {t('profileModal.newServer')}
           </button>
           <button
             className={`btn btn-block ${mode === 'bootstrap' && !editingId ? 'btn-primary' : ''}`}
             onClick={startBootstrap}
-            title="Сгенерировать отдельный SSH-ключ, установить его на сервер по паролю и (опционально) закрыть парольный вход"
+            title={t('profileModal.bootstrapButtonTitle')}
           >
-            🔑 Новый сервер (root + пароль)…
+            {t('profileModal.bootstrapButton')}
           </button>
           {profiles.map((p) => (
             <div key={p.id} className={`profile-item ${editingId === p.id ? 'active' : ''}`}>
@@ -319,19 +317,19 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
                 <strong>{p.name}</strong>
                 <span className="muted">{p.username}@{p.host}:{p.port}</span>
               </button>
-              <button className="btn btn-danger" onClick={() => remove(p.id)} title="Удалить">
+              <button className="btn btn-danger" onClick={() => remove(p.id)} title={t('common.delete')}>
                 ✕
               </button>
             </div>
           ))}
 
           <div className="transfer-block">
-            <label className="sidebar-label">Перенос на другую машину</label>
+            <label className="sidebar-label">{t('profileModal.transferTitle')}</label>
             <input
               type="password"
               value={transferPassword}
               onChange={(e) => setTransferPassword(e.target.value)}
-              placeholder="Пароль шифрования (опционально)"
+              placeholder={t('profileModal.transferPasswordPlaceholder')}
             />
             <label className="transfer-check">
               <input
@@ -339,18 +337,18 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
                 checked={transferNoSecrets}
                 onChange={(e) => setTransferNoSecrets(e.target.checked)}
               />
-              Без секретов (пароли и ключи не включать)
+              {t('profileModal.transferNoSecrets')}
             </label>
             <div className="transfer-actions">
               <button className="btn" onClick={() => void exportBackup()} disabled={transferBusy}>
-                Экспорт
+                {t('profileModal.export')}
               </button>
               <button
                 className="btn"
                 onClick={() => backupFileRef.current?.click()}
                 disabled={transferBusy}
               >
-                Импорт…
+                {t('profileModal.import')}
               </button>
               <input
                 ref={backupFileRef}
@@ -378,43 +376,43 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
             />
           ) : (
             <>
-          <h3>{editingId ? 'Редактирование сервера' : 'Новый сервер'}</h3>
+          <h3>{editingId ? t('profileModal.editServer') : t('profileModal.formTitleNew')}</h3>
           <div className="form-grid">
             <label>
-              Имя
+              {t('profileModal.fieldName')}
               <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="prod-01" />
             </label>
             <label>
-              Хост
+              {t('profileModal.fieldHost')}
               <input value={form.host} onChange={(e) => set('host', e.target.value)} placeholder="example.com" />
             </label>
             <label>
-              Порт
+              {t('profileModal.fieldPort')}
               <input type="number" value={form.port} onChange={(e) => set('port', e.target.value)} />
             </label>
             <label>
-              Пользователь
+              {t('profileModal.fieldUsername')}
               <input value={form.username} onChange={(e) => set('username', e.target.value)} />
             </label>
             <label>
-              Аутентификация
+              {t('profileModal.fieldAuth')}
               <select
                 value={form.authType}
                 onChange={(e) => set('authType', e.target.value as 'key' | 'password')}
               >
-                <option value="password">Пароль</option>
-                <option value="key">SSH-ключ</option>
+                <option value="password">{t('profileModal.authPassword')}</option>
+                <option value="key">{t('profileModal.authKey')}</option>
               </select>
             </label>
             {form.authType === 'key' ? (
               <>
                 <label className="span-2">
-                  Ключ из папки keys/
+                  {t('profileModal.keyFromFolder')}
                   <select
                     value={form.keyPath}
                     onChange={(e) => set('keyPath', e.target.value)}
                   >
-                    <option value="">— выберите ключ —</option>
+                    <option value="">{t('profileModal.selectKey')}</option>
                     {keys.map((k) => (
                       <option key={k.path} value={k.path}>
                         {k.name}
@@ -423,14 +421,14 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
                   </select>
                   <span className="field-hint">
                     {keysError
-                      ? `Не удалось загрузить список: ${keysError}`
+                      ? t('profileModal.keysLoadFailed', { error: keysError })
                       : keys.length === 0
-                        ? 'В папке keys/ нет файлов. Импортируйте ключ кнопкой ниже или положите файл в keys/ вручную.'
-                        : 'Файлы из папки keys/ (в контейнере — /keys).'}
+                        ? t('profileModal.keysEmpty')
+                        : t('profileModal.keysHint')}
                   </span>
                 </label>
                 <label className="span-2">
-                  Путь к ключу (в контейнере)
+                  {t('profileModal.keyPathLabel')}
                   <div className="inline-field">
                     <input
                       value={form.keyPath}
@@ -438,7 +436,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
                       placeholder="/keys/id_rsa"
                     />
                     <button type="button" className="btn" onClick={() => void loadKeys()}>
-                      Обновить
+                      {t('common.refresh')}
                     </button>
                     <button
                       type="button"
@@ -446,7 +444,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
                       disabled={importBusy}
                       onClick={() => keyFileRef.current?.click()}
                     >
-                      {importBusy ? 'Загрузка…' : 'Импортировать…'}
+                      {importBusy ? t('common.loading') : t('profileModal.importKey')}
                     </button>
                     <input
                       ref={keyFileRef}
@@ -461,7 +459,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
                   </div>
                 </label>
                 <label>
-                  Passphrase ключа (если задана)
+                  {t('profileModal.keyPassphraseLabel')}
                   <input
                     type="password"
                     value={form.keyPassphrase}
@@ -472,7 +470,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
               </>
             ) : (
               <label>
-                Пароль
+                {t('profileModal.fieldPassword')}
                 <input
                   type="password"
                   value={form.password}
@@ -482,43 +480,44 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
               </label>
             )}
             <label>
-              Команда Docker
+              {t('profileModal.dockerCommandLabel')}
               <input value={form.dockerCommand} onChange={(e) => set('dockerCommand', e.target.value)} placeholder="docker" />
             </label>
             <label className="span-2">
-              Заметка
-              <input value={form.note} onChange={(e) => set('note', e.target.value)} placeholder="Описание (необязательно)" />
+              {t('profileModal.noteLabel')}
+              <input value={form.note} onChange={(e) => set('note', e.target.value)} placeholder={t('profileModal.notePlaceholder')} />
             </label>
           </div>
           <div className="modal-actions">
             <button className="btn btn-primary" onClick={save} disabled={busy}>
-              {busy ? 'Сохранение…' : 'Сохранить'}
+              {busy ? t('profileModal.saving') : t('common.save')}
             </button>
             <button
               className="btn"
               onClick={() => void testConn()}
               disabled={busy || testResult.phase === 'testing'}
             >
-              {testResult.phase === 'testing' ? 'Проверка…' : 'Проверить подключение'}
+              {testResult.phase === 'testing' ? t('profileModal.testing') : t('profileModal.testConnection')}
             </button>
             {editingId && (
               <button className="btn" onClick={() => { setEditingId(null); setForm(emptyForm); }}>
-                Отмена
+                {t('common.cancel')}
               </button>
             )}
           </div>
           {testResult.phase === 'ok' && (
             <p className="test-result test-result-ok">
-              Подключение успешно{testResult.banner ? ` — ${testResult.banner}` : ''}
+              {t('profileModal.testOk')}{testResult.banner ? ` — ${testResult.banner}` : ''}
             </p>
           )}
           {testResult.phase === 'error' && (
-            <p className="test-result test-result-error">Ошибка подключения: {testResult.message}</p>
+            <p className="test-result test-result-error">{t('profileModal.testError', { message: testResult.message })}</p>
           )}
           <p className="hint">
-            Ключи можно импортировать кнопкой «Импортировать…» — файл сохраняется в папку{' '}
-            <code>keys/</code> с правами <code>0600</code>. Либо положите ключ в <code>keys/</code>{' '}
-            вручную и укажите путь внутри контейнера, например <code>/keys/id_rsa</code>.
+            {t('profileModal.keysHelpPre')}
+            <code>keys/</code>{t('profileModal.keysHelpMid1')}<code>0600</code>
+            {t('profileModal.keysHelpMid2')}<code>keys/</code>{t('profileModal.keysHelpMid3')}
+            <code>/keys/id_rsa</code>.
           </p>
             </>
           )}
@@ -546,6 +545,7 @@ function BootstrapPanel({
   onProfileCreated?: (profileId: string) => void;
   onBack: () => void;
 }) {
+  const { t } = useT();
   const [form, setForm] = useState<BootstrapFormState>(emptyBootstrapForm);
   const [state, setState] = useState<BootstrapPhase>({ phase: 'idle' });
 
@@ -556,12 +556,12 @@ function BootstrapPanel({
 
   const submit = async () => {
     if (!form.name.trim() || !form.host.trim() || !form.username.trim() || !form.password) {
-      showError('Заполните имя, хост, пользователя и пароль');
+      showError(t('profileModal.bootstrapErrorRequired'));
       return;
     }
     const port = Number(form.port) || 22;
     if (port < 1 || port > 65535) {
-      showError('Порт — число от 1 до 65535');
+      showError(t('profileModal.bootstrapErrorPort'));
       return;
     }
     setState({ phase: 'busy' });
@@ -589,14 +589,15 @@ function BootstrapPanel({
 
   return (
     <>
-      <h3>Новый сервер (root + пароль)</h3>
+      <h3>{t('profileModal.bootstrapTitle')}</h3>
       <p className="field-hint">
-        Сервис сам сгенерирует отдельный ed25519-ключ, пропишет его на сервере, проверит вход
-        ключом и создаст профиль (<code>authType=key</code>). Пароль нигде не сохраняется.
+        {t('profileModal.bootstrapHintPre')}
+        <code>authType=key</code>
+        {t('profileModal.bootstrapHintPost')}
       </p>
       {state.phase === 'done' ? (
         <div className="bootstrap-report">
-          <p className="test-result test-result-ok">Сервер настроен, профиль «{form.name.trim()}» создан и выбран.</p>
+          <p className="test-result test-result-ok">{t('profileModal.bootstrapDone', { name: form.name.trim() })}</p>
           <div className="bootstrap-steps">
             {state.steps.map((s, i) => (
               <div key={i} className={`bootstrap-step bootstrap-step-${s.status}`}>
@@ -608,13 +609,13 @@ function BootstrapPanel({
           </div>
           <div className="modal-actions">
             <button className="btn btn-primary" onClick={() => setState({ phase: 'idle' })}>
-              Настроить ещё один
+              {t('profileModal.bootstrapAnother')}
             </button>
           </div>
         </div>
       ) : state.phase === 'error' ? (
         <div className="bootstrap-report">
-          <p className="test-result test-result-error">Bootstrap не удался: {state.message}</p>
+          <p className="test-result test-result-error">{t('profileModal.bootstrapFailed', { message: state.message })}</p>
           {state.steps.length > 0 && (
             <div className="bootstrap-steps">
               {state.steps.map((s, i) => (
@@ -631,7 +632,7 @@ function BootstrapPanel({
           )}
           <div className="modal-actions">
             <button className="btn" onClick={() => setState({ phase: 'idle' })}>
-              Исправить и повторить
+              {t('profileModal.bootstrapRetry')}
             </button>
           </div>
         </div>
@@ -639,23 +640,23 @@ function BootstrapPanel({
         <>
           <div className="form-grid">
             <label>
-              Имя
+              {t('profileModal.fieldName')}
               <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="prod-01" />
             </label>
             <label>
-              Хост
+              {t('profileModal.fieldHost')}
               <input value={form.host} onChange={(e) => set('host', e.target.value)} placeholder="203.0.113.10" />
             </label>
             <label>
-              Порт
+              {t('profileModal.fieldPort')}
               <input type="number" value={form.port} onChange={(e) => set('port', e.target.value)} />
             </label>
             <label>
-              Пользователь
+              {t('profileModal.fieldUsername')}
               <input value={form.username} onChange={(e) => set('username', e.target.value)} />
             </label>
             <label className="span-2">
-              Пароль
+              {t('profileModal.fieldPassword')}
               <input
                 type="password"
                 value={form.password}
@@ -671,28 +672,28 @@ function BootstrapPanel({
                 disabled={!hardeningAvailable || state.phase === 'busy'}
                 onChange={(e) => set('disablePasswordAuth', e.target.checked)}
               />
-              Запретить вход по паролю после настройки (рекомендуется)
+              {t('profileModal.bootstrapHardening')}
             </label>
           </div>
           <p className="field-hint">
             {hardeningAvailable ? (
-              <>Проверьте, что у вас есть доступ к консоли провайдера — парольный вход SSH будет закрыт.</>
+              <>{t('profileModal.bootstrapHardeningHint')}</>
             ) : (
-              <>Отключение парольного входа доступно только для пользователя root (v1); ключ будет установлен и без этого.</>
+              <>{t('profileModal.bootstrapHardeningRootOnly')}</>
             )}
           </p>
           <div className="modal-actions">
             <button className="btn btn-primary" onClick={() => void submit()} disabled={state.phase === 'busy'}>
-              {state.phase === 'busy' ? 'Настройка…' : 'Настроить сервер'}
+              {state.phase === 'busy' ? t('profileModal.bootstrapSubmitting') : t('profileModal.bootstrapSubmit')}
             </button>
             <button className="btn" onClick={onBack} disabled={state.phase === 'busy'}>
-              Обычная форма
+              {t('profileModal.bootstrapBack')}
             </button>
           </div>
           {state.phase === 'busy' && (
             <p className="bootstrap-busy">
               <span className="bootstrap-busy-dot" aria-hidden />
-              Настраивается, это может занять до минуты…
+              {t('profileModal.bootstrapBusy')}
             </p>
           )}
         </>
