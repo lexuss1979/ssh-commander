@@ -76,7 +76,6 @@ export const ru = {
   'aiCosts.tipCached': 'Кэш входа: {n} токенов',
   'aiCosts.tipCompletion': 'Выход: {n} токенов',
   'aiCosts.tipUnpriced': 'Неполная сумма: {n} вызовов без цены',
-  'aiCosts.noConnection': 'Нет связи: {error}',
   'aiCosts.periodTitle': 'Период отчёта',
   'aiCosts.loadFailed': 'Не удалось загрузить отчёт о расходах: {error}',
   'aiCosts.totalForPeriod': 'Всего за период',

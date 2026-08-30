@@ -64,7 +64,6 @@ export const en: typeof ru = {
   'aiCosts.tipCached': 'Cached input: {n} tokens',
   'aiCosts.tipCompletion': 'Output: {n} tokens',
   'aiCosts.tipUnpriced': 'Incomplete total: {n} calls without price',
-  'aiCosts.noConnection': 'No connection: {error}',
   'aiCosts.periodTitle': 'Report period',
   'aiCosts.loadFailed': 'Failed to load the cost report: {error}',
   'aiCosts.totalForPeriod': 'Total for period',

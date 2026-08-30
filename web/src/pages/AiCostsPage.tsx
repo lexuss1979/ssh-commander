@@ -131,7 +131,7 @@ export function AiCostsPage({ visible }: Props) {
         <span className={`status-dot ${error ? 'error' : 'connected'}`} />
         <span className="status-text">
           {error
-            ? t('aiCosts.noConnection', { error })
+            ? t('common.noConnection', { error })
             : report
               ? t('common.updated', { time: new Date(updatedAt).toLocaleTimeString(locale) })
               : t('common.loading')}
