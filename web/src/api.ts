@@ -1,4 +1,5 @@
 import type { AlertsResponse, FileSearchResult, Profile } from './types';
+import { activeLocale, t } from './i18n/core';
 
 export class ApiError extends Error {
   status: number;
@@ -897,7 +898,7 @@ export async function testDbConnection(
     if (res.status === 401) unauthorizedHandler?.();
     const err = body?.error as { message?: string } | string | undefined;
     if (err && typeof err === 'object') {
-      throw Object.assign(new Error(err.message ?? 'Ошибка запроса'), {
+      throw Object.assign(new Error(err.message ?? t('common.errorRequest')), {
         info: err as DbQueryErrorInfo,
       });
     }
@@ -1053,7 +1054,7 @@ export async function runDbQuery(
     if (res.status === 401) unauthorizedHandler?.();
     const err = body?.error as { message?: string } | string | undefined;
     if (err && typeof err === 'object') {
-      throw Object.assign(new Error(err.message ?? 'Ошибка запроса'), {
+      throw Object.assign(new Error(err.message ?? t('common.errorRequest')), {
         info: err as DbQueryErrorInfo,
       });
     }
@@ -1251,16 +1252,16 @@ export function formatUsd(v: number | null | undefined): string {
 }
 
 export function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} Б`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
-  if (bytes < 1024 * 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} ГБ`;
-  return `${(bytes / (1024 * 1024 * 1024 * 1024)).toFixed(2)} ТБ`;
+  if (bytes < 1024) return `${bytes} ${t('common.sizeUnit', 0)}`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} ${t('common.sizeUnit', 1)}`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} ${t('common.sizeUnit', 2)}`;
+  if (bytes < 1024 * 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} ${t('common.sizeUnit', 3)}`;
+  return `${(bytes / (1024 * 1024 * 1024 * 1024)).toFixed(2)} ${t('common.sizeUnit', 4)}`;
 }
 
 export function formatDate(ms: number): string {
   if (!ms) return '—';
-  return new Date(ms).toLocaleString('ru-RU', {
+  return new Date(ms).toLocaleString(activeLocale(), {
     day: '2-digit',
     month: '2-digit',
     year: '2-digit',
@@ -1276,18 +1277,10 @@ export function formatDate(ms: number): string {
 export function formatRelativeDate(ms: number): string {
   if (!ms) return '—';
   const minutes = Math.floor((Date.now() - ms) / 60000);
-  if (minutes < 1) return 'только что';
-  if (minutes < 60) return `${minutes} мин назад`;
+  if (minutes < 1) return t('time.justNow');
+  if (minutes < 60) return t('time.minutesAgo', minutes);
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} ${pluralHours(hours)} назад`;
+  if (hours < 24) return t('time.hoursAgo', hours);
   return formatDate(ms);
-}
-
-function pluralHours(n: number): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return 'час';
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'часа';
-  return 'часов';
 }
 

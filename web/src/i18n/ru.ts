@@ -30,6 +30,8 @@ export const ru = {
   'common.noConnection': 'Нет связи: {error}',
   'common.serverUnavailable': 'Сервер недоступен: {error}',
   'common.serverUnavailablePlain': 'Сервер недоступен',
+  // Единицы formatSize по индексу: 0=Б, 1=КБ, 2=МБ, 3=ГБ, 4=ТБ.
+  'common.sizeUnit': (i: number) => ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ'][i] ?? '',
 
   'login.hint': 'Введите пароль для доступа к веб-интерфейсу',
   'login.passwordPlaceholder': 'Пароль',

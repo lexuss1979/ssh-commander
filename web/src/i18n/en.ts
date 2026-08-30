@@ -18,6 +18,7 @@ export const en: typeof ru = {
   'common.noConnection': 'No connection: {error}',
   'common.serverUnavailable': 'Server unavailable: {error}',
   'common.serverUnavailablePlain': 'Server unavailable',
+  'common.sizeUnit': (i: number) => ['B', 'KB', 'MB', 'GB', 'TB'][i] ?? '',
 
   'login.hint': 'Enter the password to access the web interface',
   'login.passwordPlaceholder': 'Password',
