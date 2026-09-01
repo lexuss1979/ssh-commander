@@ -10,6 +10,10 @@ import type {
 } from '../types';
 import { Markdown } from '../components/Markdown';
 import { Modal } from '../components/Modal';
+import { useT } from '../i18n';
+import type { I18nKey, I18nParams } from '../i18n';
+
+type TFn = (key: I18nKey, params?: I18nParams | number) => string;
 
 interface Props {
   profile: Profile;
@@ -94,6 +98,7 @@ function terminalContextMessage(text: string, serverName: string): string {
 }
 
 export function AgentPage({ profile, showError, agentRequest, onAgentRequestConsumed, onActivity, onSqlInsert }: Props) {
+  const { t, locale } = useT();
   const [messages, setMessages] = useState<ChatMessageView[]>([]);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [input, setInput] = useState('');
@@ -150,6 +155,10 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   runningRef.current = running;
   const activeDialogueIdRef = useRef(activeDialogueId);
   activeDialogueIdRef.current = activeDialogueId;
+  // t для WS-эффекта без добавления в deps: смена языка не должна
+  // пересоздавать подключение (паттерн tRef из TerminalPage).
+  const tRef = useRef(t);
+  tRef.current = t;
 
   const pushAssistantToken = useCallback((token: string) => {
     setMessages((prev) => {
@@ -193,8 +202,8 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   const updateTool = useCallback((callId: string, patch: Partial<ToolCallView>) => {
     setMessages((prev) =>
       prev.map((m) =>
-        m.toolCalls?.some((t) => t.callId === callId)
-          ? { ...m, toolCalls: m.toolCalls.map((t) => (t.callId === callId ? { ...t, ...patch } : t)) }
+        m.toolCalls?.some((tc) => tc.callId === callId)
+          ? { ...m, toolCalls: m.toolCalls.map((tc) => (tc.callId === callId ? { ...tc, ...patch } : tc)) }
           : m,
       ),
     );
@@ -260,10 +269,10 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   const removeDialogue = useCallback(
     async (id: string) => {
       if (id === activeDialogueId && running) {
-        showError('Дождитесь завершения текущего диалога');
+        showError(t('agent.errorDialogueRunning'));
         return;
       }
-      if (!window.confirm('Удалить диалог? Это действие необратимо.')) return;
+      if (!window.confirm(t('agent.deleteConfirm'))) return;
       try {
         await api(`/api/ai/dialogues/${encodeURIComponent(id)}`, { method: 'DELETE' });
         const remaining = dialogues.filter((d) => d.id !== id);
@@ -279,7 +288,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
         showError((err as Error).message);
       }
     },
-    [activeDialogueId, running, dialogues, startNewDialogue, showError],
+    [activeDialogueId, running, dialogues, startNewDialogue, showError, t],
   );
 
   // Загрузка списка диалогов профиля; при отсутствии — создаём первый.
@@ -456,7 +465,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
         case 'error':
           setRunning(false);
           setSuggestion('');
-          showError(String(msg.message ?? 'Ошибка агента'));
+          showError(String(msg.message ?? tRef.current('agent.errorFallback')));
           void refreshDialogues();
           break;
       }
@@ -531,7 +540,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   // Одновременно висит максимум одно подтверждение (сервер обрабатывает
   // вызовы последовательно) — плашка показывает ровно один pending-вызов.
   const pendingTool: ToolCallView | null =
-    messages.flatMap((m) => m.toolCalls ?? []).find((t) => t.status === 'pending') ?? null;
+    messages.flatMap((m) => m.toolCalls ?? []).find((tc) => tc.status === 'pending') ?? null;
 
   // Индикатор активности для сайдбара (App): висящее подтверждение (pending)
   // важнее, чем просто «работает» — без него агент молча ждёт approve в фоне.
@@ -582,7 +591,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     }
     if (mode === 'new-dialogue') {
       if (runningRef.current) {
-        showError('Агент выполняет задачу — дождитесь завершения');
+        showError(t('agent.errorBusy'));
         onAgentRequestConsumed?.();
         return;
       }
@@ -605,7 +614,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       setInput(content);
     }
     onAgentRequestConsumed?.();
-  }, [agentRequest, planMode, sendWs, onAgentRequestConsumed, profile.name, showError, startNewDialogue]);
+  }, [agentRequest, planMode, sendWs, onAgentRequestConsumed, profile.name, showError, startNewDialogue, t]);
 
   // «→ SQL» из sql-блока ответа: SQL уходит в редактор консоли нужного
   // профиля, App переключает на вкладку «Базы данных».
@@ -670,11 +679,11 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   // соединения нет — не запускаем (модалка остаётся открытой).
   const startAudit = () => {
     if (!connected || !activeDialogueId) {
-      showError('Нет соединения с агентом');
+      showError(t('agent.auditNoConnection'));
       return;
     }
     if (running) {
-      showError('Агент сейчас выполняет задачу — дождитесь завершения');
+      showError(t('agent.errorBusyNow'));
       return;
     }
     const password = auditPassword;
@@ -707,13 +716,13 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                 <path d="M12 3l1.9 5.8 5.8 1.9-5.8 1.9L12 18.4l-1.9-5.8-5.8-1.9 5.8-1.9z" />
               </svg>
             </span>
-            AI-агент
+            {t('app.agent')}
           </span>
           <div className="agent-head-actions">
             <div className="agent-history" ref={historyRef}>
               <button
                 className={`headbtn ${historyOpen ? 'open' : ''}`}
-                title="История диалогов"
+                title={t('agent.historyTitle')}
                 onClick={() => {
                   const next = !historyOpen;
                   setHistoryOpen(next);
@@ -737,7 +746,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
               {historyOpen && (
                 <div className="agent-history-dropdown">
                   <div className="agent-history-head">
-                    <span className="sidebar-label">Диалоги</span>
+                    <span className="sidebar-label">{t('agent.dialogues')}</span>
                     <button
                       className="btn btn-primary btn-mini"
                       onClick={() => {
@@ -745,12 +754,12 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                         void startNewDialogue();
                       }}
                     >
-                      Новый
+                      {t('agent.new')}
                     </button>
                   </div>
                   <div className="agent-history-list">
                     {dialogues.length === 0 && !loading && (
-                      <div className="muted dialogue-empty">Пока нет диалогов</div>
+                      <div className="muted dialogue-empty">{t('agent.emptyDialogues')}</div>
                     )}
                     {dialogues.map((d) => (
                       <div
@@ -768,7 +777,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                         {d.extraProfileIds && d.extraProfileIds.length > 0 && (
                           <span
                             className="dialogue-badge"
-                            title={`Мульти-серверный диалог: подключено ещё ${d.extraProfileIds.length} серверов`}
+                            title={t('agent.multiServerTitle', { n: d.extraProfileIds.length })}
                           >
                             +{d.extraProfileIds.length}
                           </span>
@@ -779,7 +788,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                         </div>
                         <button
                           className="dialogue-delete"
-                          title="Удалить диалог"
+                          title={t('agent.deleteDialogueTitle')}
                           onClick={(e) => {
                             e.stopPropagation();
                             void removeDialogue(d.id);
@@ -795,7 +804,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
             </div>
             <button
               className="headbtn"
-              title="Начать новый диалог (текущий останется в истории)"
+              title={t('agent.newDialogueTitle')}
               onClick={() => void startNewDialogue()}
             >
               <svg
@@ -813,7 +822,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
             </button>
             <button
               className="headbtn"
-              title="Детерминированная проверка безопасности сервера (инструмент security_audit)"
+              title={t('agent.auditButtonTitle')}
               onClick={() => {
                 setAuditServerId('');
                 setAuditOpen(true);
@@ -839,7 +848,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
             className={`status-dot ${connected ? (running ? 'pending' : 'connected') : 'disconnected'}`}
           />
           <span className="status-label">
-            {running ? 'выполняется…' : connected ? 'готов' : 'нет соединения'}
+            {running ? t('agent.statusRunning') : connected ? t('agent.statusReady') : t('agent.statusDisconnected')}
           </span>
           <span className="sep" />
           <span className="agent-ctx" title={`${profile.name} — ${profile.username}@${profile.host}`}>
@@ -849,7 +858,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
             {activeUsage && activeUsage.calls > 0 && (
               <span
                 className="cost-badge"
-                title={usageTooltip(activeUsage)}
+                title={usageTooltip(activeUsage, t, locale)}
                 data-unpriced={activeUsage.unpricedCalls > 0 ? 'true' : undefined}
               >
                 {/* Ни один вызов не протарифицирован — $0.0000 врал бы «бесплатно» */}
@@ -858,7 +867,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
             )}
             <label
               className="mini-switch"
-              title="Сначала составить пошаговый план и показать его на подтверждение — ничего не выполняя"
+              title={t('agent.planSwitchTitle')}
             >
               <input
                 type="checkbox"
@@ -866,11 +875,11 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                 onChange={(e) => setPlanMode(e.target.checked)}
               />
               <span className="sw" />
-              План
+              {t('agent.planSwitch')}
             </label>
             {running && (
               <button className="btn btn-danger" onClick={() => sendWs({ type: 'stop' })}>
-                Стоп
+                {t('agent.stop')}
               </button>
             )}
           </div>
@@ -887,7 +896,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
               {s.id !== homeServerId && (
                 <button
                   className="server-chip-remove"
-                  title="Отключить сервер от диалога"
+                  title={t('agent.detachServerTitle')}
                   onClick={() => sendWs({ type: 'detach_server', profileId: s.id })}
                 >
                   ✕
@@ -898,7 +907,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           <div className="server-add" ref={addRef}>
             <button
               className="btn btn-ghost btn-mini"
-              title="Подключить сервер к диалогу"
+              title={t('agent.attachServerTitle')}
               onClick={toggleAdd}
             >
               +
@@ -906,7 +915,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
             {addOpen && (
               <div className="server-add-dropdown">
                 {availableProfiles.length === 0 && (
-                  <div className="muted server-add-empty">Нет других серверов</div>
+                  <div className="muted server-add-empty">{t('agent.noOtherServers')}</div>
                 )}
                 {availableProfiles.map((p) => (
                   <button
@@ -931,15 +940,8 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
         <div className="agent-messages" ref={listRef}>
           {messages.length === 0 && (
             <div className="empty-state">
-              <p>
-                Опишите задачу: например, «покажи состояние сервера и запущенные контейнеры»,
-                «найди, кто занимает порт 8080», «обнови конфиг nginx».
-              </p>
-              <p className="muted">
-                Команды чтения выполняются автоматически. Действия записи требуют подтверждения — плашка
-                с кнопками «Подтвердить» и «Отклонить» появится у поля ввода. Диалоги сохраняются
-                автоматически.
-              </p>
+              <p>{t('agent.emptyHintTask')}</p>
+              <p className="muted">{t('agent.emptyHintRules')}</p>
             </div>
           )}
           {messages.map((m) => (
@@ -954,7 +956,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                     <button
                       className={`copy-bubble-btn ${copiedId === m.id ? 'copied' : ''}`}
                       onClick={() => handleCopyMessage(m)}
-                      title="Скопировать сообщение"
+                      title={t('agent.copyTitle')}
                     >
                       {copiedId === m.id ? <CheckIcon /> : <CopyIcon />}
                     </button>
@@ -963,11 +965,11 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
               )}
               {m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0 && (
                 <div className="tool-calls">
-                  {m.toolCalls.map((t) => (
+                  {m.toolCalls.map((tc) => (
                     <ToolCard
-                      key={t.callId}
-                      tool={t}
-                      decided={decidedCalls.has(t.callId)}
+                      key={tc.callId}
+                      tool={tc}
+                      decided={decidedCalls.has(tc.callId)}
                       registerCard={registerCard}
                     />
                   ))}
@@ -1025,7 +1027,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
               }
             }}
             placeholder={
-              suggestion ? `${suggestion} · Tab — подставить` : 'Задача для агента… (Enter — отправить)'
+              suggestion ? t('agent.suggestionPlaceholder', { suggestion }) : t('agent.inputPlaceholder')
             }
             rows={2}
           />
@@ -1034,21 +1036,19 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
             onClick={send}
             disabled={!connected || running || !input.trim() || !activeDialogueId}
           >
-            Отправить
+            {t('agent.send')}
           </button>
         </div>
       </div>
 
       {auditOpen && (
-        <Modal title="Проверка безопасности" onClose={() => setAuditOpen(false)}>
+        <Modal title={t('agent.auditTitle')} onClose={() => setAuditOpen(false)}>
           <p className="muted">
-            Агент выполнит детерминированный аудит сервера (ssh, сеть, обновления, активность,
-            docker, файловая система) и составит отчёт. Для root-проверок (/etc/shadow, sudoers,
-            неудачные логины и т.п.) можно указать sudo-пароль.
+            {t('agent.auditDesc')}
           </p>
           <div className="form-grid">
             <label>
-              Сервер
+              {t('agent.auditServerLabel')}
               <select value={auditServerId || homeServerId} onChange={(e) => setAuditServerId(e.target.value)}>
                 {attachedServers.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -1058,7 +1058,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
               </select>
             </label>
             <label>
-              sudo-пароль (необязательно)
+              {t('agent.auditPasswordLabel')}
               <input
                 type="password"
                 autoComplete="new-password"
@@ -1070,20 +1070,19 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                     startAudit();
                   }
                 }}
-                placeholder="Без пароля root-проверки будут пропущены"
+                placeholder={t('agent.auditPasswordPlaceholder')}
               />
             </label>
           </div>
           <p className="muted">
-            Пароль не сохраняется, не передаётся модели и не попадает в историю диалога — он живёт
-            только в памяти текущей сессии агента.
+            {t('agent.auditPasswordNote')}
           </p>
           <div className="modal-actions">
             <button className="btn btn-ghost" onClick={() => setAuditOpen(false)}>
-              Отмена
+              {t('common.cancel')}
             </button>
             <button className="btn btn-primary" onClick={startAudit}>
-              Запустить проверку
+              {t('agent.auditStart')}
             </button>
           </div>
         </Modal>
@@ -1107,15 +1106,15 @@ function toSummary(d: Dialogue): DialogueSummary {
 
 // Подсказка бейджа стоимости: вызовы и токены (вход/выход/кэш); при вызовах
 // без цены модели — честная пометка «неполная сумма».
-function usageTooltip(u: DialogueUsageTotals): string {
+function usageTooltip(u: DialogueUsageTotals, t: TFn, locale: string): string {
   const parts = [
-    `Вызовов: ${u.calls}`,
-    `Вход: ${u.promptTokens.toLocaleString('ru-RU')} токенов`,
-    `Кэш входа: ${u.cachedTokens.toLocaleString('ru-RU')} токенов`,
-    `Выход: ${u.completionTokens.toLocaleString('ru-RU')} токенов`,
+    t('agent.usageCalls', { n: u.calls }),
+    t('aiCosts.tipPrompt', { n: u.promptTokens.toLocaleString(locale) }),
+    t('aiCosts.tipCached', { n: u.cachedTokens.toLocaleString(locale) }),
+    t('aiCosts.tipCompletion', { n: u.completionTokens.toLocaleString(locale) }),
   ];
   if (u.unpricedCalls > 0) {
-    parts.push(`Неполная сумма: ${u.unpricedCalls} вызовов без цены модели`);
+    parts.push(t('agent.usageUnpriced', { n: u.unpricedCalls }));
   }
   return parts.join('\n');
 }
@@ -1169,31 +1168,32 @@ function messagesToViews(messages: DialogueMessage[]): ChatMessageView[] {
   return views;
 }
 
-const TOOL_LABELS: Record<string, string> = {
-  exec: 'Выполнить команду',
-  exec_readonly: 'Команда чтения',
-  read_file: 'Прочитать файл',
-  read_memory: 'Прочитать память',
-  list_dir: 'Список файлов',
-  write_file: 'Записать файл',
-  write_memory: 'Обновить память',
-  docker_ps: 'Список контейнеров',
-  docker_logs: 'Логи контейнера',
-  docker_inspect: 'Inspect Docker',
-  docker_action: 'Действие Docker',
-  security_audit: 'Аудит безопасности',
-  web_search: '🌐 Поиск в интернете',
-  list_servers: 'Список серверов',
+const TOOL_LABEL_KEYS: Record<string, I18nKey> = {
+  exec: 'agent.tool.exec',
+  exec_readonly: 'agent.tool.execReadonly',
+  read_file: 'agent.tool.readFile',
+  read_memory: 'agent.tool.readMemory',
+  list_dir: 'agent.tool.listDir',
+  write_file: 'agent.tool.writeFile',
+  write_memory: 'agent.tool.writeMemory',
+  docker_ps: 'agent.tool.dockerPs',
+  docker_logs: 'agent.tool.dockerLogs',
+  docker_inspect: 'agent.tool.dockerInspect',
+  docker_action: 'agent.tool.dockerAction',
+  security_audit: 'agent.tool.securityAudit',
+  web_search: 'agent.tool.webSearch',
+  list_servers: 'agent.tool.listServers',
 };
 
 // Человекочитаемый лейбл вызова; connect_server — карточка-вопрос про целевой
 // сервер (приходит в поле server события, он ещё не подключён; фолбэк — args.server).
-function toolLabel(tool: ToolCallView): string {
+function toolLabel(tool: ToolCallView, t: TFn): string {
   if (tool.name === 'connect_server') {
     const target = tool.server ?? String(tool.args?.server ?? '');
-    return `Подключить «${target}» к диалогу${tool.status === 'pending' ? '?' : ''}`;
+    return t('agent.toolConnectServer', { target }) + (tool.status === 'pending' ? '?' : '');
   }
-  return TOOL_LABELS[tool.name] ?? tool.name;
+  const key = TOOL_LABEL_KEYS[tool.name];
+  return key ? t(key) : tool.name;
 }
 
 // Главный аргумент вызова (запрос поиска, команда, путь) — видно,
@@ -1210,34 +1210,34 @@ function mainArgPreview(args?: Record<string, unknown>): string {
 // команда exec целиком (многострочная), путь + размер содержимого
 // write_file, сводка write_memory, docker-действие с целью;
 // без главного аргумента — pretty-JSON args (как «Детали» карточки).
-function fullArgText(tool: ToolCallView): string {
+function fullArgText(tool: ToolCallView, t: TFn, locale: string): string {
   const args = tool.args ?? {};
   if (tool.name === 'write_file') {
-    const lines = [`путь: ${typeof args.path === 'string' && args.path ? args.path : '—'}`];
+    const lines = [t('agent.argPath', { path: typeof args.path === 'string' && args.path ? args.path : '—' })];
     if (typeof args.content === 'string') {
-      lines.push(`содержимое: ${args.content.length.toLocaleString('ru-RU')} симв.`);
+      lines.push(t('agent.argContent', { n: args.content.length.toLocaleString(locale) }));
     }
     return lines.join('\n');
   }
   if (tool.name === 'write_memory') {
     const lines: string[] = [];
-    if (typeof args.reason === 'string' && args.reason.trim()) lines.push(`причина: ${args.reason.trim()}`);
+    if (typeof args.reason === 'string' && args.reason.trim()) lines.push(t('agent.argReason', { reason: args.reason.trim() }));
     if (typeof args.content === 'string') {
-      lines.push(`новый текст MEMORY.md: ${args.content.length.toLocaleString('ru-RU')} симв.`);
+      lines.push(t('agent.argMemoryContent', { n: args.content.length.toLocaleString(locale) }));
     }
     return lines.join('\n');
   }
   if (tool.name === 'docker_action') {
-    const lines = [`действие: ${typeof args.action === 'string' && args.action ? args.action : '—'}`];
-    const parts: Array<[string, string]> = [
-      ['target', 'цель'],
-      ['image', 'образ'],
-      ['name', 'имя'],
-      ['command', 'команда'],
+    const lines = [t('agent.argAction', { action: typeof args.action === 'string' && args.action ? args.action : '—' })];
+    const parts: Array<[string, I18nKey]> = [
+      ['target', 'agent.argLabelTarget'],
+      ['image', 'agent.argLabelImage'],
+      ['name', 'agent.argLabelName'],
+      ['command', 'agent.argLabelCommand'],
     ];
-    for (const [key, label] of parts) {
+    for (const [key, labelKey] of parts) {
       const v = args[key];
-      if (typeof v === 'string' && v.trim()) lines.push(`${label}: ${v}`);
+      if (typeof v === 'string' && v.trim()) lines.push(`${t(labelKey)}: ${v}`);
     }
     return lines.join('\n');
   }
@@ -1250,8 +1250,9 @@ function ToolCard({ tool, decided, registerCard }: {
   decided: boolean;
   registerCard: (callId: string, el: HTMLDivElement | null) => void;
 }) {
+  const { t } = useT();
   const [expanded, setExpanded] = useState(false);
-  const name = toolLabel(tool);
+  const name = toolLabel(tool, t);
   // Пока инструмент выполняется или ждёт подтверждения, вместо вывода
   // показываем его главный аргумент (запрос поиска, команду, путь).
   const argPreview = mainArgPreview(tool.args);
@@ -1271,14 +1272,14 @@ function ToolCard({ tool, decided, registerCard }: {
         <span className={`tool-dot ${tool.status}`} />
         <span className="tool-name" title={name}>{name}</span>
         {tool.server && tool.name !== 'connect_server' && (
-          <span className="tool-server" title={`Сервер: ${tool.server}`}>
+          <span className="tool-server" title={t('agent.serverBadgeTitle', { name: tool.server })}>
             {tool.server}
           </span>
         )}
         {tool.status === 'pending' ? (
           <>
             <span className="tool-status">
-              {decided ? 'выполняется…' : 'ждёт подтверждения · кнопки — внизу панели'}
+              {decided ? t('agent.statusRunning') : t('agent.toolWaiting')}
             </span>
             <span className="tool-preview" title={preview}>{short || '—'}</span>
           </>
@@ -1286,31 +1287,31 @@ function ToolCard({ tool, decided, registerCard }: {
           <>
             <span className={`tool-status ${tool.status}`}>
               {tool.status === 'running'
-                ? 'выполняется…'
+                ? t('agent.statusRunning')
                 : tool.status === 'ok'
-                  ? 'выполнено'
+                  ? t('agent.toolOk')
                   : tool.status === 'rejected'
-                    ? 'отклонено'
-                    : 'ошибка'}
+                    ? t('agent.toolRejected')
+                    : t('agent.toolError')}
             </span>
             <span className="tool-preview" title={preview}>{short || '—'}</span>
           </>
         )}
         <button className="btn btn-ghost btn-mini tool-toggle" onClick={() => setExpanded((x) => !x)}>
-          {expanded ? 'Скрыть' : 'Детали'}
+          {expanded ? t('agent.hide') : t('agent.details')}
         </button>
       </div>
       {expanded && (
         <div className="tool-details">
           {Object.keys(tool.args).length > 0 && (
             <>
-              <div className="tool-details-label">Аргументы</div>
+              <div className="tool-details-label">{t('agent.argsLabel')}</div>
               <pre className="args-view">{JSON.stringify(tool.args, null, 2)}</pre>
             </>
           )}
           {tool.output !== undefined && (
             <>
-              <div className="tool-details-label">Вывод{tool.truncated ? ' (обрезан)' : ''}</div>
+              <div className="tool-details-label">{t('agent.outputLabel')}{tool.truncated ? t('agent.outputTruncated') : ''}</div>
               <pre className="output-view">{tool.output}</pre>
             </>
           )}
@@ -1331,13 +1332,14 @@ function PendingBar({ tool, decided, onApprove, onReject, onScrollToCard }: {
   onReject: () => void;
   onScrollToCard: () => void;
 }) {
+  const { t, locale } = useT();
   const [expanded, setExpanded] = useState(false);
   // Очередь подтверждений: смена вызова мгновенно заменяет содержимое
   // плашки — раскрытие не переносится на следующий вызов.
   useEffect(() => {
     setExpanded(false);
   }, [tool.callId]);
-  const name = toolLabel(tool);
+  const name = toolLabel(tool, t);
   const preview = mainArgPreview(tool.args).replace(/\s+/g, ' ').trim();
   const short = preview.length > 80 ? `${preview.slice(0, 80)}…` : preview;
 
@@ -1345,13 +1347,13 @@ function PendingBar({ tool, decided, onApprove, onReject, onScrollToCard }: {
     <div className="pending-bar">
       <div
         className="pending-bar-row"
-        title="Показать карточку вызова в ленте"
+        title={t('agent.showCardTitle')}
         onClick={onScrollToCard}
       >
         <span className={`tool-dot ${decided ? 'running' : 'pending'}`} />
         <span className="pending-bar-name" title={name}>{name}</span>
         {tool.server && tool.name !== 'connect_server' && (
-          <span className="tool-server" title={`Сервер: ${tool.server}`}>
+          <span className="tool-server" title={t('agent.serverBadgeTitle', { name: tool.server })}>
             {tool.server}
           </span>
         )}
@@ -1363,10 +1365,10 @@ function PendingBar({ tool, decided, onApprove, onReject, onScrollToCard }: {
             setExpanded((x) => !x);
           }}
         >
-          {expanded ? 'Скрыть' : 'Подробнее'}
+          {expanded ? t('agent.hide') : t('agent.more')}
         </button>
         {decided ? (
-          <span className="tool-status running">выполняется…</span>
+          <span className="tool-status running">{t('agent.statusRunning')}</span>
         ) : (
           <>
             <button
@@ -1376,7 +1378,7 @@ function PendingBar({ tool, decided, onApprove, onReject, onScrollToCard }: {
                 onApprove();
               }}
             >
-              Подтвердить
+              {t('agent.approve')}
             </button>
             <button
               className="btn btn-danger btn-mini"
@@ -1385,13 +1387,13 @@ function PendingBar({ tool, decided, onApprove, onReject, onScrollToCard }: {
                 onReject();
               }}
             >
-              Отклонить
+              {t('agent.reject')}
             </button>
           </>
         )}
       </div>
       {expanded && (
-        <pre className="args-view pending-bar-details">{fullArgText(tool)}</pre>
+        <pre className="args-view pending-bar-details">{fullArgText(tool, t, locale)}</pre>
       )}
     </div>
   );
@@ -1400,15 +1402,15 @@ function PendingBar({ tool, decided, onApprove, onReject, onScrollToCard }: {
 // Карточка «План готов»: запускает исполнение плана (approve_plan).
 // Отказ от плана — просто написать правки в чат: план будет пересоставлен.
 function PlanCard({ onExecute }: { onExecute: () => void }) {
+  const { t } = useT();
   // Решение отправлено на сервер — блокируем кнопку (паттерн как в ToolCard).
   const [sent, setSent] = useState(false);
   return (
     <div className="plan-card">
       <div className="plan-card-info">
-        <span className="plan-card-title">План готов</span>
+        <span className="plan-card-title">{t('agent.planReady')}</span>
         <span className="plan-card-hint muted">
-          Нажмите «Выполнить», чтобы агент приступил к плану (действия записи по-прежнему потребуют
-          подтверждения), или напишите правки — план будет пересоставлен.
+          {t('agent.planHint')}
         </span>
       </div>
       <button
@@ -1419,7 +1421,7 @@ function PlanCard({ onExecute }: { onExecute: () => void }) {
           onExecute();
         }}
       >
-        {sent ? 'Запущено…' : 'Выполнить'}
+        {sent ? t('agent.planStarted') : t('agent.planExecute')}
       </button>
     </div>
   );
