@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { memoryPromptHeader, type PromptLang } from './prompts.js';
 
 /**
  * Per-profile agent memory: a MEMORY.md file stored in DATA_DIR/memory.
@@ -65,11 +66,12 @@ export function writeMemory(profileId: string, content: string): { path: string;
 /**
  * Formatted block for the system prompt. Returns null when there is nothing
  * to inject, so the prompt stays identical for fresh profiles.
+ * The header language follows the agent language (config.ai.lang).
  */
-export function memoryPromptBlock(profileId: string): string | null {
+export function memoryPromptBlock(profileId: string, lang: PromptLang = 'ru'): string | null {
   const content = readMemory(profileId);
   if (content === null) {
     return null;
   }
-  return `Память профиля (MEMORY.md — заметки из прошлых сессий):\n${content}`;
+  return `${memoryPromptHeader(lang)}\n${content}`;
 }

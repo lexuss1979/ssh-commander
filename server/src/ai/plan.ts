@@ -1,13 +1,13 @@
 import type { ChatMessage, ToolDef } from './client.js';
 import { getToolDefs } from './tools.js';
+import { planModeInstruction } from './prompts.js';
+import { config } from '../config.js';
 
 /**
  * Дополнение к системному промпту на шаге планирования (режим planMode).
+ * Язык — config.ai.lang (env AI_LANG); тексты — в ai/prompts.ts.
  */
-export const PLAN_MODE_INSTRUCTION =
-  'Сейчас включён режим планирования. Составь подробный пошаговый план решения задачи пользователя ' +
-  '(пронумерованные шаги с конкретными командами и файлами) и НИЧЕГО не выполняй: ' +
-  'инструменты в этом режиме недоступны. Ответь только планом и жди подтверждения пользователя.';
+export const PLAN_MODE_INSTRUCTION = planModeInstruction(config.ai.lang);
 
 /**
  * Инструменты для запроса к Chat Completions API. В режиме планирования
