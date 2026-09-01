@@ -93,8 +93,12 @@ function CheckIcon() {
 }
 
 // Шаблон запроса по выводу терминала (режимы 'explain' и 'new-dialogue').
-function terminalContextMessage(text: string, serverName: string): string {
-  return `Объясни этот вывод терминала (сервер ${serverName}):\n\`\`\`\n${text}\n\`\`\``;
+function terminalContextMessage(
+  t: (key: I18nKey, params?: I18nParams | number) => string,
+  text: string,
+  serverName: string,
+): string {
+  return t('agent.terminalExplainPrompt', { serverName, text });
 }
 
 export function AgentPage({ profile, showError, agentRequest, onAgentRequestConsumed, onActivity, onSqlInsert }: Props) {
@@ -578,7 +582,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       // Цитата без инструкции «объясни» — пользователь допишет свой вопрос;
       // набранное не затираем. Фокус и курсор в конец — после применённого
       // стейта, поэтому requestAnimationFrame.
-      const block = `Вывод терминала (сервер ${profile.name}):\n\`\`\`\n${agentRequest.text}\n\`\`\`\n\n`;
+      const block = t('agent.terminalPrefillBlock', { serverName: profile.name, text: agentRequest.text });
       setInput((prev) => (prev ? `${prev}\n\n${block}` : block));
       requestAnimationFrame(() => {
         const el = inputRef.current;
@@ -595,7 +599,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
         onAgentRequestConsumed?.();
         return;
       }
-      const content = terminalContextMessage(agentRequest.text, profile.name);
+      const content = terminalContextMessage(t, agentRequest.text, profile.name);
       void startNewDialogue().then((id) => {
         if (id) pendingSendRef.current = { content, dialogueId: id };
       });
@@ -605,7 +609,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     // 'explain' и 'send' идут одним путём; 'send' текст не оборачивает.
     const content = mode === 'send'
       ? agentRequest.text
-      : terminalContextMessage(agentRequest.text, profile.name);
+      : terminalContextMessage(t, agentRequest.text, profile.name);
     if (connectedRef.current && !runningRef.current && activeDialogueIdRef.current) {
       setMessages((prev) => [...prev, { id: nextId++, role: 'user', content }]);
       setPlanReady(false);
@@ -693,10 +697,10 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       sendWs({ type: 'sudo_credentials', password, profileId: targetId });
     }
     const content =
-      'Выполни проверку безопасности сервера с помощью инструмента security_audit' +
-      (targetId !== profile.id ? ` на сервере «${targetName}» (укажи параметр server: "${targetName}")` : '') +
-      (password ? ' с параметром privileged: true' : '') +
-      '. Проанализируй результаты и дай отчёт: критичные проблемы, предупреждения, рекомендации.';
+      t('agent.auditPrompt') +
+      (targetId !== profile.id ? t('agent.auditPromptServer', { name: targetName }) : '') +
+      (password ? t('agent.auditPromptPrivileged') : '') +
+      t('agent.auditPromptTail');
     setMessages((prev) => [...prev, { id: nextId++, role: 'user', content }]);
     setPlanReady(false);
     // planMode: false — аудит запускается сразу, минуя режим планирования.

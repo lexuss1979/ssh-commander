@@ -750,15 +750,16 @@ export function DatabasesPage({
     // серверному лимиту честно помечаем в самом тексте.
     let schema = buildSchemaText(tables, columns).slice(0, SCHEMA_CONTEXT_LIMIT);
     if (columnsTruncated) {
-      schema += '\n… (показаны не все колонки — обрезано по лимиту)';
+      schema += '\n' + t('databases.askSchemaTruncated');
     }
-    const message =
-      `Напиши SQL-запрос для ${engineLabel}${version ? ` (версия ${version})` : ''}.\n\n` +
-      `Задача / черновик запроса:\n${task}\n` +
-      (schema
-        ? `\nСхема базы «${database ?? ''}»:\n${schema}\n`
-        : '') +
-      `\nОтвет дай одним блоком \`\`\`sql — я вставлю его в редактор.`;
+    const versionSuffix = version ? t('databases.askSqlVersion', { version }) : '';
+    const schemaBlock = schema ? t('databases.askSqlSchema', { db: database ?? '', schema }) : '';
+    const message = t('databases.askSqlPrompt', {
+      engine: engineLabel,
+      version: versionSuffix,
+      task,
+      schemaBlock,
+    });
     onAskAgent(message, 'send', 'db');
   };
 

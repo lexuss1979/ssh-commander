@@ -12,6 +12,7 @@ import {
 import type { AgentAskMode, Profile } from '../types';
 import { Modal } from './Modal';
 import { useT } from '../i18n';
+import type { I18nKey, I18nParams } from '../i18n';
 
 interface Props {
   showError: (msg: string) => void;
@@ -48,10 +49,16 @@ function snippetToForm(s: Snippet): SnippetForm {
   };
 }
 
-function buildAskText(command: string, serverName: string, stdout: string, stderr: string): string {
-  const output = `${stdout}\n${stderr}`.trim() || '(пустой вывод)';
+function buildAskText(
+  t: (key: I18nKey, params?: I18nParams | number) => string,
+  command: string,
+  serverName: string,
+  stdout: string,
+  stderr: string,
+): string {
+  const output = `${stdout}\n${stderr}`.trim() || t('snippets.emptyOutput');
   const tail = output.length > ASK_TAIL_CHARS ? `…${output.slice(-ASK_TAIL_CHARS)}` : output;
-  return `Объясни вывод команды "${command}" на сервере ${serverName}:\n\`\`\`\n${tail}\n\`\`\``;
+  return t('snippets.askPrompt', { command, serverName, tail });
 }
 
 /**
@@ -219,9 +226,12 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
     const r = results.results.find((x) => x.profileId === profileId);
     if (!r) return;
     const name = profileById.get(profileId)?.name ?? profileId;
-    const codePart = r.code === null ? `ошибка выполнения: ${r.error ?? 'неизвестно'}` : `exit code ${r.code}`;
+    const codePart =
+      r.code === null
+        ? t('snippets.codeError', { error: r.error ?? t('snippets.codeUnknown') })
+        : t('snippets.codeExit', { n: r.code });
     onAskAgent(
-      `${buildAskText(results.command, name, r.stdout, r.stderr)}\n(${codePart})${r.truncated ? '\n(вывод обрезан)' : ''}`,
+      `${buildAskText(t, results.command, name, r.stdout, r.stderr)}\n(${codePart})${r.truncated ? `\n(${t('snippets.truncated')})` : ''}`,
       'send',
     );
   };

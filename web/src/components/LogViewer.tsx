@@ -256,8 +256,8 @@ export function LogViewer(props: Props) {
   const ask = () => {
     if (!onAskAgent) return;
     const where = logPath ?? title;
-    const server = serverName ? ` (сервер ${serverName})` : '';
-    onAskAgent(`Объясни этот вывод лога ${where}${server}:\n\`\`\`\n${lastNChars(visibleLines, ASK_TAIL_CHARS)}\n\`\`\``);
+    const server = serverName ? t('logViewer.askServerSuffix', { name: serverName }) : '';
+    onAskAgent(t('logViewer.askPrompt', { where, server, tail: lastNChars(visibleLines, ASK_TAIL_CHARS) }));
   };
 
   const statusText =
