@@ -10,8 +10,14 @@ import { isSearchConfigured, searchWeb, type WebSearchUsage } from './web-search
 import { computeCostUsd } from './pricing.js';
 import { recordUsage, usageTotalsByDialogue } from './usage.js';
 import {
-  SUGGEST_MARKER,
-  MAX_SUGGESTION_LENGTH,
+  attachedServersNote,
+  multiServerNote,
+  planApprovedMessage,
+  suggestInstruction,
+  systemPromptBase,
+  webSearchNote,
+} from './prompts.js';
+import {
   createSuggestionTokenFilter,
   extractSuggestion,
 } from './suggest.js';
@@ -107,47 +113,18 @@ export class AgentSession {
         console.warn(`dialogue ${this.dialogueId}: attached profile ${extraId} not found, skipped`);
       }
     }
-    let systemPrompt =
-      'Ты — AI-ассистент для администрирования удалённого Linux-сервера ' +
-      `${homeProfile.username}@${homeProfile.host}. ` +
-      'Ты работаешь только через предоставленные инструменты, не выдумывай результаты. ' +
-      'Инструменты чтения (exec_readonly, read_file, list_dir, docker_ps, docker_logs, docker_inspect, read_memory, security_audit, disk_usage) выполняются автоматически. ' +
-      'Инструменты записи (exec, write_file, docker_action, write_memory) требуют подтверждения пользователя — не пытайся обойти это ограничение, ' +
-      'запрашивай подтверждение обычным вызовом инструмента. ' +
-      'Отвечай кратко и по делу на русском. Сначала собери факты (проверь состояние), затем предлагай действия. ' +
-      'Инструмент security_audit — детерминированный аудит безопасности сервера (фиксированные read-only проверки по секциям). ' +
-      'Проанализируй его сырые данные и оформи отчёт с severity (критично / предупреждение / ок) и рекомендациями; ' +
-      'после отчёта предложи записать ключевые находки в память через write_memory. ' +
-      'Инструмент disk_usage показывает, что занимает место на диске (размер каталога, крупнейшие подкаталоги и файлы) — ' +
-      'для сценария «почему кончился диск» начни с / и спускайся по крупнейшим подкаталогам. ' +
-      'Перед разрушительными действиями предупреждай о последствиях. ' +
-      'У профиля есть MEMORY.md — файл заметок для будущих сессий (хранится в каталоге данных приложения, не на сервере). ' +
-      'Его содержимое автоматически загружается в контекст в начале каждой сессии — см. блок «Память профиля» ниже. ' +
-      'Прежде чем заново исследовать сервер, сверься с памятью: если ответ там уже есть, не ищи его заново; ' +
-      'в длинной сессии используй read_memory, чтобы вернуть полный текст памяти в контекст. ' +
-      'Записывай в память только важное и долговечное: неочевидные команды и конфиги, пути, порты, архитектуру сервисов, ' +
-      'решённые проблемы и их причины, грабли и ограничения. Не сохраняй секреты (пароли, ключи, токены), временные данные и шум логов. ' +
-      'Предлагай запись через write_memory после того, как нашёл такое знание; пиши кратко и структурированно (markdown: заголовки, короткие пункты). ' +
-      'write_memory принимает полный новый текст файла: обязательно сохраняй все прежние записи и только добавляй/правь нужное, без дублей. ' +
-      'Не записывай память через exec/write_file — только через write_memory.';
+    // Статические тексты промпта — в ai/prompts.ts (ru/en, выбор по
+    // config.ai.lang); здесь только склейка динамических частей.
+    const lang = config.ai.lang;
+    let systemPrompt = systemPromptBase(lang, `${homeProfile.username}@${homeProfile.host}`);
     // Мульти-серверность: домашний сервер диалога + подключённые к нему.
-    systemPrompt +=
-      ' Этот диалог привязан к домашнему серверу — инструменты без параметра server выполняются на нём. ' +
-      'К диалогу могут быть подключены дополнительные серверы: полный список профилей показывает list_servers ' +
-      '(поле connected), а выполнять инструменты можно только на подключённых — при работе не с домашним сервером ' +
-      'всегда указывай его имя в параметре server явно. ' +
-      'Чтобы подключить новый сервер, вызови connect_server (потребуется подтверждение пользователя) или попроси пользователя добавить его. ' +
-      'Не путай факты между серверами: в отчётах всегда подписывай, к какому серверу относится информация. ' +
-      'Память (MEMORY.md) ведётся отдельно для каждого сервера — read_memory/write_memory с параметром server работают с памятью указанного сервера.';
+    systemPrompt += multiServerNote(lang);
     const attachedNames = [...this.attached.values()].map((p) => p.name);
     if (attachedNames.length > 1) {
-      systemPrompt += ` Сейчас к диалогу подключены серверы: ${attachedNames.join(', ')}.`;
+      systemPrompt += attachedServersNote(lang, attachedNames);
     }
     if (isSearchConfigured()) {
-      systemPrompt +=
-        ' Инструмент web_search ищет в интернете (документация, changelog, актуальные версии) и выполняется автоматически ' +
-        'без подтверждения — используй его, когда нужен свежий или неизвестный факт (версии, релизы, настройки сервисов), ' +
-        'вместо ответа по памяти.';
+      systemPrompt += webSearchNote(lang);
     }
     // Подсказка вероятного ответа (agent-suggest): маркер вырезается из ответа
     // до персиста и контекста (ai/suggest.ts), текст подсказки уходит на
@@ -155,19 +132,8 @@ export class AgentSession {
     // (асимметрия в пользу молчания): подсказка — только при заведомо
     // вероятном ответе; на открытые вопросы, равнозначные варианты и
     // необратимые/рискованные действия модель молчит.
-    systemPrompt +=
-      ` Если твой финальный ответ запрашивает у пользователя решение или выбор («продолжать?», «какой вариант?», «выполнить?»), ` +
-      `добавь самой последней строкой ответа ${SUGGEST_MARKER} <краткий вероятный ответ пользователя> — ` +
-      `одна фраза до ${MAX_SUGGESTION_LENGTH} символов на русском, без markdown и кавычек, которую пользователь мог бы отправить в ответ ` +
-      '(например, «Да, выполняй» или «Сначала покажи конфиг»). ' +
-      'Эта строка пользователю не показывается — приложение превращает её в подсказку поля ввода. ' +
-      'Добавляй подсказку только если один ответ заведомо вероятен: простое подтверждение безопасного следующего шага ' +
-      'или очевидный запрос вроде «покажи логи». ' +
-      'Не добавляй строку, если вопрос открытый (нужны данные — имя, домен, путь, число), варианты равнозначны ' +
-      'или речь о необратимом/рискованном действии — там не подсказывай согласие. ' +
-      'Если сомневаешься — не добавляй: отсутствие подсказки лучше неверной. ' +
-      'Не вставляй маркер в середину ответа и не используй его ни для чего другого.';
-    const memoryBlock = memoryPromptBlock(homeProfile.id);
+    systemPrompt += suggestInstruction(lang);
+    const memoryBlock = memoryPromptBlock(homeProfile.id, lang);
     if (memoryBlock) {
       systemPrompt += `\n\n${memoryBlock}`;
     }
@@ -338,7 +304,7 @@ export class AgentSession {
         // (per-tool approve для мутирующих инструментов сохраняется).
         if (this.planPending && !this.running) {
           this.planPending = false;
-          void this.runLoop('План подтверждён пользователем. Приступай к его выполнению по шагам.');
+          void this.runLoop(planApprovedMessage(config.ai.lang));
         }
         break;
       }
@@ -788,7 +754,7 @@ export class AgentSession {
     this.attached.set(target.id, target);
     this.notifyServers();
     let output = `Сервер «${target.name}» (${target.username}@${target.host}) подключён к диалогу.`;
-    const memoryBlock = memoryPromptBlock(target.id);
+    const memoryBlock = memoryPromptBlock(target.id, config.ai.lang);
     if (memoryBlock) {
       output += `\n\n${memoryBlock}`;
     }

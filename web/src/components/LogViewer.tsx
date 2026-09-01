@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { appendChunk, lastNChars, type LogBufferState } from '../log-buffer';
+import { useT } from '../i18n';
 
 const MAX_LINES = 5000;
 // Флеш буфера в стейт интервалом, а не на каждый чанк — батчинг против
@@ -59,6 +60,7 @@ type Props = {
 );
 
 export function LogViewer(props: Props) {
+  const { t } = useT();
   const { title, visible, onAskAgent, toolbarExtra, logPath, serverName, onStatusChange } = props;
   const oneShot = props.kind === 'request';
   const [follow, setFollow] = useState(true);
@@ -261,11 +263,11 @@ export function LogViewer(props: Props) {
   const statusText =
     status === 'stopped'
       ? oneShot
-        ? 'завершено'
-        : 'остановлено'
+        ? t('logViewer.statusDone')
+        : t('logViewer.statusStopped')
       : status === 'error'
         ? error
-        : 'подключено…';
+        : t('logViewer.statusConnected');
 
   const statusClass = status === 'error' ? 'error' : status === 'stopped' ? 'stopped' : 'live';
   const fileName = (logPath ?? title).split('/').pop() ?? title;
@@ -276,33 +278,33 @@ export function LogViewer(props: Props) {
         {!oneShot && (
           <label className="check">
             <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
-            Следовать
+            {t('logViewer.follow')}
           </label>
         )}
         <label className="check">
           <input type="checkbox" checked={autoscroll} onChange={(e) => setAutoscroll(e.target.checked)} />
-          Автоскролл
+          {t('logViewer.autoscroll')}
         </label>
         <input
           className="log-filter"
-          placeholder="Фильтр (подстрока)…"
+          placeholder={t('logViewer.filterPlaceholder')}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
         {toolbarExtra}
-        <button className="btn btn-mini" onClick={() => void copy()}>Скопировать</button>
+        <button className="btn btn-mini" onClick={() => void copy()}>{t('logViewer.copy')}</button>
         {onAskAgent && (
-          <button className="btn btn-mini" onClick={ask}>В чат</button>
+          <button className="btn btn-mini" onClick={ask}>{t('logViewer.toChat')}</button>
         )}
         {!oneShot && (status === 'error' || status === 'stopped') && (
-          <button className="btn btn-mini" onClick={() => setRetry((r) => r + 1)}>Переподключиться</button>
+          <button className="btn btn-mini" onClick={() => setRetry((r) => r + 1)}>{t('logViewer.reconnect')}</button>
         )}
       </div>
       <div className="viewer-pane">
         <div className="viewer-pane-head">
           <code>{fileName}</code>
           <span className="spacer" />
-          <span>{visibleLines.length} строк</span>
+          <span>{t('logViewer.linesCount', { n: visibleLines.length })}</span>
           <span className={`viewer-status ${statusClass}`}>{statusText}</span>
         </div>
         <pre className="logs-view" ref={preRef} onScroll={onScroll}>

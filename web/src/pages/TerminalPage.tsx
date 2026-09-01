@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import type { AgentAskMode, Profile, TerminalTab } from '../types';
 import { fetchTerminalHistory, fetchTerminalSessions } from '../api';
+import { useT } from '../i18n';
 
 // Лимит до сверки с сервером (сервер отдаёт фактический в /api/terminal/sessions).
 const TERMINAL_LIMIT_DEFAULT = 4;
@@ -59,6 +60,7 @@ interface HistoryPaletteProps {
 }
 
 function HistoryPalette({ profileId, onPick, onClose }: HistoryPaletteProps) {
+  const { t } = useT();
   const [commands, setCommands] = useState<string[] | null>(null);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState('');
@@ -73,13 +75,13 @@ function HistoryPalette({ profileId, onPick, onClose }: HistoryPaletteProps) {
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Не удалось загрузить историю');
+          setError(err instanceof Error ? err.message : t('terminal.historyLoadFailed'));
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [profileId]);
+  }, [profileId, t]);
 
   const filtered = useMemo(() => {
     if (!commands) return [];
@@ -122,16 +124,16 @@ function HistoryPalette({ profileId, onPick, onClose }: HistoryPaletteProps) {
       <input
         className="history-filter"
         autoFocus
-        placeholder="Фильтр команд… (↑↓ — выбор, Enter — вставить, Esc — закрыть)"
+        placeholder={t('terminal.historyPlaceholder')}
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
       />
       <div className="history-list" ref={listRef}>
         {error && <div className="history-empty">{error}</div>}
-        {!error && commands === null && <div className="history-empty">Загрузка истории…</div>}
+        {!error && commands === null && <div className="history-empty">{t('terminal.historyLoading')}</div>}
         {!error && commands !== null && filtered.length === 0 && (
           <div className="history-empty">
-            {commands.length === 0 ? 'История команд пуста' : 'Ничего не найдено'}
+            {commands.length === 0 ? t('terminal.historyEmpty') : t('terminal.historyNoMatches')}
           </div>
         )}
         {filtered.map((cmd, i) => (
@@ -189,6 +191,10 @@ function TerminalView({
   onStatus,
   pendingCwdRef,
 }: TerminalViewProps) {
+  const { t } = useT();
+  // t для WS-эффекта через ref: t в deps рвал бы WebSocket при смене языка.
+  const tRef = useRef(t);
+  tRef.current = t;
   const containerRef = useRef<HTMLDivElement>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -235,7 +241,7 @@ function TerminalView({
     if (!term || !onAskAgent) return;
     const text = collectTerminalContext(term);
     if (!text) {
-      showError('Буфер терминала пуст — нечего отправлять агенту');
+      showError(t('terminal.bufferEmpty'));
       return;
     }
     term.clearSelection();
@@ -250,7 +256,7 @@ function TerminalView({
     if (!term || !onAskAgent) return;
     const text = collectSelection(term);
     if (!text) {
-      showError('Сначала выделите текст в терминале');
+      showError(t('terminal.needSelection'));
       return;
     }
     term.clearSelection();
@@ -362,11 +368,11 @@ function TerminalView({
         }
         if (msg.type === 'close') {
           setStatus('closed');
-          term.write('\r\n\x1b[31m[сессия завершена]\x1b[0m\r\n');
+          term.write(`\r\n\x1b[31m${tRef.current('terminal.sessionClosedMark')}\x1b[0m\r\n`);
         }
         if (msg.type === 'error') {
           setStatus('error');
-          term.write(`\r\n\x1b[31m${msg.data ?? 'Ошибка подключения'}\x1b[0m\r\n`);
+          term.write(`\r\n\x1b[31m${msg.data ?? tRef.current('terminal.connectError')}\x1b[0m\r\n`);
         }
       } catch {
         /* ignore */
@@ -437,28 +443,28 @@ function TerminalView({
           {profile.name} — {profile.username}@{profile.host}
         </span>
         {tab.container && (
-          <span className="container-chip">контейнер: {tab.container.name}</span>
+          <span className="container-chip">{t('terminal.containerChip', { name: tab.container.name })}</span>
         )}
         <span className={`status-dot ${status}`} />
         <span className="status-text">
-          {status === 'connected' && 'подключено'}
-          {status === 'connecting' && 'подключение…'}
-          {status === 'disconnected' && 'отключено'}
-          {status === 'closed' && 'сессия завершена'}
-          {status === 'error' && 'ошибка'}
+          {status === 'connected' && t('terminal.statusConnected')}
+          {status === 'connecting' && t('terminal.statusConnecting')}
+          {status === 'disconnected' && t('terminal.statusDisconnected')}
+          {status === 'closed' && t('terminal.statusClosed')}
+          {status === 'error' && t('terminal.statusError')}
         </span>
         {!tab.container && (
           <button className="btn btn-ghost" onClick={openHistory} title="Ctrl+R">
-            История
+            {t('terminal.historyButton')}
           </button>
         )}
         {onAskAgent && (
           <button
             className="btn btn-ghost"
             onClick={askAgent}
-            title="Отправить выделение (или последние строки буфера) AI-агенту"
+            title={t('terminal.askAgentTitle')}
           >
-            Спросить агента
+            {t('terminal.askAgent')}
           </button>
         )}
         {onAskAgent && (
@@ -466,9 +472,9 @@ function TerminalView({
             <button
               className={`btn btn-ghost ${askMenuOpen ? 'open' : ''}`}
               onClick={() => setAskMenuOpen((o) => !o)}
-              title="Действия с выделением терминала в чате агента"
+              title={t('terminal.toChatTitle')}
             >
-              В чат ▾
+              {t('terminal.toChat')}
             </button>
             {askMenuOpen && (
               <div className="terminal-ask-menu">
@@ -477,24 +483,24 @@ function TerminalView({
                   disabled={!hasSelection}
                   title={
                     hasSelection
-                      ? 'Создать новый диалог и отправить выделение первым сообщением'
-                      : 'Сначала выделите текст в терминале'
+                      ? t('terminal.newChatTitle')
+                      : t('terminal.needSelection')
                   }
                   onClick={() => sendSelectionToChat('new-dialogue')}
                 >
-                  Открыть в новом чате
+                  {t('terminal.openInNewChat')}
                 </button>
                 <button
                   className="terminal-ask-item"
                   disabled={!hasSelection}
                   title={
                     hasSelection
-                      ? 'Вставить выделение в поле ввода текущего диалога (без отправки)'
-                      : 'Сначала выделите текст в терминале'
+                      ? t('terminal.addToChatTitle')
+                      : t('terminal.needSelection')
                   }
                   onClick={() => sendSelectionToChat('prefill')}
                 >
-                  Добавить в чат
+                  {t('terminal.addToChat')}
                 </button>
               </div>
             )}
@@ -502,7 +508,7 @@ function TerminalView({
         )}
         <button
           className="btn btn-ghost"
-          title="Переустановить SSH-подключение (применить новые группы и права)"
+          title={t('terminal.restartSessionTitle')}
           onClick={() => {
             const ws = wsRef.current;
             if (ws && ws.readyState === WebSocket.OPEN) {
@@ -517,7 +523,7 @@ function TerminalView({
             }
           }}
         >
-          Обновить сессию
+          {t('terminal.restartSession')}
         </button>
       </div>
       {/* Палитра — внутри terminal-container: якорится к области терминала
@@ -629,6 +635,7 @@ export function TerminalPage({
   onOpenInTerminalConsumed,
   onAskAgent,
 }: Props) {
+  const { t } = useT();
   const [tabsState, setTabsState] = useState<TabsState>(() => loadTabsState(profile.id));
   const [statuses, setStatuses] = useState<Record<string, TerminalStatus>>({});
   const [limit, setLimit] = useState(TERMINAL_LIMIT_DEFAULT);
@@ -804,25 +811,25 @@ export function TerminalPage({
     <div className="page terminal-page">
       {tabs.length > 0 && (
         <div className="terminal-tabs">
-          {tabs.map((t) => {
-            const key = terminalTabKey(t);
+          {tabs.map((tab) => {
+            const key = terminalTabKey(tab);
             return (
               <div key={key} className={`tab terminal-tab${key === activeId ? ' active' : ''}`}>
                 <button
                   type="button"
                   className="terminal-tab-main"
                   onClick={() => activateTab(key)}
-                  title={t.container ? t.container.id : `Терминал ${t.id + 1}`}
+                  title={tab.container ? tab.container.id : t('terminal.tabTitle', { n: tab.id + 1 })}
                 >
                   <span className={`status-dot ${statuses[key] ?? 'connecting'}`} />
                   <span className="terminal-tab-label">
-                    {t.container ? t.container.name : `shell ${t.id + 1}`}
+                    {tab.container ? tab.container.name : t('terminal.shellLabel', { n: tab.id + 1 })}
                   </span>
                 </button>
                 <button
                   type="button"
                   className="terminal-tab-close"
-                  title="Закрыть вкладку (сессия завершается)"
+                  title={t('terminal.closeTabTitle')}
                   onClick={() => closeTab(key)}
                 >
                   ✕
@@ -837,8 +844,8 @@ export function TerminalPage({
             disabled={tabs.length >= limit}
             title={
               tabs.length >= limit
-                ? `Максимум ${limit} терминала на сервер — закройте другие вкладки`
-                : 'Новый терминал'
+                ? t('terminal.limitTitle', { limit })
+                : t('terminal.newTabTitle')
             }
           >
             +
@@ -847,22 +854,22 @@ export function TerminalPage({
       )}
       {tabs.length === 0 ? (
         <div className="empty-state">
-          <p>Все терминалы закрыты.</p>
+          <p>{t('terminal.allClosed')}</p>
           <button className="btn btn-primary" onClick={addTab}>
-            Открыть терминал
+            {t('terminal.openTerminal')}
           </button>
         </div>
       ) : (
-        tabs.map((t) => (
+        tabs.map((tab) => (
           <TerminalView
-            key={terminalTabKey(t)}
+            key={terminalTabKey(tab)}
             profile={profile}
-            tab={t}
-            active={terminalTabKey(t) === activeId}
+            tab={tab}
+            active={terminalTabKey(tab) === activeId}
             visible={visible}
             showError={showError}
             onAskAgent={onAskAgent}
-            closeOnUnmountRef={getCloseFlag(terminalTabKey(t))}
+            closeOnUnmountRef={getCloseFlag(terminalTabKey(tab))}
             onStatus={handleStatus}
             pendingCwdRef={pendingCwdRef}
           />

@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { HistorySample } from '../api';
+import { useT } from '../i18n';
 
 /** Точка графика: момент сэмпла и значение (null — данных нет). */
 interface ChartPoint {
@@ -108,20 +109,18 @@ function formatPct(v: number): string {
   return `${v.toFixed(1)}%`;
 }
 
-function formatSpan(ms: number): string {
-  const min = Math.max(1, Math.round(ms / 60000));
-  if (min < 60) return `за ${min} мин`;
-  const h = Math.floor(min / 60);
-  const rest = min % 60;
-  return rest > 0 ? `за ${h} ч ${rest} мин` : `за ${h} ч`;
+/** Длительность окна в минутах (минимум 1) — аргумент ключа sparkline.span. */
+function spanMinutes(ms: number): number {
+  return Math.max(1, Math.round(ms / 60000));
 }
 
-function formatTime(t: number): string {
-  return new Date(t).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+function formatTime(t: number, locale: string): string {
+  return new Date(t).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
 }
 
 /** График нагрузки с мин/сред/макс и подписями времени — вкладка «Обзор». */
 export function LoadChart({ samples, value, tone }: ChartProps) {
+  const { t, locale } = useT();
   const segments = useSegments(samples, value);
   const stats = useMemo(() => {
     const vals = samples.map(value).filter((v): v is number => v !== null);
@@ -138,7 +137,7 @@ export function LoadChart({ samples, value, tone }: ChartProps) {
   }, [samples, value]);
 
   if (segments.length === 0) {
-    return <div className="load-chart-pending">История собирается…</div>;
+    return <div className="load-chart-pending">{t('sparkline.collecting')}</div>;
   }
   const first = samples[0];
   const last = samples[samples.length - 1];
@@ -146,16 +145,16 @@ export function LoadChart({ samples, value, tone }: ChartProps) {
     <div className="load-chart">
       {stats && (
         <div className="load-chart-stats">
-          <span>мин {formatPct(stats.min)}</span>
-          <span>сред {formatPct(stats.avg)}</span>
-          <span>макс {formatPct(stats.max)}</span>
-          <span className="load-chart-span">{formatSpan(last.t - first.t)}</span>
+          <span>{t('sparkline.statMin')} {formatPct(stats.min)}</span>
+          <span>{t('sparkline.statAvg')} {formatPct(stats.avg)}</span>
+          <span>{t('sparkline.statMax')} {formatPct(stats.max)}</span>
+          <span className="load-chart-span">{t('sparkline.span', spanMinutes(last.t - first.t))}</span>
         </div>
       )}
       <SparkSvg segments={segments} tone={tone} className="load-chart-svg" />
       <div className="load-chart-time">
-        <span>{formatTime(first.t)}</span>
-        <span>{formatTime(last.t)}</span>
+        <span>{formatTime(first.t, locale)}</span>
+        <span>{formatTime(last.t, locale)}</span>
       </div>
     </div>
   );

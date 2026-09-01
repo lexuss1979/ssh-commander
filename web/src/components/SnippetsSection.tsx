@@ -11,6 +11,7 @@ import {
 } from '../api';
 import type { AgentAskMode, Profile } from '../types';
 import { Modal } from './Modal';
+import { useT } from '../i18n';
 
 interface Props {
   showError: (msg: string) => void;
@@ -60,6 +61,7 @@ function buildAskText(command: string, serverName: string, stdout: string, stder
  * защита не фильтрацией, а модалкой с явным перечислением целей.
  */
 export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Props) {
+  const { t } = useT();
   const [snippets, setSnippets] = useState<Snippet[] | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [editing, setEditing] = useState<{ snippet: Snippet | null; form: SnippetForm } | null>(null);
@@ -145,7 +147,7 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
   };
 
   const removeSnippet = async (snippet: Snippet) => {
-    if (!window.confirm(`Удалить команду «${snippet.name}»?`)) return;
+    if (!window.confirm(t('snippets.deleteConfirm', { name: snippet.name }))) return;
     try {
       await deleteSnippet(snippet.id);
       setReloadKey((k) => k + 1);
@@ -164,7 +166,7 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
       setSelected(effective);
     }
     if (effective.size === 0) {
-      showError('Выберите хотя бы один сервер');
+      showError(t('snippets.errorNoTargets'));
       return;
     }
     setConfirming({ command, scope });
@@ -195,7 +197,7 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
       if ((err as Error).name !== 'AbortError') {
         showError((err as Error).message);
       } else {
-        showError('Запуск отменён — на серверах выполнявшаяся команда могла продолжить работу');
+        showError(t('snippets.runAborted'));
       }
     } finally {
       runAbortRef.current = null;
@@ -229,17 +231,17 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
   return (
     <section className="snippets-section">
       <div className="snippets-head">
-        <h3>Команды</h3>
+        <h3>{t('snippets.title')}</h3>
         <button className="btn btn-ghost btn-mini" onClick={() => openEditor(null)}>
-          + Новая команда
+          {t('snippets.new')}
         </button>
       </div>
 
       {snippets === null ? (
-        <div className="muted">Загрузка…</div>
+        <div className="muted">{t('common.loading')}</div>
       ) : snippets.length === 0 ? (
         <div className="muted">
-          Сохранённых команд нет. Создайте команду, чтобы запускать её на нескольких серверах сразу.
+          {t('snippets.empty')}
         </div>
       ) : (
         <div className="snippets-list">
@@ -250,8 +252,8 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
                   <span className="snippet-name">{s.name}</span>
                   <span className="snippet-scope muted">
                     {s.profileIds
-                      ? `${s.profileIds.length} сервер(ов)`
-                      : 'все серверы'}
+                      ? t('snippets.scopeServers', s.profileIds.length)
+                      : t('snippets.scopeAll')}
                   </span>
                 </div>
                 <code className="snippet-cmd" title={s.command}>{s.command}</code>
@@ -263,15 +265,15 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
                   disabled={running}
                   onClick={() => startRun(s.command, s)}
                 >
-                  Выполнить
+                  {t('snippets.run')}
                 </button>
-                <button className="btn btn-ghost btn-mini" onClick={() => openEditor(s)} title="Изменить">
+                <button className="btn btn-ghost btn-mini" onClick={() => openEditor(s)} title={t('snippets.edit')}>
                   ✎
                 </button>
                 <button
                   className="btn btn-ghost btn-mini"
                   onClick={() => void removeSnippet(s)}
-                  title="Удалить"
+                  title={t('common.delete')}
                 >
                   🗑
                 </button>
@@ -284,7 +286,7 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
       <div className="snippets-adhoc">
         <textarea
           className="snippets-adhoc-input"
-          placeholder="Разовая команда без сохранения, например: uptime && df -h /"
+          placeholder={t('snippets.adhocPlaceholder')}
           value={adhoc}
           rows={2}
           spellCheck={false}
@@ -295,13 +297,13 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
           disabled={running || !adhoc.trim()}
           onClick={() => startRun(adhoc.trim())}
         >
-          Выполнить команду
+          {t('snippets.runAdhoc')}
         </button>
       </div>
 
       <div className="snippets-targets">
         <div className="snippets-targets-head">
-          <span className="sidebar-label">Серверы для запуска</span>
+          <span className="sidebar-label">{t('snippets.targetsLabel')}</span>
           {profiles.length > 1 && (
             <button
               className="btn btn-ghost btn-mini"
@@ -311,7 +313,7 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
                 )
               }
             >
-              {selected.size === profiles.length ? 'Снять все' : 'Выбрать все'}
+              {selected.size === profiles.length ? t('snippets.deselectAll') : t('snippets.selectAll')}
             </button>
           )}
         </div>
@@ -328,7 +330,7 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
                 />
                 <span
                   className={`status-dot${st ? (st.ok ? ' connected' : ' error') : ''}`}
-                  title={st ? (st.ok ? 'доступен' : `недоступен: ${st.error ?? 'нет данных'}`) : ''}
+                  title={st ? (st.ok ? t('snippets.targetAvailable') : t('snippets.targetUnavailable', { error: st.error ?? t('servers.noData') })) : ''}
                 />
                 <span className="snippet-target-name">{p.name}</span>
                 <span className="muted">
@@ -342,9 +344,9 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
 
       {running && (
         <div className="snippets-running">
-          <span className="muted">Выполняется на {runTargets.length} сервер(ах)…</span>
+          <span className="muted">{t('snippets.runningOn', runTargets.length)}</span>
           <button className="btn btn-ghost btn-mini" onClick={cancelRun}>
-            Отменить
+            {t('snippets.cancelRun')}
           </button>
         </div>
       )}
@@ -352,9 +354,9 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
       {results && (
         <div className="snippets-results">
           <div className="snippets-results-head">
-            <span className="sidebar-label">Результаты</span>
+            <span className="sidebar-label">{t('snippets.resultsTitle')}</span>
             <span className="muted">
-              {results.results.filter((r) => r.ok).length} из {results.results.length} успешно
+              {t('snippets.resultsOk', { ok: results.results.filter((r) => r.ok).length, total: results.results.length })}
             </span>
           </div>
           <div className="snippets-result-list">
@@ -365,11 +367,11 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
                 <div key={r.profileId} className={`snippet-result${r.ok ? '' : ' failed'}`}>
                   <button type="button" className="snippet-result-head" onClick={() => toggleResult(r.profileId)}>
                     <span className={`snippet-badge ${r.ok ? 'ok' : 'fail'}`}>
-                      {r.code === null ? 'ошибка' : r.code}
+                      {r.code === null ? t('snippets.badgeError') : r.code}
                     </span>
                     <span className="snippet-target-name">{p?.name ?? r.profileId}</span>
-                    <span className="muted">{r.ms} мс</span>
-                    {r.truncated && <span className="muted">вывод обрезан</span>}
+                    <span className="muted">{t('snippets.ms', { n: r.ms })}</span>
+                    {r.truncated && <span className="muted">{t('snippets.truncated')}</span>}
                     <span className="snippet-result-caret">{open ? '▾' : '▸'}</span>
                   </button>
                   {open && (
@@ -380,11 +382,11 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
                         <>
                           {r.stdout && <pre className="snippets-output">{r.stdout}</pre>}
                           {r.stderr && <pre className="snippets-output stderr">{r.stderr}</pre>}
-                          {!r.stdout && !r.stderr && <div className="muted">(пустой вывод)</div>}
+                          {!r.stdout && !r.stderr && <div className="muted">{t('snippets.emptyOutput')}</div>}
                         </>
                       )}
                       <button className="btn btn-ghost btn-mini" onClick={() => askAgent(r.profileId)}>
-                        В чат
+                        {t('snippets.toChat')}
                       </button>
                     </div>
                   )}
@@ -407,16 +409,17 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
       )}
 
       {confirming && (
-        <Modal title="Запуск команды" onClose={() => setConfirming(null)}>
+        <Modal title={t('snippets.confirmTitle')} onClose={() => setConfirming(null)}>
           <div className="snippets-confirm">
             <p>
-              Команда выполняется <strong>без фильтрации</strong> и может изменить состояние серверов.
-              Запуск на {selected.size} сервер(ах) сразу:
+              {t('snippets.confirmPre')}<strong>{t('snippets.confirmStrong')}</strong>{t('snippets.confirmPost')}{' '}
+              {t('snippets.confirmRunOn', selected.size)}
             </p>
             {confirming.scope && (
               <p className="field-hint">
-                Выбор целей сброшен на область команды (сниппет сохранён для:{' '}
-                {confirming.scope.map((id) => profileById.get(id)?.name ?? id).join(', ') || 'нет существующих серверов'}).
+                {t('snippets.scopeReset', {
+                  names: confirming.scope.map((id) => profileById.get(id)?.name ?? id).join(', ') || t('snippets.noExistingServers'),
+                })}
               </p>
             )}
             <ul className="snippets-confirm-targets">
@@ -432,10 +435,10 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
             <pre className="snippets-output">{confirming.command}</pre>
             <div className="modal-actions">
               <button className="btn" onClick={() => setConfirming(null)}>
-                Отмена
+                {t('common.cancel')}
               </button>
               <button className="btn btn-primary" onClick={() => void confirmRun()}>
-                Выполнить
+                {t('snippets.run')}
               </button>
             </div>
           </div>
@@ -460,6 +463,7 @@ function SnippetEditorModal({
   onClose: () => void;
   onSave: () => void;
 }) {
+  const { t } = useT();
   const { snippet, form } = editing;
   const valid = form.name.trim() !== '' && form.command.trim() !== '';
   const set = (patch: Partial<SnippetForm>) => onChange({ ...form, ...patch });
@@ -471,27 +475,27 @@ function SnippetEditorModal({
   };
 
   return (
-    <Modal title={snippet ? 'Изменить команду' : 'Новая команда'} onClose={onClose}>
+    <Modal title={snippet ? t('snippets.editorEditTitle') : t('snippets.editorNewTitle')} onClose={onClose}>
       <div className="form-grid snippets-form">
         <label>
-          <span>Имя</span>
+          <span>{t('snippets.fieldName')}</span>
           <input
             value={form.name}
             onChange={(e) => set({ name: e.target.value })}
-            placeholder="Например: версия ОС"
+            placeholder={t('snippets.namePlaceholder')}
             autoFocus
           />
         </label>
         <label>
-          <span>Описание (необязательно)</span>
+          <span>{t('snippets.fieldDescription')}</span>
           <input
             value={form.description}
             onChange={(e) => set({ description: e.target.value })}
-            placeholder="Зачем эта команда"
+            placeholder={t('snippets.descriptionPlaceholder')}
           />
         </label>
         <label className="span-2">
-          <span>Команда (выполняется как есть, без фильтрации — не сохраняйте пароли)</span>
+          <span>{t('snippets.fieldCommand')}</span>
           <textarea
             value={form.command}
             onChange={(e) => set({ command: e.target.value })}
@@ -506,7 +510,7 @@ function SnippetEditorModal({
             checked={form.allServers}
             onChange={(e) => set({ allServers: e.target.checked })}
           />
-          <span>Доступна на всех серверах</span>
+          <span>{t('snippets.allServers')}</span>
         </label>
         {!form.allServers && (
           <div className="snippets-target-list span-2">
@@ -524,20 +528,20 @@ function SnippetEditorModal({
               </label>
             ))}
             {form.profileIds.size === 0 && (
-              <div className="field-hint">Не выбран ни один сервер — выберите хотя бы один.</div>
+              <div className="field-hint">{t('snippets.noServersSelected')}</div>
             )}
           </div>
         )}
         <div className="modal-actions span-2">
           <button className="btn" onClick={onClose}>
-            Отмена
+            {t('common.cancel')}
           </button>
           <button
             className="btn btn-primary"
             disabled={!valid || saving || (!form.allServers && form.profileIds.size === 0)}
             onClick={onSave}
           >
-            {saving ? 'Сохранение…' : 'Сохранить'}
+            {saving ? t('snippets.saving') : t('common.save')}
           </button>
         </div>
       </div>

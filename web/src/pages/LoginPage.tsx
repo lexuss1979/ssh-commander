@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useT } from '../i18n';
 
 interface Props {
   onLogin: (password: string) => Promise<void>;
@@ -6,6 +7,7 @@ interface Props {
 }
 
 export function LoginPage({ onLogin, showError }: Props) {
+  const { t } = useT();
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -25,16 +27,16 @@ export function LoginPage({ onLogin, showError }: Props) {
     <div className="login">
       <form className="login-card" onSubmit={submit}>
         <h1>ssh-commander</h1>
-        <p className="muted">Введите пароль для доступа к веб-интерфейсу</p>
+        <p className="muted">{t('login.hint')}</p>
         <input
           type="password"
           autoFocus
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder="Пароль"
+          placeholder={t('login.passwordPlaceholder')}
         />
         <button className="btn btn-primary btn-block" disabled={busy || !password}>
-          {busy ? 'Вход…' : 'Войти'}
+          {busy ? t('login.submitting') : t('login.submit')}
         </button>
       </form>
     </div>

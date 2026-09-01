@@ -14,6 +14,7 @@ import type { AgentAskMode, FileEntry, FileListResponse, FileSearchResult, Profi
 import { LogViewer } from '../components/LogViewer';
 import { Modal } from '../components/Modal';
 import { useSortBy, SortableTh } from '../hooks/useSortBy';
+import { useT } from '../i18n';
 
 // Редактор с подсветкой грузится отдельным чанком, чтобы не раздувать основной бандл
 const CodeEditor = lazy(() => import('../components/CodeEditor'));
@@ -124,6 +125,7 @@ const MORE_ICON = (
 );
 
 export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesChanged, openPath, onFilesPathConsumed, onOpenInTerminal }: Props) {
+  const { t } = useT();
   const [path, setPath] = useState('/');
   // Редактируемая адресная строка: draft синхронизирован с path, Enter — переход.
   const [pathDraft, setPathDraft] = useState('/');
@@ -391,7 +393,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
   const commitPathDraft = () => {
     const v = pathDraft.trim();
     if (!v.startsWith('/')) {
-      showError('Путь должен начинаться с /');
+      showError(t('files.pathMustStartSlash'));
       setPathDraft(path);
       return;
     }
@@ -438,7 +440,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
   const submitAddLog = async () => {
     const value = addLogInput.trim();
     if (!value.startsWith('/')) {
-      showError('Путь должен начинаться с /');
+      showError(t('files.pathMustStartSlash'));
       return;
     }
     // при отказе сервера (не-абсолютный, ..) модалку держим открытой
@@ -463,7 +465,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
   const batchDelete = async () => {
     if (selected.size === 0) return;
     const count = selected.size;
-    if (!window.confirm(`Удалить ${count} объект(ов)? Это действие необратимо.`)) return;
+    if (!window.confirm(t('files.batchDeleteConfirm', count))) return;
     for (const entry of sortedEntries) {
       if (!selected.has(entry.path)) continue;
       try {
@@ -482,9 +484,9 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
   const remove = async (entry: FileEntry) => {
     let recursive = false;
     if (entry.isDirectory) {
-      recursive = window.confirm(`Удалить директорию ${entry.path} и всё содержимое (рекурсивно)? Это необратимо.`);
-      if (!recursive && !window.confirm(`Удалить директорию ${entry.path}, только если она пустая?`)) return;
-    } else if (!window.confirm(`Удалить файл ${entry.path}?`)) {
+      recursive = window.confirm(t('files.deleteDirRecursiveConfirm', { path: entry.path }));
+      if (!recursive && !window.confirm(t('files.deleteDirEmptyConfirm', { path: entry.path }))) return;
+    } else if (!window.confirm(t('files.deleteFileConfirm', { path: entry.path }))) {
       return;
     }
     try {
@@ -575,10 +577,10 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
   };
 
   const promptTitle = {
-    mkdir: 'Новая директория',
-    newfile: 'Новый файл',
-    rename: 'Переименовать',
-    chmod: 'Права доступа (chmod)',
+    mkdir: t('files.promptMkdir'),
+    newfile: t('files.promptNewfile'),
+    rename: t('files.promptRename'),
+    chmod: t('files.promptChmod'),
   }[promptState?.action ?? 'mkdir'];
 
   return (
@@ -586,12 +588,12 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
       <div className="toolbar files-toolbar">
         <div className="addr-row">
           <div className="addr-bar">
-            <button className="addr-btn" title="Вверх (родительский каталог)" onClick={goUp}>
+            <button className="addr-btn" title={t('files.goUpTitle')} onClick={goUp}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 19V5M5 12l7-7 7 7" />
               </svg>
             </button>
-            <button className="addr-btn" title="Копировать путь" onClick={() => void copyPath()}>
+            <button className="addr-btn" title={t('files.copyPathTitle')} onClick={() => void copyPath()}>
               {copied ? (
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M20 6L9 17l-5-5" />
@@ -615,21 +617,21 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
 
           <div className="tools">
             <div className="tools-group">
-              <button className="btn btn-small" onClick={() => setPromptState({ title: 'Новая директория', value: '', action: 'mkdir' })}>
+              <button className="btn btn-small" onClick={() => setPromptState({ title: t('files.promptMkdir'), value: '', action: 'mkdir' })}>
                 <span className="ic">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                     <path d="M12 5v14M5 12h14" />
                   </svg>
                 </span>
-                Папка
+                {t('files.newFolder')}
               </button>
-              <button className="btn btn-small" onClick={() => setPromptState({ title: 'Новый файл', value: '', action: 'newfile' })}>
+              <button className="btn btn-small" onClick={() => setPromptState({ title: t('files.promptNewfile'), value: '', action: 'newfile' })}>
                 <span className="ic">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                     <path d="M12 5v14M5 12h14" />
                   </svg>
                 </span>
-                Файл
+                {t('files.newFile')}
               </button>
             </div>
             <span className="tools-sep" />
@@ -641,16 +643,16 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
                     <path d="M4 20h16" />
                   </svg>
                 </span>
-                Загрузить
+                {t('files.upload')}
               </button>
               <button
                 className="btn btn-small"
                 disabled={uploadingArchive}
                 onClick={() => archiveInputRef.current?.click()}
-                title="Загрузить архив .tar.gz и распаковать в текущую директорию"
+                title={t('files.archiveTitle')}
               >
                 {uploadingArchive ? (
-                  'Распаковка…'
+                  t('files.extracting')
                 ) : (
                   <>
                     <span className="ic">
@@ -659,7 +661,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
                         <path d="M5 21h14" />
                       </svg>
                     </span>
-                    Архив
+                    {t('files.archive')}
                   </>
                 )}
               </button>
@@ -680,23 +682,23 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
             </div>
             <span className="tools-sep" />
             <div className="tools-group">
-              <button className="btn btn-ghost btn-small" onClick={() => void load()}>↻ Обновить</button>
+              <button className="btn btn-ghost btn-small" onClick={() => void load()}>↻ {t('common.refresh')}</button>
               <button
                 className="btn btn-ghost btn-small"
-                title="Переустановить SSH-подключение (применить новые группы и права)"
+                title={t('files.reconnectTitle')}
                 onClick={() => void reconnect()}
               >
-                ⇄ Переподключить
+                ⇄ {t('files.reconnect')}
               </button>
             </div>
             {selected.size > 0 && (
               <>
                 <span className="tools-sep" />
                 <div className="tools-group">
-                  <span className="muted" style={{ fontSize: 12 }}>выбрано: {selected.size}</span>
+                  <span className="muted" style={{ fontSize: 12 }}>{t('files.selectedCount', { n: selected.size })}</span>
                   <button className="btn btn-small" disabled={batchLoading} onClick={() => void batchDownload()}>
                     {batchLoading ? (
-                      'Упаковка…'
+                      t('files.packing')
                     ) : (
                       <>
                         <span className="ic">
@@ -705,7 +707,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
                             <path d="M5 21h14" />
                           </svg>
                         </span>
-                        Скачать
+                        {t('files.download')}
                       </>
                     )}
                   </button>
@@ -715,7 +717,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
                         <path d="M18 6L6 18M6 6l12 12" />
                       </svg>
                     </span>
-                    Удалить
+                    {t('common.delete')}
                   </button>
                 </div>
               </>
@@ -745,16 +747,16 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
       {/* Ряд закреплённых логов — компактные чипы по имени файла (полный путь в
           подсказке); «+» достижим и при пустом logPaths. */}
       <div className="log-bookmarks">
-        <span className="lbl">Закреплённые логи</span>
+        <span className="lbl">{t('files.pinnedLogs')}</span>
         {pinnedPaths.map((p) => (
           <span key={p} className="log-pin">
             <span className="ic">{FILE_ICON}</span>
-            <button className="name" title={`Смотреть ${p}`} onClick={() => setTailTarget(p)}>
+            <button className="name" title={t('files.watchTitle', { path: p })} onClick={() => setTailTarget(p)}>
               {p.split('/').pop() || p}
             </button>
             <button
               className="rm"
-              title="Открепить"
+              title={t('files.unpinTitle')}
               onClick={() => void putLogPaths(pinnedPaths.filter((x) => x !== p))}
             >
               {X_ICON}
@@ -763,7 +765,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
         ))}
         <button
           className="log-pin-add"
-          title="Добавить путь лога"
+          title={t('files.addLogTitle')}
           onClick={() => setAddLogOpen(true)}
         >
           <span className="ic">
@@ -771,14 +773,14 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
               <path d="M12 5v14M5 12h14" />
             </svg>
           </span>
-          Добавить лог
+          {t('files.addLog')}
         </button>
       </div>
 
       <div className="search-panel">
         <input
           className="search-input"
-          placeholder={searchMode === 'name' ? 'Шаблон имени, напр. *.log (без * — точное имя)' : 'Текст внутри файлов'}
+          placeholder={searchMode === 'name' ? t('files.searchNamePlaceholder') : t('files.searchContentPlaceholder')}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && void runSearch()}
@@ -788,29 +790,29 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
             className={`btn${searchMode === 'name' ? ' active' : ''}`}
             onClick={() => setSearchMode('name')}
           >
-            Имена
+            {t('files.searchModeName')}
           </button>
           <button
             className={`btn${searchMode === 'content' ? ' active' : ''}`}
             onClick={() => setSearchMode('content')}
           >
-            Содержимое
+            {t('files.searchModeContent')}
           </button>
         </div>
         <button className="btn" disabled={searching || !searchQuery.trim()} onClick={() => void runSearch()}>
-          {searching ? 'Поиск…' : 'Найти'}
+          {searching ? t('files.searching') : t('files.search')}
         </button>
         {searchResults !== null && !searching && (
-          <button className="btn btn-ghost" onClick={() => setSearchResults(null)}>Скрыть</button>
+          <button className="btn btn-ghost" onClick={() => setSearchResults(null)}>{t('files.hide')}</button>
         )}
       </div>
 
       {(searching || searchResults !== null) && (
         <div className="search-results">
           {searching ? (
-            <p className="muted">Идёт поиск…</p>
+            <p className="muted">{t('files.searchInProgress')}</p>
           ) : searchResults !== null && searchResults.length === 0 ? (
-            <p className="muted">Ничего не найдено</p>
+            <p className="muted">{t('files.searchEmpty')}</p>
           ) : (
             <ul>
               {(searchResults ?? []).map((r, i) => (
@@ -836,7 +838,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
       >
         {dragOver && (
           <div className="drop-overlay">
-            <span>Отпустите файлы для загрузки</span>
+            <span>{t('files.dropHint')}</span>
           </div>
         )}
         <table className="data-table">
@@ -847,25 +849,25 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
                   type="checkbox"
                   checked={sortedEntries.length > 0 && selected.size === sortedEntries.length}
                   onChange={toggleSelectAll}
-                  title="Выбрать все"
+                  title={t('files.selectAllTitle')}
                 />
               </th>
-              <SortableTh sortKey="name" currentSort={fileSort} onToggle={toggleFileSort}>Имя</SortableTh>
-              <SortableTh sortKey="size" currentSort={fileSort} onToggle={toggleFileSort} className="col-narrow">Размер</SortableTh>
-              <SortableTh sortKey="mtime" currentSort={fileSort} onToggle={toggleFileSort} className="col-narrow">Изменён</SortableTh>
-              <SortableTh sortKey="mode" currentSort={fileSort} onToggle={toggleFileSort} className="col-narrow">Права</SortableTh>
-              <th className="col-narrow">Действия</th>
+              <SortableTh sortKey="name" currentSort={fileSort} onToggle={toggleFileSort}>{t('files.colName')}</SortableTh>
+              <SortableTh sortKey="size" currentSort={fileSort} onToggle={toggleFileSort} className="col-narrow">{t('files.colSize')}</SortableTh>
+              <SortableTh sortKey="mtime" currentSort={fileSort} onToggle={toggleFileSort} className="col-narrow">{t('files.colModified')}</SortableTh>
+              <SortableTh sortKey="mode" currentSort={fileSort} onToggle={toggleFileSort} className="col-narrow">{t('files.colMode')}</SortableTh>
+              <th className="col-narrow">{t('files.colActions')}</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={6} className="muted">Загрузка…</td>
+                <td colSpan={6} className="muted">{t('common.loading')}</td>
               </tr>
             )}
             {!loading && sortedEntries.length === 0 && (
               <tr>
-                <td colSpan={6} className="muted">Директория пуста</td>
+                <td colSpan={6} className="muted">{t('files.emptyDir')}</td>
               </tr>
             )}
             {sortedEntries.map((entry) => (
@@ -899,23 +901,23 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
                       <a
                         className="btn btn-mini"
                         href={downloadDirUrl(profile.id, entry.path)}
-                        title="Скачать директорию архивом (.tar.gz)"
+                        title={t('files.downloadDirTitle')}
                       >
                         {DOWN_ICON}
                       </a>
                     ) : (
                       <>
-                        <a className="btn btn-mini" href={downloadUrl(profile.id, entry.path)} title="Скачать">
+                        <a className="btn btn-mini" href={downloadUrl(profile.id, entry.path)} title={t('files.download')}>
                           {DOWN_ICON}
                         </a>
                         <button
                           className="btn btn-mini"
-                          title="Просмотр (read-only, с подсветкой)"
+                          title={t('files.viewTitle')}
                           onClick={() => void openView(entry)}
                         >
                           {VIEW_ICON}
                         </button>
-                        <button className="btn btn-mini" title="Редактировать" onClick={() => void openEditor(entry)}>
+                        <button className="btn btn-mini" title={t('files.editTitle')} onClick={() => void openEditor(entry)}>
                           {EDIT_ICON}
                         </button>
                       </>
@@ -923,18 +925,18 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
                     {entry.isDirectory && (
                       <button
                         className="btn btn-mini"
-                        title="Открыть в терминале (cd в директорию)"
+                        title={t('files.openInTerminalTitle')}
                         onClick={() => openInTerminal(entry)}
                       >
                         {TERMINAL_ICON}
                       </button>
                     )}
-                    <button className="btn btn-mini btn-danger" title="Удалить" onClick={() => void remove(entry)}>
+                    <button className="btn btn-mini btn-danger" title={t('common.delete')} onClick={() => void remove(entry)}>
                       {X_ICON}
                     </button>
                     <button
                       className="btn btn-mini icon-btn"
-                      title="Дополнительно"
+                      title={t('files.moreTitle')}
                       onClick={(e) => openOverflowMenu(e, entry.path)}
                     >
                       {MORE_ICON}
@@ -960,46 +962,46 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
             >
               {!entry.isDirectory && (
                 <button className="files-overflow-item" onClick={() => { setTailTarget(entry.path); close(); }}>
-                  <span className="files-overflow-ic">{EYE_ICON}</span> Смотреть хвост (tail -F)
+                  <span className="files-overflow-ic">{EYE_ICON}</span> {t('files.watchTail')}
                 </button>
               )}
               <button className="files-overflow-item" onClick={() => { void copyEntryPath(entry); close(); }}>
-                <span className="files-overflow-ic">{copiedPath === entry.path ? CHECK_ICON : COPY_ICON}</span> Скопировать путь
+                <span className="files-overflow-ic">{copiedPath === entry.path ? CHECK_ICON : COPY_ICON}</span> {t('files.copyPath')}
               </button>
               {!entry.isDirectory && (
                 <button className="files-overflow-item" onClick={() => { openInTerminal(entry); close(); }}>
-                  <span className="files-overflow-ic">{TERMINAL_ICON}</span> Открыть в терминале
+                  <span className="files-overflow-ic">{TERMINAL_ICON}</span> {t('files.openInTerminal')}
                 </button>
               )}
               <button
                 className="files-overflow-item"
                 onClick={() => {
-                  setPromptState({ title: 'Переименовать', value: entry.name, action: 'rename', target: entry });
+                  setPromptState({ title: t('files.promptRename'), value: entry.name, action: 'rename', target: entry });
                   close();
                 }}
               >
-                <span className="files-overflow-ic">{RENAME_ICON}</span> Переименовать
+                <span className="files-overflow-ic">{RENAME_ICON}</span> {t('files.promptRename')}
               </button>
               <button
                 className="files-overflow-item"
                 onClick={() => {
-                  setPromptState({ title: 'Права доступа', value: '755', action: 'chmod', target: entry });
+                  setPromptState({ title: t('files.promptChmod'), value: '755', action: 'chmod', target: entry });
                   close();
                 }}
               >
-                <span className="files-overflow-ic">{LOCK_ICON}</span> Права доступа (chmod)
+                <span className="files-overflow-ic">{LOCK_ICON}</span> {t('files.promptChmod')}
               </button>
             </div>
           );
         })()}
 
       {editTarget && (
-        <Modal title={`Редактирование: ${editTarget.name}`} onClose={() => setEditTarget(null)} wide>
+        <Modal title={t('files.editingTitle', { name: editTarget.name })} onClose={() => setEditTarget(null)} wide>
           {editLoading ? (
-            <p className="muted">Загрузка файла…</p>
+            <p className="muted">{t('files.fileLoading')}</p>
           ) : (
             <>
-              <Suspense fallback={<p className="muted">Загрузка редактора…</p>}>
+              <Suspense fallback={<p className="muted">{t('files.editorLoading')}</p>}>
                 <CodeEditor
                   value={editContent}
                   fileName={editTarget.path}
@@ -1007,8 +1009,8 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
                 />
               </Suspense>
               <div className="modal-actions">
-                <button className="btn btn-primary" onClick={() => void saveEdit()}>Сохранить</button>
-                <button className="btn" onClick={() => setEditTarget(null)}>Отмена</button>
+                <button className="btn btn-primary" onClick={() => void saveEdit()}>{t('common.save')}</button>
+                <button className="btn" onClick={() => setEditTarget(null)}>{t('common.cancel')}</button>
               </div>
             </>
           )}
@@ -1016,16 +1018,16 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
       )}
 
       {viewTarget && (
-        <Modal title={`Просмотр: ${viewTarget.name}`} onClose={() => setViewTarget(null)} wide>
+        <Modal title={t('files.viewingTitle', { name: viewTarget.name })} onClose={() => setViewTarget(null)} wide>
           {viewLoading ? (
-            <p className="muted">Загрузка файла…</p>
+            <p className="muted">{t('files.fileLoading')}</p>
           ) : (
             <>
-              <Suspense fallback={<p className="muted">Загрузка редактора…</p>}>
+              <Suspense fallback={<p className="muted">{t('files.editorLoading')}</p>}>
                 <CodeEditor value={viewContent} fileName={viewTarget.path} onChange={noop} readOnly />
               </Suspense>
               <div className="modal-actions">
-                <button className="btn" onClick={() => setViewTarget(null)}>Закрыть</button>
+                <button className="btn" onClick={() => setViewTarget(null)}>{t('common.close')}</button>
               </div>
             </>
           )}
@@ -1035,7 +1037,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
       {promptState && (
         <Modal title={promptTitle} onClose={() => setPromptState(null)}>
           <label>
-            {promptState.action === 'chmod' ? 'Режим (например 755):' : 'Имя:'}
+            {promptState.action === 'chmod' ? t('files.chmodModeLabel') : t('files.nameLabel')}
             <input
               autoFocus
               value={promptState.value}
@@ -1044,8 +1046,8 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
             />
           </label>
           <div className="modal-actions">
-            <button className="btn btn-primary" onClick={() => void submitPrompt()}>ОК</button>
-            <button className="btn" onClick={() => setPromptState(null)}>Отмена</button>
+            <button className="btn btn-primary" onClick={() => void submitPrompt()}>{t('common.ok')}</button>
+            <button className="btn" onClick={() => setPromptState(null)}>{t('common.cancel')}</button>
           </div>
         </Modal>
       )}
@@ -1074,20 +1076,20 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
                   )
                 }
               >
-                {tailPinned ? '☆ Открепить' : '★ Закрепить'}
+                {tailPinned ? t('files.unpin') : t('files.pin')}
               </button>
             }
           />
           <div className="modal-actions">
-            <button className="btn" onClick={() => setTailTarget(null)}>Закрыть</button>
+            <button className="btn" onClick={() => setTailTarget(null)}>{t('common.close')}</button>
           </div>
         </Modal>
       )}
 
       {addLogOpen && (
-        <Modal title="Добавить путь лога" onClose={() => setAddLogOpen(false)}>
+        <Modal title={t('files.addLogTitle')} onClose={() => setAddLogOpen(false)}>
           <label>
-            Абсолютный путь:
+            {t('files.absPathLabel')}
             <input
               autoFocus
               value={addLogInput}
@@ -1097,8 +1099,8 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
             />
           </label>
           <div className="modal-actions">
-            <button className="btn btn-primary" onClick={() => void submitAddLog()}>ОК</button>
-            <button className="btn" onClick={() => setAddLogOpen(false)}>Отмена</button>
+            <button className="btn btn-primary" onClick={() => void submitAddLog()}>{t('common.ok')}</button>
+            <button className="btn" onClick={() => setAddLogOpen(false)}>{t('common.cancel')}</button>
           </div>
         </Modal>
       )}

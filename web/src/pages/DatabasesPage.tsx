@@ -27,6 +27,7 @@ import {
   type MysqlFlavor,
 } from '../api';
 import type { AgentAskMode, Profile } from '../types';
+import { useT } from '../i18n';
 
 // Редактор с подсветкой — тот же чанк, что и в файловом менеджере
 const CodeEditor = lazy(() => import('../components/CodeEditor'));
@@ -108,6 +109,7 @@ function QueryHistoryPalette({
   onPick: (sql: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useT();
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
@@ -150,14 +152,14 @@ function QueryHistoryPalette({
       <input
         className="history-filter"
         autoFocus
-        placeholder="Фильтр запросов… (↑↓ — выбор, Enter — вставить, Esc — закрыть)"
+        placeholder={t('databases.historyPlaceholder')}
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
       />
       <div className="history-list" ref={listRef}>
         {filtered.length === 0 && (
           <div className="history-empty">
-            {history.length === 0 ? 'История запросов пуста' : 'Ничего не найдено'}
+            {history.length === 0 ? t('databases.historyEmpty') : t('databases.historyNoMatches')}
           </div>
         )}
         {filtered.map((sql, i) => (
@@ -196,6 +198,7 @@ function ConnectionModal({
   onDeleted: (id: string) => void;
   showError: (msg: string) => void;
 }) {
+  const { t } = useT();
   const [name, setName] = useState(editing?.name ?? '');
   const [engine, setEngine] = useState<DbEngine>(editing?.engine ?? 'postgres');
   const [containerId, setContainerId] = useState(
@@ -256,7 +259,7 @@ function ConnectionModal({
 
   const save = async () => {
     if (!name.trim() || !containerId.trim() || !username.trim()) {
-      showError('Заполните имя, контейнер и пользователя');
+      showError(t('databases.errorRequiredFields'));
       return;
     }
     setBusy(true);
@@ -274,7 +277,7 @@ function ConnectionModal({
 
   const runTest = async () => {
     if (!containerId.trim() || !username.trim()) {
-      showError('Заполните контейнер и пользователя');
+      showError(t('databases.errorTestRequiredFields'));
       return;
     }
     setTesting(true);
@@ -282,7 +285,7 @@ function ConnectionModal({
     try {
       const input = buildInput();
       await testDbConnection(editing ? { ...input, id: editing.id } : input);
-      setTestResult({ phase: 'ok', message: 'Подключение работает' });
+      setTestResult({ phase: 'ok', message: t('databases.testOk') });
     } catch (err) {
       const info = (err as { info?: DbQueryErrorInfo }).info;
       setTestResult({
@@ -296,7 +299,7 @@ function ConnectionModal({
 
   const remove = async () => {
     if (!editing) return;
-    if (!window.confirm(`Удалить подключение «${editing.name}»?`)) return;
+    if (!window.confirm(t('databases.deleteConfirm', { name: editing.name }))) return;
     setBusy(true);
     try {
       await deleteDbConnection(editing.id);
@@ -323,7 +326,7 @@ function ConnectionModal({
     >
       <div className="modal">
         <div className="modal-header">
-          <h2>{editing ? 'Подключение к БД' : 'Новое подключение к БД'}</h2>
+          <h2>{editing ? t('databases.editTitle') : t('databases.newTitle')}</h2>
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             ✕
           </button>
@@ -331,9 +334,9 @@ function ConnectionModal({
         <div className="modal-body">
           <div className="form-grid">
             <label className="span-2">
-              Контейнер
+              {t('databases.fieldContainer')}
               <select value={containerId} onChange={(e) => pickContainer(e.target.value)}>
-                <option value="">— выберите контейнер —</option>
+                <option value="">{t('databases.selectContainer')}</option>
                 {suggestions?.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name} ({s.image})
@@ -341,22 +344,22 @@ function ConnectionModal({
                 ))}
                 {editingContainerMissing && editingContainerId && (
                   <option value={editingContainerId}>
-                    {editingContainerId} (сохранённый)
+                    {editingContainerId}{t('databases.savedSuffix')}
                   </option>
                 )}
               </select>
               <span className="field-hint">
                 {discoveryError
-                  ? `Список контейнеров не получен: ${discoveryError}`
+                  ? t('databases.discoveryError', { error: discoveryError })
                   : suggestions === null
-                    ? 'Загрузка контейнеров…'
+                    ? t('databases.loadingContainers')
                     : suggestions.length === 0
-                      ? 'Контейнеры PostgreSQL / MySQL / MariaDB не найдены.'
-                      : 'Выбор автозаполняет движок, пользователя и базу по умолчанию.'}
+                      ? t('databases.noContainers')
+                      : t('databases.pickHint')}
               </span>
             </label>
             <label>
-              Движок
+              {t('databases.fieldEngine')}
               <select
                 value={engine}
                 onChange={(e) => setEngine(e.target.value as DbEngine)}
@@ -366,7 +369,7 @@ function ConnectionModal({
               </select>
             </label>
             <label>
-              Имя подключения
+              {t('databases.fieldName')}
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -374,7 +377,7 @@ function ConnectionModal({
               />
             </label>
             <label>
-              Пользователь БД
+              {t('databases.fieldUsername')}
               <input
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
@@ -382,29 +385,28 @@ function ConnectionModal({
               />
             </label>
             <label>
-              Пароль
+              {t('databases.fieldPassword')}
               <div className="inline-field">
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder={editing ? 'сохранён — пусто = не менять' : 'для PG в контейнере часто не нужен'}
+                  placeholder={editing ? t('databases.passwordPlaceholderEdit') : t('databases.passwordPlaceholderNew')}
                 />
                 <button
                   type="button"
                   className="btn"
                   onClick={() => setShowPassword((v) => !v)}
                 >
-                  {showPassword ? 'Скрыть' : 'Показать'}
+                  {showPassword ? t('databases.hidePassword') : t('databases.showPassword')}
                 </button>
               </div>
               <span className="field-hint">
-                Передаётся первой строкой stdin — не светится в ps сервера. Перевод
-                строки в пароле не поддерживается.
+                {t('databases.passwordHint')}
               </span>
             </label>
             <label>
-              База по умолчанию (необязательно)
+              {t('databases.fieldDefaultDatabase')}
               <input
                 value={defaultDatabase}
                 onChange={(e) => setDefaultDatabase(e.target.value)}
@@ -416,9 +418,8 @@ function ConnectionModal({
           {hints.length > 0 && (
             <div className="db-hints">
               {hints.map((h) => (
-                <p key={h.id} className="muted" title={`Контейнер ${h.name}, порт ${h.port}`}>
-                  «{h.name}» слушает :{h.port} — похоже на СУБД, но образ не распознан
-                  (поддерживаются postgres / mysql / mariadb)
+                <p key={h.id} className="muted" title={t('databases.hintTitle', { name: h.name, port: h.port })}>
+                  {t('databases.hintText', { name: h.name, port: h.port })}
                 </p>
               ))}
             </div>
@@ -426,18 +427,18 @@ function ConnectionModal({
         </div>
         <div className="modal-actions">
           <button className="btn btn-primary" onClick={save} disabled={busy || testing}>
-            {busy ? 'Сохранение…' : 'Сохранить'}
+            {busy ? t('databases.saving') : t('common.save')}
           </button>
           <button className="btn" onClick={runTest} disabled={busy || testing}>
-            {testing ? 'Проверка…' : 'Проверить подключение'}
+            {testing ? t('databases.testing') : t('databases.testConnection')}
           </button>
           {editing && (
             <button className="btn btn-danger" onClick={remove} disabled={busy || testing}>
-              Удалить
+              {t('common.delete')}
             </button>
           )}
           <button className="btn" onClick={onClose} disabled={busy}>
-            Отмена
+            {t('common.cancel')}
           </button>
         </div>
         {testResult && (
@@ -458,6 +459,7 @@ export function DatabasesPage({
   sqlInsert,
   onSqlInsertConsumed,
 }: Props) {
+  const { t } = useT();
   // Подключения (обновление по кнопке и после правок — polling нет)
   const [connections, setConnections] = useState<DbConnectionInfo[] | null>(null);
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
@@ -646,7 +648,7 @@ export function DatabasesPage({
 
   const runQuery = useCallback(async () => {
     if (!connection || !database) {
-      showError('Выберите подключение и базу');
+      showError(t('databases.errorNoSelection'));
       return;
     }
     if (!sql.trim() || running) return;
@@ -674,7 +676,7 @@ export function DatabasesPage({
     } finally {
       setRunning(false);
     }
-  }, [connection, database, sql, running, readOnly, profile.id, showError, pushHistory]);
+  }, [connection, database, sql, running, readOnly, profile.id, showError, pushHistory, t]);
 
   const handleDump = async (dbName: string) => {
     if (!connection || dumping) return;
@@ -702,14 +704,14 @@ export function DatabasesPage({
     });
   };
 
-  const prefillTable = (t: DbTableInfo) => {
+  const prefillTable = (tbl: DbTableInfo) => {
     const quote = (s: string) => (connection?.engine === 'postgres' ? `"${s}"` : `\`${s}\``);
-    setSql(`SELECT *\nFROM ${quote(t.schema)}.${quote(t.name)}\nLIMIT 100;`);
+    setSql(`SELECT *\nFROM ${quote(tbl.schema)}.${quote(tbl.name)}\nLIMIT 100;`);
   };
 
   // Раскрытие таблицы: показать/скрыть поля и индексы (деталь кэшируется).
-  const toggleTableDetail = async (t: DbTableInfo) => {
-    const key = tableDetailKey(t);
+  const toggleTableDetail = async (tbl: DbTableInfo) => {
+    const key = tableDetailKey(tbl);
     if (expandedTable === key) {
       setExpandedTable(null);
       return;
@@ -718,7 +720,7 @@ export function DatabasesPage({
     if (!tableDetails[key] && connection && database) {
       setTableDetailLoading((prev) => ({ ...prev, [key]: true }));
       try {
-        const detail = await fetchDbTableDetail(profile.id, connection.id, database, t.schema, t.name);
+        const detail = await fetchDbTableDetail(profile.id, connection.id, database, tbl.schema, tbl.name);
         setTableDetails((prev) => ({ ...prev, [key]: detail }));
       } catch (err) {
         showError((err as Error).message);
@@ -733,12 +735,12 @@ export function DatabasesPage({
   // 'send'). Выполняет сгенерированный запрос всегда пользователь.
   const askAgent = () => {
     if (!connection) {
-      showError('Выберите подключение');
+      showError(t('databases.errorNoConnection'));
       return;
     }
     const task = sql.trim();
     if (!task) {
-      showError('Опишите задачу или набросайте запрос в редакторе');
+      showError(t('databases.errorNoTask'));
       return;
     }
     const engineLabel = ENGINE_LABEL[connection.engine] ?? connection.engine;
@@ -796,53 +798,52 @@ export function DatabasesPage({
         <span className={`status-dot ${connectionsError ? 'error' : connections ? 'connected' : ''}`} />
         <span className="status-text">
           {connectionsError
-            ? `Ошибка: ${connectionsError}`
+            ? t('databases.errorPrefix', { error: connectionsError })
             : connections
-              ? `${connections.length} подключение(ий)`
-              : 'Загрузка…'}
+              ? t('databases.connectionsCount', connections.length)
+              : t('common.loading')}
         </span>
         <div className="toolbar-actions">
           <button className="btn btn-ghost" onClick={() => setReloadKey((k) => k + 1)}>
-            Обновить
+            {t('common.refresh')}
           </button>
         </div>
       </div>
 
       {connectionsError && !connections ? (
         <div className="empty-state">
-          <p>Список подключений получить не удалось:</p>
+          <p>{t('databases.loadFailed')}</p>
           <p className="error-text">{connectionsError}</p>
           <button className="btn btn-primary" onClick={() => setReloadKey((k) => k + 1)}>
-            Повторить
+            {t('common.retry')}
           </button>
         </div>
       ) : !connections ? (
         <div className="empty-state">
-          <p>Загрузка подключений…</p>
+          <p>{t('databases.loadingConnections')}</p>
         </div>
       ) : connections.length === 0 ? (
         <div className="empty-state">
-          <p>Сохранённых подключений к БД нет.</p>
+          <p>{t('databases.empty')}</p>
           <p className="muted">
-            Подключение — как в DBeaver: контейнер PostgreSQL/MySQL/MariaDB,
-            пользователь и пароль. Пароль вводится один раз.
+            {t('databases.emptyHint')}
           </p>
           <button className="btn btn-primary" onClick={openCreateModal}>
-            Добавить подключение
+            {t('databases.addConnection')}
           </button>
         </div>
       ) : (
         <div className="db-layout">
           <aside className="db-sidebar">
             <div className="db-section-header">
-              <h3 className="section-title">Подключения</h3>
+              <h3 className="section-title">{t('databases.connectionsTitle')}</h3>
               <button
                 type="button"
                 className="btn btn-ghost btn-mini"
                 onClick={openCreateModal}
-                title="Новое подключение к БД"
+                title={t('databases.newTitle')}
               >
-                + Добавить
+                {t('databases.addButton')}
               </button>
             </div>
             {connections.map((c) => (
@@ -868,7 +869,7 @@ export function DatabasesPage({
                   type="button"
                   className="btn btn-ghost btn-mini"
                   onClick={() => openEditModal(c)}
-                  title="Изменить подключение"
+                  title={t('databases.editConnectionTitle')}
                 >
                   ✎
                 </button>
@@ -878,7 +879,7 @@ export function DatabasesPage({
             {connection && (
               <>
                 <h3 className="section-title">
-                  Базы
+                  {t('databases.databasesTitle')}
                   {overview && (
                     <span className="muted db-version">
                       {' · '}
@@ -887,9 +888,9 @@ export function DatabasesPage({
                   )}
                 </h3>
                 {overviewError && <p className="error-text">{overviewError}</p>}
-                {!overview && !overviewError && <p className="muted">Загрузка…</p>}
+                {!overview && !overviewError && <p className="muted">{t('common.loading')}</p>}
                 {overview && overview.databases.length === 0 && (
-                  <p className="muted db-sidebar-empty">Баз нет</p>
+                  <p className="muted db-sidebar-empty">{t('databases.noDatabases')}</p>
                 )}
                 {overview?.databases.map((db) => (
                   <div
@@ -905,7 +906,7 @@ export function DatabasesPage({
                         <strong>{db.name}</strong>
                         <span className="muted">
                           {db.sizeBytes !== null ? formatSize(db.sizeBytes) : ''}
-                          {db.tableCount !== null ? ` · ${db.tableCount} табл.` : ''}
+                          {db.tableCount !== null ? t('databases.tablesSuffix', db.tableCount) : ''}
                         </span>
                       </span>
                     </button>
@@ -914,7 +915,7 @@ export function DatabasesPage({
                       className="btn btn-ghost btn-mini"
                       onClick={() => handleDump(db.name)}
                       disabled={dumping !== null}
-                      title="Скачать дамп (pg_dump/mysqldump | gzip)"
+                      title={t('databases.dumpTitle')}
                     >
                       {dumping === db.name ? '…' : '⤓'}
                     </button>
@@ -922,16 +923,16 @@ export function DatabasesPage({
                 ))}
 
                 <h3 className="section-title">
-                  Таблицы{database ? ` — ${database}` : ''}
+                  {t('databases.tablesTitle')}{database ? t('databases.tablesFor', { name: database }) : ''}
                 </h3>
-                {tablesError && <p className="error-text" title={tablesError}>Не загрузились: {tablesError}</p>}
-                {tables === null && database && !tablesError && <p className="muted">Загрузка…</p>}
+                {tablesError && <p className="error-text" title={tablesError}>{t('databases.tablesLoadFailed', { error: tablesError })}</p>}
+                {tables === null && database && !tablesError && <p className="muted">{t('common.loading')}</p>}
                 {tables !== null && tables.length === 0 && !tablesError && (
-                  <p className="muted db-sidebar-empty">Таблиц нет</p>
+                  <p className="muted db-sidebar-empty">{t('databases.noTables')}</p>
                 )}
                 <div className="db-tables">
-                  {tables?.map((t) => {
-                    const key = tableDetailKey(t);
+                  {tables?.map((tbl) => {
+                    const key = tableDetailKey(tbl);
                     const open = expandedTable === key;
                     const detail = tableDetails[key];
                     const loading = tableDetailLoading[key];
@@ -941,8 +942,8 @@ export function DatabasesPage({
                           <button
                             type="button"
                             className="db-table-chev"
-                            onClick={() => void toggleTableDetail(t)}
-                            title="Поля и индексы таблицы"
+                            onClick={() => void toggleTableDetail(tbl)}
+                            title={t('databases.tableDetailTitle')}
                           >
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M9 6l6 6-6 6" />
@@ -951,20 +952,20 @@ export function DatabasesPage({
                           <button
                             type="button"
                             className="db-table-item"
-                            onClick={() => prefillTable(t)}
-                            title="Вставить SELECT * … LIMIT 100 в редактор"
+                            onClick={() => prefillTable(tbl)}
+                            title={t('databases.prefillTitle')}
                           >
-                            {t.name}
+                            {tbl.name}
                           </button>
                         </div>
                         {open && (
                           <div className="db-table-detail">
-                            {loading && !detail && <p className="muted db-detail-loading">Загрузка…</p>}
+                            {loading && !detail && <p className="muted db-detail-loading">{t('common.loading')}</p>}
                             {detail && (
                               <>
                                 {detail.columns.length > 0 && (
                                   <>
-                                    <p className="db-detail-label">Поля</p>
+                                    <p className="db-detail-label">{t('databases.detailColumns')}</p>
                                     <div className="db-detail-cols">
                                       {detail.columns.map((c) => (
                                         <div key={c.name} className="db-detail-col">
@@ -978,7 +979,7 @@ export function DatabasesPage({
                                 )}
                                 {detail.indexes.length > 0 && (
                                   <>
-                                    <p className="db-detail-label">Индексы</p>
+                                    <p className="db-detail-label">{t('databases.detailIndexes')}</p>
                                     <div className="db-detail-idx">
                                       {detail.indexes.map((ix) => (
                                         <div key={ix.name} className="db-detail-idx-row">
@@ -992,7 +993,7 @@ export function DatabasesPage({
                                   </>
                                 )}
                                 {detail.columns.length === 0 && detail.indexes.length === 0 && (
-                                  <p className="muted db-detail-empty">Нет данных</p>
+                                  <p className="muted db-detail-empty">{t('databases.noData')}</p>
                                 )}
                               </>
                             )}
@@ -1008,28 +1009,28 @@ export function DatabasesPage({
 
           <section className="db-main">
             <div className="db-editor-toolbar">
-              <label className="db-readonly-toggle" title="Серверный SET перед запросом. Защита от случайности, не от намеренного: пользовательский SET может снять режим.">
+              <label className="db-readonly-toggle" title={t('databases.readOnlyTitle')}>
                 <input
                   type="checkbox"
                   checked={readOnly}
                   onChange={(e) => setReadOnly(e.target.checked)}
                 />
-                только чтение
+                {t('databases.readOnlyLabel')}
               </label>
               <button
                 className="btn btn-primary"
                 onClick={runQuery}
                 disabled={running || !connection || !database}
               >
-                {running ? 'Выполняется…' : 'Выполнить'}
+                {running ? t('databases.running') : t('databases.run')}
               </button>
               <button
                 className="btn btn-ghost"
                 onClick={insertExplain}
                 title={
                   connection?.engine === 'postgres'
-                    ? 'Обернуть запрос в EXPLAIN (ANALYZE, BUFFERS)'
-                    : 'Обернуть запрос в EXPLAIN'
+                    ? t('databases.explainTitlePostgres')
+                    : t('databases.explainTitle')
                 }
               >
                 EXPLAIN
@@ -1037,18 +1038,18 @@ export function DatabasesPage({
               <button
                 className="btn btn-ghost"
                 onClick={() => setHistoryOpen(true)}
-                title="История запросов (Ctrl+R)"
+                title={t('databases.historyTitle')}
               >
-                История
+                {t('databases.historyButton')}
               </button>
-              <button className="btn btn-ghost" onClick={askAgent} title="Агент напишет SQL по задаче и схеме; схема уходит в API модели — действие осознанное">
-                Спросить агента
+              <button className="btn btn-ghost" onClick={askAgent} title={t('databases.askAgentTitle')}>
+                {t('databases.askAgent')}
               </button>
-              <span className="muted db-shortcut">Ctrl+Enter — выполнить</span>
+              <span className="muted db-shortcut">{t('databases.shortcutRun')}</span>
             </div>
 
             <div className="db-editor">
-              <Suspense fallback={<p className="muted">Загрузка редактора…</p>}>
+              <Suspense fallback={<p className="muted">{t('databases.editorLoading')}</p>}>
                 <CodeEditor
                   value={sql}
                   fileName="query.sql"
@@ -1071,17 +1072,17 @@ export function DatabasesPage({
                 <div className="db-result-meta">
                   {result.columns.length > 0 ? (
                     <span>
-                      {result.rowCount} строк(и)
+                      {t('databases.rowsCount', result.rowCount)}
                       {result.totalRows > result.rowCount
-                        ? ` — показаны первые ${result.rowCount} из ${result.totalRows}`
+                        ? t('databases.rowsShownFirst', { shown: result.rowCount, total: result.totalRows })
                         : ''}
                     </span>
                   ) : (
-                    <span className="muted">Result set отсутствует (см. полный вывод)</span>
+                    <span className="muted">{t('databases.noResultSet')}</span>
                   )}
-                  <span className="muted">{result.durationMs} мс</span>
+                  <span className="muted">{t('databases.ms', { n: result.durationMs })}</span>
                   {result.truncated && (
-                    <span className="error-text">вывод обрезан по лимиту 2 МБ</span>
+                    <span className="error-text">{t('databases.truncatedOutput')}</span>
                   )}
                 </div>
                 {result.columns.length > 0 && (
@@ -1107,7 +1108,7 @@ export function DatabasesPage({
                         {result.rows.length === 0 && (
                           <tr>
                             <td colSpan={result.columns.length} className="muted">
-                              0 строк
+                              {t('databases.zeroRows')}
                             </td>
                           </tr>
                         )}
@@ -1117,7 +1118,7 @@ export function DatabasesPage({
                 )}
                 {result.rawOutput && (
                   <details className="db-raw-output">
-                    <summary>Полный вывод</summary>
+                    <summary>{t('databases.rawOutput')}</summary>
                     <pre className="mono">{result.rawOutput}</pre>
                   </details>
                 )}

@@ -23,6 +23,8 @@ import { DockerPage } from './pages/DockerPage';
 import { AgentPage } from './pages/AgentPage';
 import { ProfileModal } from './components/ProfileModal';
 import { AlertsBell } from './components/AlertsBell';
+import { useT } from './i18n';
+import type { I18nKey } from './i18n';
 
 // Иконки футера сайдбара (луна/солнце/выход) — в фирменном SVG-стиле.
 const MOON_ICON = (
@@ -57,16 +59,16 @@ type Tab =
   | 'cron'
   | 'services';
 
-const TABS: Array<{ id: Tab; label: string }> = [
-  { id: 'overview', label: 'Обзор' },
-  { id: 'terminal', label: 'Терминал' },
-  { id: 'files', label: 'Файлы' },
-  { id: 'docker', label: 'Docker' },
-  { id: 'databases', label: 'Базы данных' },
-  { id: 'nginx', label: 'Nginx' },
-  { id: 'ports', label: 'Порты' },
-  { id: 'cron', label: 'Cron' },
-  { id: 'services', label: 'Службы' },
+const TABS: Array<{ id: Tab; labelKey: I18nKey }> = [
+  { id: 'overview', labelKey: 'tabs.overview' },
+  { id: 'terminal', labelKey: 'tabs.terminal' },
+  { id: 'files', labelKey: 'tabs.files' },
+  { id: 'docker', labelKey: 'tabs.docker' },
+  { id: 'databases', labelKey: 'tabs.databases' },
+  { id: 'nginx', labelKey: 'tabs.nginx' },
+  { id: 'ports', labelKey: 'tabs.ports' },
+  { id: 'cron', labelKey: 'tabs.cron' },
+  { id: 'services', labelKey: 'tabs.services' },
 ];
 
 const AGENT_MIN_WIDTH = 360;
@@ -93,6 +95,7 @@ function loadAgentOpen(): boolean {
 }
 
 export default function App() {
+  const { lang, setLang, t } = useT();
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [activeProfileId, setActiveProfileId] = useState('');
@@ -446,7 +449,7 @@ export default function App() {
   if (authed === null) {
     return (
       <>
-        <div className="boot">Загрузка…</div>
+        <div className="boot">{t('common.loading')}</div>
         {toast && <div className="toast">{toast}</div>}
       </>
     );
@@ -487,8 +490,8 @@ export default function App() {
             className={`profile-list-item${tab === 'servers' ? ' active' : ''}`}
             onClick={() => setTab('servers')}
           >
-            <strong>Серверы</strong>
-            <span className="muted">Сводный дашборд</span>
+            <strong>{t('app.servers')}</strong>
+            <span className="muted">{t('app.serversSubtitle')}</span>
           </button>
 
           <button
@@ -496,25 +499,25 @@ export default function App() {
             className={`profile-list-item${tab === 'ai-costs' ? ' active' : ''}`}
             onClick={() => setTab('ai-costs')}
           >
-            <strong>ИИ-расходы</strong>
-            <span className="muted">Расходы по проектам</span>
+            <strong>{t('app.aiCosts')}</strong>
+            <span className="muted">{t('app.aiCostsSubtitle')}</span>
           </button>
 
           <div className="sidebar-divider" />
 
-          <label className="sidebar-label">Площадки</label>
+          <label className="sidebar-label">{t('app.sites')}</label>
           <div className="profile-list">
             {profiles.length === 0 && (
-              <div className="profile-list-empty muted">Нет серверов</div>
+              <div className="profile-list-empty muted">{t('app.noServers')}</div>
             )}
             {profiles.map((p) => {
               const st = serverStatus[p.id];
               const dotClass = st ? (st.ok ? 'connected' : 'error') : '';
               const statusText = st
                 ? st.ok
-                  ? 'доступен'
-                  : `недоступен: ${st.error ?? 'нет данных'}`
-                : 'статус проверяется';
+                  ? t('app.statusAvailable')
+                  : t('app.statusUnavailable', { error: st.error ?? t('app.statusNoData') })
+                : t('app.statusChecking');
               const activity = agentActivity[p.id];
               const pAlerts = profileAlerts.get(p.id);
               return (
@@ -536,8 +539,8 @@ export default function App() {
                         className={`agent-dot ${activity}`}
                         title={
                           activity === 'pending'
-                            ? 'Агент ждёт подтверждения действия'
-                            : 'Агент выполняет задачу'
+                            ? t('app.agentPending')
+                            : t('app.agentRunning')
                         }
                       />
                     )}
@@ -558,18 +561,35 @@ export default function App() {
             })}
           </div>
           <button className="btn btn-ghost btn-block" onClick={() => setShowProfiles(true)}>
-            Управление серверами
+            {t('app.manageServers')}
           </button>
         </div>
 
         <div className="sidebar-footer">
           <div className="theme-switch-row">
-            <span className="theme-switch-label">Тема</span>
+            <span className="theme-switch-label">{t('common.language')}</span>
+            <div className="lang-switch" role="group" aria-label={t('common.language')}>
+              <button
+                className={`lang-switch-btn ${lang === 'ru' ? 'active' : ''}`}
+                onClick={() => setLang('ru')}
+              >
+                RU
+              </button>
+              <button
+                className={`lang-switch-btn ${lang === 'en' ? 'active' : ''}`}
+                onClick={() => setLang('en')}
+              >
+                EN
+              </button>
+            </div>
+          </div>
+          <div className="theme-switch-row">
+            <span className="theme-switch-label">{t('app.theme')}</span>
             <button
               className={`theme-switch ${theme}`}
-              onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
-              title={theme === 'dark' ? 'Переключить на светлую' : 'Переключить на тёмную'}
-              aria-label="Переключить тему"
+              onClick={() => setTheme((cur) => (cur === 'dark' ? 'light' : 'dark'))}
+              title={theme === 'dark' ? t('app.themeToLight') : t('app.themeToDark')}
+              aria-label={t('app.themeToggleAria')}
             >
               <span className="ts-icon ts-moon">{MOON_ICON}</span>
               <span className="ts-icon ts-sun">{SUN_ICON}</span>
@@ -578,7 +598,7 @@ export default function App() {
           </div>
           <button className="btn btn-block" onClick={handleLogout}>
             <span className="logout-label">
-              <span className="logout-ic">{LOGOUT_ICON}</span> Выйти
+              <span className="logout-ic">{LOGOUT_ICON}</span> {t('app.logout')}
             </span>
           </button>
         </div>
@@ -587,13 +607,13 @@ export default function App() {
       <div className="app-main">
         <div className="topbar">
           <nav className="topbar-tabs">
-            {TABS.map((t) => (
+            {TABS.map((tabDef) => (
               <button
-                key={t.id}
-                className={`topbar-tab ${tab === t.id ? 'active' : ''}`}
-                onClick={() => setTab(t.id)}
+                key={tabDef.id}
+                className={`topbar-tab ${tab === tabDef.id ? 'active' : ''}`}
+                onClick={() => setTab(tabDef.id)}
               >
-                {t.label}
+                {t(tabDef.labelKey)}
               </button>
             ))}
           </nav>
@@ -601,9 +621,9 @@ export default function App() {
             <button
               className={`btn btn-ghost topbar-agent-toggle ${agentOpen ? 'active' : ''}`}
               onClick={() => setAgentOpen((o) => !o)}
-              title={agentOpen ? 'Скрыть панель агента' : 'Показать панель агента'}
+              title={agentOpen ? t('app.hideAgentPanel') : t('app.showAgentPanel')}
             >
-              AI-агент
+              {t('app.agent')}
             </button>
           )}
         </div>
@@ -629,9 +649,9 @@ export default function App() {
             </div>
             {!activeProfile && tab !== 'servers' && tab !== 'ai-costs' && (
               <div className="empty-state">
-                <p>Сначала добавьте SSH-сервер.</p>
+                <p>{t('app.addServerFirst')}</p>
                 <button className="btn btn-primary" onClick={() => setShowProfiles(true)}>
-                  Добавить сервер
+                  {t('app.addServer')}
                 </button>
               </div>
             )}
@@ -741,11 +761,11 @@ export default function App() {
               style={agentOpen ? { width: agentWidth } : undefined}
             >
               <div className="agent-panel-head">
-                <span className="sidebar-label">AI-агент</span>
+                <span className="sidebar-label">{t('app.agent')}</span>
                 <button
                   className="btn btn-ghost btn-mini"
                   onClick={() => setAgentOpen(false)}
-                  title="Свернуть панель"
+                  title={t('app.collapsePanel')}
                 >
                   »
                 </button>

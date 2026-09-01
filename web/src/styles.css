@@ -565,6 +565,34 @@ button {
   color: var(--on-accent);
 }
 
+/* Переключатель языка — две кнопки RU/EN по образцу свитча темы */
+.lang-switch {
+  display: flex;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+  overflow: hidden;
+}
+
+.lang-switch-btn {
+  padding: 0 12px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.2s,
+    color 0.2s;
+}
+
+.lang-switch-btn.active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
 /* Кнопка «Выйти» — полноширинная, с иконкой */
 .logout-label {
   display: inline-flex;

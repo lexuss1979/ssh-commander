@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useT } from '../i18n';
 
 interface Props {
   content: string;
@@ -29,6 +30,7 @@ function codeLanguage(children: ReactNode): string | null {
 /** Блок <pre> с кнопкой «Копировать»; для sql-блоков — дополнительно «В SQL». */
 function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
   const { children, ...rest } = props;
+  const { t } = useT();
   const [copied, setCopied] = useState(false);
   const preRef = useRef<HTMLPreElement>(null);
   const onInsertSql = useContext(InsertSqlContext);
@@ -56,8 +58,8 @@ function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
           <button
             className="code-copy-btn code-insert-btn"
             onClick={handleInsert}
-            title="Вставить SQL в редактор на вкладке «Базы данных»"
-            aria-label="Вставить SQL в редактор"
+            title={t('markdown.insertSqlTitle')}
+            aria-label={t('markdown.insertSqlAria')}
           >
             → SQL
           </button>
@@ -65,8 +67,8 @@ function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
         <button
           className="code-copy-btn"
           onClick={handleCopy}
-          title="Копировать"
-          aria-label="Копировать код"
+          title={t('markdown.copyTitle')}
+          aria-label={t('markdown.copyAria')}
         >
           {copied ? '✓' : '📋'}
         </button>

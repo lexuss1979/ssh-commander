@@ -3,6 +3,8 @@ import { api } from '../api';
 import type { DockerEntity, Profile } from '../types';
 import { Modal } from '../components/Modal';
 import { useSortBy, SortableTh } from '../hooks/useSortBy';
+import { useT } from '../i18n';
+import type { I18nKey, I18nParams } from '../i18n';
 
 interface Props {
   profile: Profile;
@@ -23,11 +25,13 @@ interface ComposeStatus {
 // Лимит буфера логов в LogsModal (~500 КБ текста).
 const LOG_BUFFER_LIMIT = 500 * 1024;
 
-const PRUNE_LABELS: Record<PruneTarget, string> = {
-  containers: 'все остановленные контейнеры',
-  images: 'все dangling-образы (без тега и не используемые)',
-  volumes: 'все неиспользуемые volumes — данные будут потеряны',
-  system: 'остановленные контейнеры, неиспользуемые сети, dangling-образы и кэш сборки',
+type TFn = (key: I18nKey, params?: I18nParams | number) => string;
+
+const PRUNE_LABELS: Record<PruneTarget, I18nKey> = {
+  containers: 'docker.pruneDescContainers',
+  images: 'docker.pruneDescImages',
+  volumes: 'docker.pruneDescVolumes',
+  system: 'docker.pruneDescSystem',
 };
 
 function q(profileId: string): string {
@@ -42,14 +46,14 @@ function q(profileId: string): string {
 /** Максимум символов отображаемого имени образа до обрезки (полный — в title). */
 const IMAGE_MAX_CHARS = 50;
 
-const UPTIME_UNIT_RU: Record<string, string> = {
-  year: 'г',
-  month: 'мес',
-  week: 'нед',
-  day: 'дн',
-  hour: 'ч',
-  minute: 'мин',
-  second: 'с',
+const UPTIME_UNIT_KEYS: Record<string, I18nKey> = {
+  year: 'docker.unitYear',
+  month: 'docker.unitMonth',
+  week: 'docker.unitWeek',
+  day: 'docker.unitDay',
+  hour: 'docker.unitHour',
+  minute: 'docker.unitMinute',
+  second: 'docker.unitSecond',
 };
 
 /** Статус контейнера → класс точки. running — зелёная, restarting — жёлтая, иначе нейтральная. */
@@ -60,18 +64,18 @@ function containerDotClass(status: string, running: boolean): string {
 }
 
 /** Короткий текст статуса для не-работающего контейнера (вместо аптайма). */
-function containerStatusLabel(status: string): string {
+function containerStatusLabel(status: string, t: TFn): string {
   const s = status.trim();
-  if (/^Exited/i.test(s)) return 'остановлен';
-  if (/^Restarting/i.test(s)) return 'перезапуск';
-  if (/^Paused/i.test(s)) return 'приостановлен';
-  if (/^Created/i.test(s)) return 'создан';
-  if (/^Dead/i.test(s)) return 'недоступен';
+  if (/^Exited/i.test(s)) return t('docker.statusExited');
+  if (/^Restarting/i.test(s)) return t('docker.statusRestarting');
+  if (/^Paused/i.test(s)) return t('docker.statusPaused');
+  if (/^Created/i.test(s)) return t('docker.statusCreated');
+  if (/^Dead/i.test(s)) return t('docker.statusDead');
   return s;
 }
 
 /** «Up 6 months (healthy)» → «6 мес». `About an hour` → «≈1 ч». null — не запущен. */
-function containerUptimeLabel(status: string): string | null {
+function containerUptimeLabel(status: string, t: TFn): string | null {
   const m = /^Up\s+(.+?)(?:\s*\(.*\))?$/i.exec(status.trim());
   if (!m) return null;
   let d = m[1].trim();
@@ -84,8 +88,9 @@ function containerUptimeLabel(status: string): string | null {
   const base = d.match(/^(\d+)?\s*([a-z]+)$/i);
   if (!base) return status;
   const n = base[1] ?? '1';
-  const ru = UPTIME_UNIT_RU[base[2].toLowerCase().replace(/s$/, '')] ?? base[2];
-  return approx ? `≈${n} ${ru}` : `${n} ${ru}`;
+  const unitKey = UPTIME_UNIT_KEYS[base[2].toLowerCase().replace(/s$/, '')];
+  const unit = unitKey ? t(unitKey) : base[2];
+  return approx ? `≈${n} ${unit}` : `${n} ${unit}`;
 }
 
 /** Слушающий наружу (не loopback, не wildcard) → public (подсветка warn). */
@@ -132,6 +137,7 @@ function pctWidth(n: number): string {
 }
 
 export function DockerPage({ profile, showError, visible, onExecContainer }: Props) {
+  const { t } = useT();
   const [section, setSection] = useState<Section>('containers');
   const [containers, setContainers] = useState<DockerEntity[]>([]);
   const [images, setImages] = useState<DockerEntity[]>([]);
@@ -259,14 +265,14 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
   }, [statsActive, profile.id]);
 
   const runPrune = async (target: PruneTarget) => {
-    if (!window.confirm(`Очистка удалит: ${PRUNE_LABELS[target]}.\nПродолжить?`)) return;
+    if (!window.confirm(t('docker.confirmPrune', { target: t(PRUNE_LABELS[target]) }))) return;
     try {
       const res = await api<{ output: string }>('/api/docker/prune', {
         method: 'POST',
         body: JSON.stringify({ profileId: profile.id, target }),
       });
       const reclaimed = /Total reclaimed space:\s*(.+)/.exec(res.output)?.[1];
-      showNotice(reclaimed ? `Освобождено: ${reclaimed}` : res.output || 'Очистка завершена');
+      showNotice(reclaimed ? t('docker.pruneReclaimed', { size: reclaimed }) : res.output || t('docker.pruneDone'));
       void load();
     } catch (err) {
       showError((err as Error).message);
@@ -285,17 +291,17 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
   const composeAction = async (action: 'up' | 'down') => {
     const path = composePath.trim();
     if (!path) {
-      showError('Укажите путь к проекту (каталог с compose-файлом)');
+      showError(t('docker.errorNoComposePath'));
       return;
     }
-    if (action === 'down' && !window.confirm(`Остановить проект и удалить его контейнеры/сети (compose down) в ${path}?`)) return;
+    if (action === 'down' && !window.confirm(t('docker.confirmComposeDown', { path }))) return;
     setComposeBusy(true);
     try {
       await api(`/api/docker/compose/${action}`, {
         method: 'POST',
         body: JSON.stringify({ profileId: profile.id, path }),
       });
-      showNotice(action === 'up' ? 'Проект запущен (up -d)' : 'Проект остановлен (down)');
+      showNotice(action === 'up' ? t('docker.noticeComposeUp') : t('docker.noticeComposeDown'));
       await loadComposePs(path);
     } catch (err) {
       showError((err as Error).message);
@@ -305,13 +311,13 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
   };
 
   const containerAction = async (id: string, action: ContainerAction, name: string) => {
-    const labels: Record<ContainerAction, string> = {
-      start: 'Запустить',
-      stop: 'Остановить',
-      restart: 'Перезапустить',
-      rm: 'Удалить (rm -f)',
+    const labels: Record<ContainerAction, I18nKey> = {
+      start: 'docker.actionStart',
+      stop: 'docker.actionStop',
+      restart: 'docker.actionRestart',
+      rm: 'docker.actionRm',
     };
-    if (!window.confirm(`${labels[action]} контейнер «${name}»?`)) return;
+    if (!window.confirm(t('docker.confirmContainer', { action: t(labels[action]), name }))) return;
     try {
       await api(`/api/docker/containers/${encodeURIComponent(id)}/${action}${q(profile.id)}`, { method: 'POST' });
       void load('containers');
@@ -335,7 +341,7 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
   };
 
   const removeImage = async (id: string, tag: string) => {
-    if (!window.confirm(`Удалить образ ${tag}?`)) return;
+    if (!window.confirm(t('docker.confirmRemoveImage', { tag }))) return;
     try {
       await api(`/api/docker/images/${encodeURIComponent(id)}/remove${q(profile.id)}`, { method: 'POST' });
       void load('images');
@@ -345,7 +351,7 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
   };
 
   const removeVolume = async (name: string) => {
-    if (!window.confirm(`Удалить volume «${name}»? Данные будут потеряны.`)) return;
+    if (!window.confirm(t('docker.confirmRemoveVolume', { name }))) return;
     try {
       await api(`/api/docker/volumes/${encodeURIComponent(name)}/remove${q(profile.id)}`, { method: 'POST' });
       void load('volumes');
@@ -355,7 +361,7 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
   };
 
   const removeNetwork = async (name: string) => {
-    if (!window.confirm(`Удалить сеть «${name}»?`)) return;
+    if (!window.confirm(t('docker.confirmRemoveNetwork', { name }))) return;
     try {
       await api(`/api/docker/networks/${encodeURIComponent(name)}/remove${q(profile.id)}`, { method: 'POST' });
       void load('networks');
@@ -378,11 +384,11 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
         <div className="tabs">
           {(
             [
-              ['containers', 'Контейнеры'],
-              ['images', 'Образы'],
-              ['volumes', 'Volumes'],
-              ['networks', 'Сети'],
-              ['compose', 'Compose'],
+              ['containers', t('docker.secContainers')],
+              ['images', t('docker.secImages')],
+              ['volumes', t('docker.secVolumes')],
+              ['networks', t('docker.secNetworks')],
+              ['compose', t('docker.secCompose')],
             ] as Array<[Section, string]>
           ).map(([id, label]) => (
             <button
@@ -396,18 +402,18 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
         </div>
         <div className="toolbar-actions">
           {section === 'containers' && (
-            <button className="btn" onClick={() => setRunOpen(true)}>+ Запустить</button>
+            <button className="btn" onClick={() => setRunOpen(true)}>{t('docker.runButton')}</button>
           )}
           {(section === 'containers' || section === 'images' || section === 'volumes') && (
-            <button className="btn" onClick={() => void runPrune(section)}>Очистка</button>
+            <button className="btn" onClick={() => void runPrune(section)}>{t('docker.prune')}</button>
           )}
           {section !== 'compose' && (
             <button
               className="btn btn-ghost"
-              title="System prune: контейнеры, сети, dangling-образы, кэш сборки"
+              title={t('docker.pruneSystemTitle')}
               onClick={() => void runPrune('system')}
             >
-              Полная очистка
+              {t('docker.pruneSystem')}
             </button>
           )}
           {section === 'images' && (
@@ -421,13 +427,13 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
               <button className="btn" onClick={() => void pullImage()}>Pull</button>
             </label>
           )}
-          <button className="btn btn-ghost" onClick={() => void load()}>Обновить</button>
+          <button className="btn btn-ghost" onClick={() => void load()}>{t('common.refresh')}</button>
           <button
             className="btn btn-ghost"
-            title="Переустановить SSH-подключение (применить новые группы и права)"
+            title={t('docker.reconnectTitle')}
             onClick={() => void reconnect()}
           >
-            Переподключить
+            {t('docker.reconnect')}
           </button>
         </div>
       </div>
@@ -437,16 +443,16 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
           <table className="data-table">
             <thead>
               <tr>
-                <SortableTh sortKey="name" currentSort={containerSort} onToggle={toggleContainerSort}>Имя</SortableTh>
+                <SortableTh sortKey="name" currentSort={containerSort} onToggle={toggleContainerSort}>{t('docker.colName')}</SortableTh>
                 <th>CPU</th>
-                <th>Память</th>
-                <SortableTh sortKey="ports" currentSort={containerSort} onToggle={toggleContainerSort}>Порты</SortableTh>
-                <th className="col-actions">Действия</th>
+                <th>{t('docker.colMemory')}</th>
+                <SortableTh sortKey="ports" currentSort={containerSort} onToggle={toggleContainerSort}>{t('docker.colPorts')}</SortableTh>
+                <th className="col-actions">{t('docker.colActions')}</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={5} className="muted">Загрузка…</td></tr>}
-              {!loading && sortedContainers.length === 0 && <tr><td colSpan={5} className="muted">Контейнеров нет</td></tr>}
+              {loading && <tr><td colSpan={5} className="muted">{t('common.loading')}</td></tr>}
+              {!loading && sortedContainers.length === 0 && <tr><td colSpan={5} className="muted">{t('docker.noContainers')}</td></tr>}
               {sortedContainers.map((c) => {
                 const id = String(c.ID ?? c.ContainerID ?? '');
                 const name = String(c.Names ?? id).replace(/^\//, '');
@@ -457,14 +463,14 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
                 const cpuPct = st ? parseFloat(String(st.CPUPerc ?? '')) : NaN;
                 const memPct = st ? parseFloat(String(st.MemPerc ?? '')) : NaN;
                 const ports = parseDockerPorts(String(c.Ports ?? ''));
-                const uptime = running ? containerUptimeLabel(status) : null;
+                const uptime = running ? containerUptimeLabel(status, t) : null;
                 return (
                   <tr key={id}>
                     <td>
                       <div className="cell-main">
                         <div className="cell-top">
                           <span className={`status-dot ${containerDotClass(status, running)}`} title={status} />
-                          <span className="uptime">{uptime ?? containerStatusLabel(status)}</span>
+                          <span className="uptime">{uptime ?? containerStatusLabel(status, t)}</span>
                           <span className="cell-id">ID: {shortId(id)}</span>
                         </div>
                         <span className="name">{name}</span>
@@ -502,12 +508,12 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
                     </td>
                     <td className="col-actions">
                       <div className="row-actions">
-                        <button className="btn btn-mini icon-btn btn-primary" onClick={() => void containerAction(id, 'restart', name)} title="Перезапустить">↻</button>
-                        <button className="btn btn-mini icon-btn btn-danger" onClick={() => void containerAction(id, 'stop', name)} title="Остановить">■</button>
+                        <button className="btn btn-mini icon-btn btn-primary" onClick={() => void containerAction(id, 'restart', name)} title={t('docker.actionRestart')}>↻</button>
+                        <button className="btn btn-mini icon-btn btn-danger" onClick={() => void containerAction(id, 'stop', name)} title={t('docker.actionStop')}>■</button>
                         <span className="action-sep" />
-                        <button className="btn btn-mini icon-btn btn-ghost" onClick={() => onExecContainer(id, name)} title="Терминал в контейнере">❯</button>
-                        <button className="btn btn-mini icon-btn btn-ghost" onClick={() => setLogsTarget({ id, name })} title="Логи">≡</button>
-                        <button className="btn btn-mini icon-btn btn-ghost" onClick={() => void containerAction(id, 'rm', name)} title="Удалить">✕</button>
+                        <button className="btn btn-mini icon-btn btn-ghost" onClick={() => onExecContainer(id, name)} title={t('docker.execTitle')}>❯</button>
+                        <button className="btn btn-mini icon-btn btn-ghost" onClick={() => setLogsTarget({ id, name })} title={t('docker.logsButton')}>≡</button>
+                        <button className="btn btn-mini icon-btn btn-ghost" onClick={() => void containerAction(id, 'rm', name)} title={t('common.delete')}>✕</button>
                       </div>
                     </td>
                   </tr>
@@ -522,15 +528,15 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Репозиторий</th>
-                <th>Тег</th>
-                <th>Размер</th>
-                <th className="col-actions">Действия</th>
+                <th>{t('docker.colRepository')}</th>
+                <th>{t('docker.colTag')}</th>
+                <th>{t('docker.colSize')}</th>
+                <th className="col-actions">{t('docker.colActions')}</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={5} className="muted">Загрузка…</td></tr>}
-              {!loading && images.length === 0 && <tr><td colSpan={5} className="muted">Образов нет</td></tr>}
+              {loading && <tr><td colSpan={5} className="muted">{t('common.loading')}</td></tr>}
+              {!loading && images.length === 0 && <tr><td colSpan={5} className="muted">{t('docker.noImages')}</td></tr>}
               {images.map((img) => {
                 const id = String(img.ID ?? '');
                 return (
@@ -558,14 +564,14 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
           <table className="data-table">
             <thead>
               <tr>
-                <th>Имя</th>
+                <th>{t('docker.colName')}</th>
                 <th>Driver</th>
-                <th className="col-actions">Действия</th>
+                <th className="col-actions">{t('docker.colActions')}</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={3} className="muted">Загрузка…</td></tr>}
-              {!loading && volumes.length === 0 && <tr><td colSpan={3} className="muted">Volumes нет</td></tr>}
+              {loading && <tr><td colSpan={3} className="muted">{t('common.loading')}</td></tr>}
+              {!loading && volumes.length === 0 && <tr><td colSpan={3} className="muted">{t('docker.noVolumes')}</td></tr>}
               {volumes.map((v) => (
                 <tr key={String(v.Name ?? '')}>
                   <td>{String(v.Name ?? '')}</td>
@@ -583,15 +589,15 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
           <table className="data-table">
             <thead>
               <tr>
-                <th>Имя</th>
+                <th>{t('docker.colName')}</th>
                 <th>Driver</th>
                 <th>Scope</th>
-                <th className="col-actions">Действия</th>
+                <th className="col-actions">{t('docker.colActions')}</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={4} className="muted">Загрузка…</td></tr>}
-              {!loading && networks.length === 0 && <tr><td colSpan={4} className="muted">Сетей нет</td></tr>}
+              {loading && <tr><td colSpan={4} className="muted">{t('common.loading')}</td></tr>}
+              {!loading && networks.length === 0 && <tr><td colSpan={4} className="muted">{t('docker.noNetworks')}</td></tr>}
               {networks.map((n) => (
                 <tr key={String(n.Name ?? '')}>
                   <td>{String(n.Name ?? '')}</td>
@@ -608,16 +614,17 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
 
         {section === 'compose' && (
           <div className="compose-section">
-            {!composeStatus && <div className="muted">Проверка доступности Docker Compose…</div>}
+            {!composeStatus && <div className="muted">{t('docker.composeChecking')}</div>}
             {composeStatus && !composeStatus.available && (
               <div className="compose-unavailable">
-                Docker Compose не найден на сервере — секция недоступна.
+                {t('docker.composeUnavailable')}
               </div>
             )}
             {composeStatus?.available && composeStatus.kind === 'v1' && (
               <div className="compose-unavailable">
-                Найден только docker-compose (v1). Поддерживается Compose v2
-                (плагин <code>docker compose</code>) — обновите Docker на сервере.
+                {t('docker.composeV1Pre')}
+                <code>docker compose</code>
+                {t('docker.composeV1Post')}
               </div>
             )}
             {composeStatus?.available && composeStatus.kind === 'v2' && (
@@ -628,45 +635,45 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
                     value={composePath}
                     onChange={(e) => saveComposePath(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && void loadComposePs(composePath)}
-                    placeholder="/srv/my-project — каталог с compose-файлом"
+                    placeholder={t('docker.composePathPlaceholder')}
                   />
                   <button
                     className="btn btn-primary"
                     disabled={composeBusy || !composePath.trim()}
                     onClick={() => void composeAction('up')}
                   >
-                    Запустить (up -d)
+                    {t('docker.composeUp')}
                   </button>
                   <button
                     className="btn"
                     disabled={composeBusy || !composePath.trim()}
                     onClick={() => void composeAction('down')}
                   >
-                    Остановить (down)
+                    {t('docker.composeDown')}
                   </button>
                   <button
                     className="btn btn-ghost"
                     disabled={!composePath.trim()}
                     onClick={() => void loadComposePs(composePath)}
                   >
-                    Обновить
+                    {t('common.refresh')}
                   </button>
                 </div>
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>Сервис</th>
-                      <th>Имя</th>
+                      <th>{t('docker.colService')}</th>
+                      <th>{t('docker.colName')}</th>
                       <th>State</th>
-                      <th>Статус</th>
-                      <th>Порты</th>
+                      <th>{t('docker.colStatus')}</th>
+                      <th>{t('docker.colPorts')}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {loading && <tr><td colSpan={5} className="muted">Загрузка…</td></tr>}
+                    {loading && <tr><td colSpan={5} className="muted">{t('common.loading')}</td></tr>}
                     {!loading && composeServices.length === 0 && (
                       <tr><td colSpan={5} className="muted">
-                        {composePath.trim() ? 'Сервисов нет (проект не запущен?)' : 'Укажите путь к проекту'}
+                        {composePath.trim() ? t('docker.composeNoServices') : t('docker.composeNoPath')}
                       </td></tr>
                     )}
                     {composeServices.map((s) => (
@@ -719,6 +726,7 @@ function RunContainerModal({ profile, onClose, onDone, showError }: {
   onDone: () => void;
   showError: (msg: string) => void;
 }) {
+  const { t } = useT();
   const [image, setImage] = useState('');
   const [name, setName] = useState('');
   const [ports, setPorts] = useState('');
@@ -728,7 +736,7 @@ function RunContainerModal({ profile, onClose, onDone, showError }: {
 
   const submit = async () => {
     if (!image.trim()) {
-      showError('Укажите образ');
+      showError(t('docker.errorNoImage'));
       return;
     }
     setBusy(true);
@@ -753,34 +761,34 @@ function RunContainerModal({ profile, onClose, onDone, showError }: {
   };
 
   return (
-    <Modal title="Запустить контейнер" onClose={onClose}>
+    <Modal title={t('docker.runTitle')} onClose={onClose}>
       <div className="form-grid">
         <label className="span-2">
-          Образ
+          {t('docker.fieldImage')}
           <input autoFocus value={image} onChange={(e) => setImage(e.target.value)} placeholder="nginx:latest" />
         </label>
         <label className="span-2">
-          Имя (необязательно)
+          {t('docker.fieldNameOptional')}
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="my-app" />
         </label>
         <label className="span-2">
-          Порты (по одному на строку)
+          {t('docker.fieldPorts')}
           <textarea rows={3} value={ports} onChange={(e) => setPorts(e.target.value)} placeholder={'8080:80\n127.0.0.1:3000:3000'} />
         </label>
         <label className="span-2">
-          Переменные окружения (KEY=VALUE, по одной на строку)
+          {t('docker.fieldEnv')}
           <textarea rows={3} value={env} onChange={(e) => setEnv(e.target.value)} placeholder="MODE=production" />
         </label>
         <label className="span-2">
-          Команда (необязательно)
+          {t('docker.fieldCommand')}
           <input value={command} onChange={(e) => setCommand(e.target.value)} placeholder="npm start" />
         </label>
       </div>
       <div className="modal-actions">
         <button className="btn btn-primary" onClick={() => void submit()} disabled={busy}>
-          {busy ? 'Запуск…' : 'Запустить -d'}
+          {busy ? t('docker.runBusy') : t('docker.runSubmit')}
         </button>
-        <button className="btn" onClick={onClose}>Отмена</button>
+        <button className="btn" onClick={onClose}>{t('common.cancel')}</button>
       </div>
     </Modal>
   );
@@ -793,6 +801,7 @@ function LogsModal({ profile, target, visible, onClose, showError }: {
   onClose: () => void;
   showError: (msg: string) => void;
 }) {
+  const { t } = useT();
   const [follow, setFollow] = useState(false);
   const [started, setStarted] = useState(false);
   const preRef = useRef<HTMLPreElement>(null);
@@ -857,17 +866,17 @@ function LogsModal({ profile, target, visible, onClose, showError }: {
   }, [profile.id, target.id, follow, visible, showError]);
 
   return (
-    <Modal title={`Логи: ${target.name}`} onClose={onClose} wide>
+    <Modal title={t('docker.logsTitle', { name: target.name })} onClose={onClose} wide>
       <div className="logs-toolbar">
         <label className="check">
           <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
-          Следовать за логами
+          {t('docker.followLogs')}
         </label>
-        {started && <span className="muted">подключено…</span>}
+        {started && <span className="muted">{t('docker.logsConnected')}</span>}
       </div>
       <pre className="logs-view" ref={preRef} />
       <div className="modal-actions">
-        <button className="btn" onClick={onClose}>Закрыть</button>
+        <button className="btn" onClick={onClose}>{t('common.close')}</button>
       </div>
     </Modal>
   );
