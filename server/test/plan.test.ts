@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '../src/ai/client.js';
-import { PLAN_MODE_INSTRUCTION, buildPlanRequestMessages, toolsForRequest } from '../src/ai/plan.js';
+import { buildPlanRequestMessages, toolsForRequest } from '../src/ai/plan.js';
+import { planModeInstruction } from '../src/ai/prompts.js';
 import { getToolDefs } from '../src/ai/tools.js';
 
 const history: ChatMessage[] = [
@@ -22,28 +23,36 @@ describe('toolsForRequest', () => {
 });
 
 describe('buildPlanRequestMessages', () => {
-  it('дополняет системный промпт инструкцией планирования', () => {
-    const result = buildPlanRequestMessages(history);
+  it('дополняет системный промпт инструкцией планирования на языке сессии', () => {
+    const result = buildPlanRequestMessages(history, 'ru');
     expect(result[0].role).toBe('system');
     expect(result[0].content).toContain('Базовый системный промпт.');
-    expect(result[0].content).toContain(PLAN_MODE_INSTRUCTION);
+    expect(result[0].content).toContain(planModeInstruction('ru'));
     expect(result[0].content).toContain('НИЧЕГО не выполняй');
   });
 
+  it('lang=en — английская инструкция, без кириллицы в дополнении', () => {
+    const result = buildPlanRequestMessages(history, 'en');
+    expect(result[0].content).toContain(planModeInstruction('en'));
+    expect(result[0].content).not.toContain(planModeInstruction('ru'));
+    // История пользователя — данные, не переводятся.
+    expect(result[1]).toEqual(history[1]);
+  });
+
   it('сохраняет остальные сообщения без изменений', () => {
-    const result = buildPlanRequestMessages(history);
+    const result = buildPlanRequestMessages(history, 'ru');
     expect(result).toHaveLength(history.length);
     expect(result[1]).toEqual(history[1]);
   });
 
   it('не мутирует исходный массив сообщений', () => {
     const snapshot = JSON.stringify(history);
-    buildPlanRequestMessages(history);
+    buildPlanRequestMessages(history, 'ru');
     expect(JSON.stringify(history)).toBe(snapshot);
   });
 
   it('история без системного сообщения возвращается как есть', () => {
     const noSystem: ChatMessage[] = [{ role: 'user', content: 'привет' }];
-    expect(buildPlanRequestMessages(noSystem)).toEqual(noSystem);
+    expect(buildPlanRequestMessages(noSystem, 'ru')).toEqual(noSystem);
   });
 });

@@ -1,13 +1,6 @@
 import type { ChatMessage, ToolDef } from './client.js';
 import { getToolDefs } from './tools.js';
-import { planModeInstruction } from './prompts.js';
-import { config } from '../config.js';
-
-/**
- * Дополнение к системному промпту на шаге планирования (режим planMode).
- * Язык — config.ai.lang (env AI_LANG); тексты — в ai/prompts.ts.
- */
-export const PLAN_MODE_INSTRUCTION = planModeInstruction(config.ai.lang);
+import { planModeInstruction, type PromptLang } from './prompts.js';
 
 /**
  * Инструменты для запроса к Chat Completions API. В режиме планирования
@@ -21,12 +14,12 @@ export function toolsForRequest(planMode: boolean): ToolDef[] | undefined {
 
 /**
  * Сообщения для запроса в режиме планирования: системный промпт дополняется
- * инструкцией составить план. Исходный массив не мутируется.
+ * инструкцией составить план на языке сессии. Исходный массив не мутируется.
  */
-export function buildPlanRequestMessages(messages: ChatMessage[]): ChatMessage[] {
+export function buildPlanRequestMessages(messages: ChatMessage[], lang: PromptLang): ChatMessage[] {
   return messages.map((m, i) =>
     i === 0 && m.role === 'system'
-      ? { ...m, content: `${m.content ?? ''}\n\n${PLAN_MODE_INSTRUCTION}` }
+      ? { ...m, content: `${m.content ?? ''}\n\n${planModeInstruction(lang)}` }
       : m,
   );
 }

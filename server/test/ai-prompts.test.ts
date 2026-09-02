@@ -50,7 +50,7 @@ describe('ai prompts (i18n)', () => {
     expect(planApprovedMessage('en')).not.toMatch(CYRILLIC);
   });
 
-  it('PLAN_MODE_INSTRUCTION обоих языков непустые и на своём языке', () => {
+  it('planModeInstruction обоих языков непустые и на своём языке', () => {
     expect(planModeInstruction('ru').length).toBeGreaterThan(0);
     expect(planModeInstruction('en').length).toBeGreaterThan(0);
     expect(planModeInstruction('ru')).toMatch(CYRILLIC);

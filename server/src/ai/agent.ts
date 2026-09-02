@@ -17,6 +17,7 @@ import {
   suggestInstruction,
   systemPromptBase,
   webSearchNote,
+  type PromptLang,
 } from './prompts.js';
 import {
   createSuggestionTokenFilter,
@@ -101,6 +102,9 @@ export class AgentSession {
     private homeProfile: Profile,
     private ws: WebSocket,
     dialogue?: Dialogue,
+    // Язык системного промпта и ответов — параметр сессии, приходит от
+    // клиента по WS-подключению (query `lang`): язык агента = язык интерфейса.
+    private readonly lang: PromptLang = 'ru',
   ) {
     this.dialogueId = dialogue?.id ?? createDialogue(homeProfile.id).id;
     this.attached.set(homeProfile.id, homeProfile);
@@ -114,18 +118,18 @@ export class AgentSession {
         console.warn(`dialogue ${this.dialogueId}: attached profile ${extraId} not found, skipped`);
       }
     }
-    // Статические тексты промпта — в ai/prompts.ts (ru/en, выбор по
-    // config.ai.lang); здесь только склейка динамических частей.
-    const lang = config.ai.lang;
-    let systemPrompt = systemPromptBase(lang, `${homeProfile.username}@${homeProfile.host}`);
+    // Статические тексты промпта — в ai/prompts.ts (ru/en, выбор по языку
+    // сессии this.lang); здесь только склейка динамических частей.
+    const promptLang = this.lang;
+    let systemPrompt = systemPromptBase(promptLang, `${homeProfile.username}@${homeProfile.host}`);
     // Мульти-серверность: домашний сервер диалога + подключённые к нему.
-    systemPrompt += multiServerNote(lang);
+    systemPrompt += multiServerNote(promptLang);
     const attachedNames = [...this.attached.values()].map((p) => p.name);
     if (attachedNames.length > 1) {
-      systemPrompt += attachedServersNote(lang, attachedNames);
+      systemPrompt += attachedServersNote(promptLang, attachedNames);
     }
     if (isSearchConfigured()) {
-      systemPrompt += webSearchNote(lang);
+      systemPrompt += webSearchNote(promptLang);
     }
     // Подсказка вероятного ответа (agent-suggest): маркер вырезается из ответа
     // до персиста и контекста (ai/suggest.ts), текст подсказки уходит на
@@ -133,8 +137,8 @@ export class AgentSession {
     // (асимметрия в пользу молчания): подсказка — только при заведомо
     // вероятном ответе; на открытые вопросы, равнозначные варианты и
     // необратимые/рискованные действия модель молчит.
-    systemPrompt += suggestInstruction(lang);
-    const memoryBlock = memoryPromptBlock(homeProfile.id, lang);
+    systemPrompt += suggestInstruction(promptLang);
+    const memoryBlock = memoryPromptBlock(homeProfile.id, promptLang);
     if (memoryBlock) {
       systemPrompt += `\n\n${memoryBlock}`;
     }
@@ -305,7 +309,7 @@ export class AgentSession {
         // (per-tool approve для мутирующих инструментов сохраняется).
         if (this.planPending && !this.running) {
           this.planPending = false;
-          void this.runLoop(planApprovedMessage(config.ai.lang));
+          void this.runLoop(planApprovedMessage(this.lang));
         }
         break;
       }
@@ -492,7 +496,7 @@ export class AgentSession {
         // в стрим-пузыре. flush — только на успешном стриме (решение 5 плана).
         const tokenFilter = createSuggestionTokenFilter((t) => this.send({ type: 'token', content: t }));
         const result = await streamChatCompletion({
-          messages: buildPlanRequestMessages(sanitizeMessages(this.messages)),
+          messages: buildPlanRequestMessages(sanitizeMessages(this.messages), this.lang),
           tools: toolsForRequest(true),
           signal: this.loopAbort.signal,
           onToken: (token) => tokenFilter.push(token),
@@ -757,7 +761,7 @@ export class AgentSession {
     this.attached.set(target.id, target);
     this.notifyServers();
     let output = `Сервер «${target.name}» (${target.username}@${target.host}) подключён к диалогу.`;
-    const memoryBlock = memoryPromptBlock(target.id, config.ai.lang);
+    const memoryBlock = memoryPromptBlock(target.id, this.lang);
     if (memoryBlock) {
       output += `\n\n${memoryBlock}`;
     }
@@ -995,7 +999,12 @@ export class AgentSession {
 // «одна сессия на профиль» сохраняется и в мульти-серверном режиме).
 const sessions = new Map<string, AgentSession>();
 
-export function attachAgent(ws: WebSocket, profile: Profile, dialogueId?: string): AgentSession {
+export function attachAgent(
+  ws: WebSocket,
+  profile: Profile,
+  dialogueId?: string,
+  lang?: PromptLang,
+): AgentSession {
   const existing = sessions.get(profile.id);
   if (existing) {
     existing.stop();
@@ -1014,7 +1023,7 @@ export function attachAgent(ws: WebSocket, profile: Profile, dialogueId?: string
       dialogue = found;
     }
   }
-  const session = new AgentSession(profile, ws, dialogue);
+  const session = new AgentSession(profile, ws, dialogue, lang);
   sessions.set(profile.id, session);
   session.notifyDialogue();
   session.notifyServers();

@@ -64,9 +64,6 @@ export const config = {
     // Пустой AI_SEARCH_API_BASE выключает поиск: инструмент агенту не объявляется.
     searchApiBase: (process.env.AI_SEARCH_API_BASE || '').replace(/\/+$/, ''),
     searchModel: process.env.AI_SEARCH_MODEL || 'deepseek-v4-flash',
-    // Язык системного промпта и ответов агента (слой 3 i18n): ru по умолчанию,
-    // неизвестные значения AI_LANG сводятся к ru (не валимся).
-    lang: process.env.AI_LANG === 'en' ? ('en' as const) : ('ru' as const),
   },
 };
 

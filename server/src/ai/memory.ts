@@ -66,7 +66,8 @@ export function writeMemory(profileId: string, content: string): { path: string;
 /**
  * Formatted block for the system prompt. Returns null when there is nothing
  * to inject, so the prompt stays identical for fresh profiles.
- * The header language follows the agent language (config.ai.lang).
+ * The header language follows the agent session language (a parameter
+ * passed from the client over the agent WebSocket).
  */
 export function memoryPromptBlock(profileId: string, lang: PromptLang = 'ru'): string | null {
   const content = readMemory(profileId);

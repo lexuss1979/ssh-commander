@@ -32,7 +32,7 @@ import { alertsRouter } from './routes/alerts.js';
 import { nginxRouter } from './routes/nginx.js';
 import { requireProfile } from './profiles.js';
 import { attachTerminal } from './ws/terminal.js';
-import { handleAgentWs } from './ws/agent.js';
+import { handleAgentWs, parseAgentLang } from './ws/agent.js';
 
 ensureDirs();
 // Seed из env при первом старте (docs/settings-model-plan.md): settings.json
@@ -153,7 +153,8 @@ server.on('upgrade', (req, socket, head) => {
       attachTerminal(ws, profile, cols, rows, container, tabId, containerName);
     } else {
       const dialogueId = url.searchParams.get('dialogueId') ?? undefined;
-      handleAgentWs(ws, profile, dialogueId);
+      // Язык агента = язык интерфейса: параметр WS-подключения, мусор → ru.
+      handleAgentWs(ws, profile, dialogueId, parseAgentLang(url.searchParams.get('lang')));
     }
   });
 });

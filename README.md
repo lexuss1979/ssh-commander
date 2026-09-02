@@ -50,7 +50,7 @@ Self-hosted server panels are a crowded niche — but none of them ship an AI ag
 - Plan mode: the agent proposes a plan first, you approve it, then it executes.
 - Per-profile persistent memory (`MEMORY.md`, loaded into context at session start); secrets are never written to it.
 - Web search built in with the DeepSeek preset (same key); cost tracking per dialogue, suggested-reply hints.
-- Agent language controlled by `AI_LANG` (`ru`/`en`).
+- The agent language matches the UI language (switchable in the sidebar).
 
 ### Servers
 - Multiple SSH profiles (password or key auth), key import from the UI (saved with `0600`), one-click bootstrap of a new server (root + password), saved command snippets that run on several servers at once, threshold alerts with a sidebar bell (availability/disk/memory/load).
@@ -97,7 +97,6 @@ Environment variables are set via `.env` (template: `.env.example`); inside the 
 | `AI_TEMPERATURE` | `0.2` | Model temperature |
 | `AI_SEARCH_API_BASE` | empty | Anthropic-compatible web-search endpoint (env-only). The DeepSeek preset has search built in — same key, no env needed; this variable is for other providers (e.g. OpenAI chat + DeepSeek search). Empty and not DeepSeek — search is disabled and the tool is not announced to the model |
 | `AI_SEARCH_MODEL` | `deepseek-v4-flash` | Model used for web search |
-| `AI_LANG` | `ru` | Agent language — the system prompt and plan instruction. `en` — English; unknown values fall back to `ru` |
 | `TUNNEL_PORT_MIN` / `TUNNEL_PORT_MAX` | `10000` / `10049` | Port range for SSH tunnels (local end) |
 
 ### Data storage

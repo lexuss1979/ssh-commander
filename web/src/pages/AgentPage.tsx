@@ -102,7 +102,9 @@ function terminalContextMessage(
 }
 
 export function AgentPage({ profile, showError, agentRequest, onAgentRequestConsumed, onActivity, onSqlInsert }: Props) {
-  const { t, locale } = useT();
+  // lang (в отличие от t) — в deps WS-эффекта: смена языка интерфейса
+  // пересоздаёт подключение, чтобы агент отвечал на языке UI.
+  const { t, lang, locale } = useT();
   const [messages, setMessages] = useState<ChatMessageView[]>([]);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [input, setInput] = useState('');
@@ -159,8 +161,9 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   runningRef.current = running;
   const activeDialogueIdRef = useRef(activeDialogueId);
   activeDialogueIdRef.current = activeDialogueId;
-  // t для WS-эффекта без добавления в deps: смена языка не должна
-  // пересоздавать подключение (паттерн tRef из TerminalPage).
+  // t для WS-эффекта без добавления в deps: переводы не должны
+  // пересоздавать подключение (паттерн tRef из TerminalPage). Сам язык
+  // (lang) в deps есть — его смена пересоздаёт WS намеренно.
   const tRef = useRef(t);
   tRef.current = t;
 
@@ -353,7 +356,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       .catch(() => undefined);
 
     const ws = new WebSocket(
-      `/ws/agent?profileId=${encodeURIComponent(profile.id)}&dialogueId=${encodeURIComponent(activeDialogueId)}`,
+      `/ws/agent?profileId=${encodeURIComponent(profile.id)}&dialogueId=${encodeURIComponent(activeDialogueId)}&lang=${lang}`,
     );
     wsRef.current = ws;
     ws.onopen = () => {
@@ -491,6 +494,10 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   }, [
     activeDialogueId,
     profile.id,
+    // Смена языка интерфейса пересоздаёт WS: диалог тот же (dialogueId
+    // сохраняется), но сессия агента собирается с новым языком промпта.
+    // Обрыв стрима на середине при этом редком действии приемлем.
+    lang,
     pushAssistantToken,
     finalizeAssistant,
     addToolCard,
