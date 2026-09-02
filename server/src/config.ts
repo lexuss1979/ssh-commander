@@ -43,10 +43,17 @@ export const config = {
   port: int('APP_PORT', 8080),
   dataDir: process.env.DATA_DIR || path.resolve('data'),
   keysDir: resolveDir('KEYS_DIR', 'keys'),
-  appPassword: process.env.APP_PASSWORD || 'admin',
+  // Пусто = «не задан» (дефолта 'admin' больше нет): пароль сеется в
+  // settings.json при первом старте (seedSettingsFromEnv) или задаётся
+  // в onboarding; после первого старта env не читается.
+  appPassword: process.env.APP_PASSWORD || '',
   sessionTtlMs: 24 * 60 * 60 * 1000,
   webDist: resolveWebDist(),
   ai: {
+    // apiBase/apiKey/model — только вход для seed'а при первом старте
+    // (seedSettingsFromEnv копирует их в settings.json); в рантайме AI-конфиг
+    // читается из settings (getAiSettings), изменение env после первого
+    // старта ни на что не влияет.
     apiBase: (process.env.AI_API_BASE || 'https://api.openai.com/v1').replace(/\/+$/, ''),
     apiKey: process.env.AI_API_KEY || '',
     model: process.env.AI_MODEL || 'gpt-4.1-mini',

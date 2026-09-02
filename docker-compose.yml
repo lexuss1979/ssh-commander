@@ -8,10 +8,12 @@ services:
       # Обе стороны маппинга используют одни переменные — источник истины один.
       - "127.0.0.1:${TUNNEL_PORT_MIN:-10000}-${TUNNEL_PORT_MAX:-10049}:${TUNNEL_PORT_MIN:-10000}-${TUNNEL_PORT_MAX:-10049}"
     environment:
-      - APP_PASSWORD=${APP_PASSWORD:-admin}
-      - AI_API_BASE=${AI_API_BASE:-https://api.openai.com/v1}
+      # Пусто = «не задан»: пароль сеется в data/settings.json при первом
+      # старте или задаётся в onboarding; после первого старта env не читается.
+      - APP_PASSWORD=${APP_PASSWORD:-}
+      - AI_API_BASE=${AI_API_BASE:-https://api.deepseek.com/v1}
       - AI_API_KEY=${AI_API_KEY:-}
-      - AI_MODEL=${AI_MODEL:-gpt-4.1-mini}
+      - AI_MODEL=${AI_MODEL:-deepseek-v4-flash}
       - AI_MAX_STEPS=${AI_MAX_STEPS:-30}
       - AI_TEMPERATURE=${AI_TEMPERATURE:-0.2}
       - AI_LANG=${AI_LANG:-ru}

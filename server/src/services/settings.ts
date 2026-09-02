@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { config } from '../config.js';
 
 /**
- * Настройки приложения (`data/settings.json`), план — docs/onboarding-plan.md.
+ * Настройки приложения (`data/settings.json`), план — docs/settings-model-plan.md.
  *
  * Паттерн `db-connections.ts`/`profiles.ts`: zod-валидация, атомарная запись
  * tmp+rename, corrupt-guard (битый файл → `*.corrupt-<timestamp>`, persist
@@ -13,20 +13,37 @@ import { config } from '../config.js';
  * (формат `scrypt$<saltHex>$<hashHex>` — самодостаточный, допускает будущую
  * смену KDF), ключ AI — открытым текстом: тот же trust domain, что у
  * SSH-паролей `profiles.json` (осознанный компромисс локального инструмента).
+ *
+ * Единая модель конфигурации: env (`APP_PASSWORD`/`AI_API_KEY`/…) читается
+ * один раз при первом старте — `seedSettingsFromEnv()` сеет его в settings.json
+ * (пароль сразу хешем). После первого старта env не читается никогда, источник
+ * правды в рантайме — только этот файл; правка — страница «Настройки» (эпик 23)
+ * или файл + рестарт.
  */
 
+export type AiProvider = 'deepseek' | 'openai' | 'custom';
+
 export interface AppSettings {
-  passwordHash: string;
+  /** Опционален: seed при заданном только AI-ключе пишет AI-поля без пароля,
+   * и onboarding остаётся доступным (дозаписывает хеш мержем). */
+  passwordHash?: string;
+  /** Какой пресет провайдера выбран: статус веб-поиска и UI; на логику ходьбы
+   * в API не влияет. */
+  aiProvider?: AiProvider;
   /** Ключ OpenAI-совместимого API (агент); без него агент недоступен. */
   aiApiKey?: string;
-  /** Опциональный оверрайд базового URL API (без хвостового `/`). */
+  /** Базовый URL API (без хвостового `/`). */
   aiApiBase?: string;
+  /** Модель агента: пресет провайдера без модели не работает. */
+  aiModel?: string;
 }
 
 const settingsSchema = z.object({
-  passwordHash: z.string().min(1),
+  passwordHash: z.string().min(1).optional(),
+  aiProvider: z.enum(['deepseek', 'openai', 'custom']).optional(),
   aiApiKey: z.string().optional(),
   aiApiBase: z.string().optional(),
+  aiModel: z.string().optional(),
 });
 
 // undefined — ещё не читали; null — файла нет (или битый → corrupt = true).
@@ -106,37 +123,84 @@ function parseHash(encoded: string): { salt: Buffer; hash: Buffer } | null {
 }
 
 /**
- * Проверка пароля: хеш из settings.json → scrypt + `timingSafeEqual`; настроек
- * нет → сравнение с `config.appPassword` (фолбэк env, как раньше). Битый или
+ * Проверка пароля: только хеш из settings.json → scrypt + `timingSafeEqual`.
+ * Настроек нет (или пароль не сеялся) → false: env-фолбэка больше нет, env-пароль
+ * при первом старте записывается хешем через `seedSettingsFromEnv`. Битый или
  * незнакомый формат хеша — fail-closed (false), а не пропуск.
  */
 export function verifyPassword(candidate: string): boolean {
   const settings = load();
-  if (settings?.passwordHash) {
-    const parsed = parseHash(settings.passwordHash);
-    if (!parsed) return false;
-    const hash = crypto.scryptSync(candidate, parsed.salt, parsed.hash.length);
-    return crypto.timingSafeEqual(hash, parsed.hash);
-  }
-  const a = Buffer.from(candidate);
-  const b = Buffer.from(config.appPassword);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  if (!settings?.passwordHash) return false;
+  const parsed = parseHash(settings.passwordHash);
+  if (!parsed) return false;
+  const hash = crypto.scryptSync(candidate, parsed.salt, parsed.hash.length);
+  return crypto.timingSafeEqual(hash, parsed.hash);
 }
 
-/** Мерж AI-конфига: settings поверх env (docs/onboarding-plan.md). */
-export function getAiConfig(): { apiKey: string; apiBase: string } {
-  const settings = load();
+/** Провайдер по base URL — эвристика только для seed'а и UI-подписи. */
+export function providerFromBase(base: string): AiProvider {
+  if (base.includes('api.deepseek.com')) return 'deepseek';
+  if (base.includes('api.openai.com')) return 'openai';
+  return 'custom';
+}
+
+/**
+ * Seed из env при первом старте (docs/settings-model-plan.md): если
+ * settings.json ещё нет, а env задан — значения копируются в settings
+ * (пароль — сразу хешем). Для существующих установок это «скрытая миграция»:
+ * settings.json у них нет, env задан → файл создаётся сам при рестарте.
+ * Битый файл (corrupt-guard) не трогаем и старт не блокируем — saveSettings
+ * бросит, ловим и warn.
+ */
+export function seedSettingsFromEnv(): void {
+  if (getSettings() !== null) return; // settings есть → env игнорируем
+  const hasPassword = Boolean(config.appPassword);
+  const hasAi = Boolean(config.ai.apiKey);
+  if (!hasPassword && !hasAi) return; // сеять нечего → onboarding
+  try {
+    saveSettings({
+      passwordHash: hasPassword ? hashPassword(config.appPassword) : undefined,
+      aiProvider: hasAi ? providerFromBase(config.ai.apiBase) : undefined,
+      aiApiKey: hasAi ? config.ai.apiKey : undefined,
+      aiApiBase: hasAi ? config.ai.apiBase : undefined,
+      aiModel: hasAi ? config.ai.model : undefined,
+    });
+    console.log('settings.json seeded from environment');
+  } catch (err) {
+    console.warn('settings.json seed skipped:', (err as Error).message);
+  }
+}
+
+// Дефолты base/model — константы кода, не env: env-значения при первом старте
+// уже посеяны в settings.json, после него env не читается.
+const DEFAULT_API_BASE = 'https://api.openai.com/v1';
+const DEFAULT_MODEL = 'gpt-4.1-mini';
+
+/**
+ * AI-конфиг только из settings.json (мерж «settings поверх env» умер,
+ * docs/settings-model-plan.md). apiKey '' — агент недоступен; provider null —
+ * пресет не выбран (установка без seed'а AI-полей).
+ */
+export function getAiSettings(): {
+  provider: AiProvider | null;
+  apiKey: string; // '' — агент недоступен
+  apiBase: string;
+  model: string;
+} {
+  const s = load();
   return {
-    apiKey: settings?.aiApiKey ?? config.ai.apiKey,
-    apiBase: settings?.aiApiBase ?? config.ai.apiBase,
+    provider: s?.aiProvider ?? null,
+    apiKey: s?.aiApiKey ?? '',
+    apiBase: s?.aiApiBase ?? DEFAULT_API_BASE,
+    model: s?.aiModel ?? DEFAULT_MODEL,
   };
 }
 
 /**
- * Триггер onboarding: пароль не задан ни хешем в settings.json, ни env
- * (APP_PASSWORD === 'admin' — compose-дефолт; «env не задан» неотличим от
- * «env = admin», считаем default-значение неконфигурацией).
+ * Триггер onboarding: пароля хешем в settings.json нет. Env-пароль не
+ * участвует: заданный env уже записан seed'ом хешем, а отсутствие APP_PASSWORD
+ * теперь честное «не задан» (дефолта 'admin' в config.ts больше нет).
  */
 export function onboardingRequired(): boolean {
-  return !load()?.passwordHash && config.appPassword === 'admin';
+  return !load()?.passwordHash;
 }

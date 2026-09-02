@@ -3,17 +3,21 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
-// До динамического импорта модуля: config читает env при загрузке.
-process.env.AI_API_BASE = 'http://mock-api';
-process.env.AI_API_KEY = 'test-key';
-process.env.AI_MODEL = 'test-model';
+// AI-конфиг читается только из settings.json (эпик 22: env-моки больше не
+// работают) — пишем настройки через saveSettings в изолированный data-каталог.
 process.env.AI_TEMPERATURE = '0.2';
-// Изоляция settings.json: streamChatCompletion ходит через getAiConfig()
-// (services/settings.ts) — пустой data-каталог даёт env-фолбэк.
 const dataDir = mkdtempSync(path.join(tmpdir(), 'sc-client-'));
 process.env.DATA_DIR = dataDir;
 
 const client = await import('../src/ai/client.js');
+const { saveSettings } = await import('../src/services/settings.js');
+
+saveSettings({
+  aiProvider: 'custom',
+  aiApiKey: 'test-key',
+  aiApiBase: 'http://mock-api',
+  aiModel: 'test-model',
+});
 
 afterAll(() => {
   rmSync(dataDir, { recursive: true, force: true });
@@ -225,6 +229,8 @@ describe('streamChatCompletion — захват usage (docs/ai-costs-plan.md, р
     const [url, init] = fetchMockArgs();
     expect(url).toBe('http://mock-api/chat/completions');
     const body = JSON.parse(init.body as string);
+    // base и модель — из settings.json (env больше не источник).
+    expect(body.model).toBe('test-model');
     expect(body.stream_options).toEqual({ include_usage: true });
   });
 });

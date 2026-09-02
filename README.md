@@ -49,7 +49,7 @@ Self-hosted server panels are a crowded niche — but none of them ship an AI ag
 - **Read-only tools run automatically; anything that mutates (write a file, run a command, docker action, connect a server) waits for your approve/reject in the UI.** A conservative deny-list filters what read-only commands may even run.
 - Plan mode: the agent proposes a plan first, you approve it, then it executes.
 - Per-profile persistent memory (`MEMORY.md`, loaded into context at session start); secrets are never written to it.
-- Optional web search tool (DeepSeek), cost tracking per dialogue, suggested-reply hints.
+- Web search built in with the DeepSeek preset (same key); cost tracking per dialogue, suggested-reply hints.
 - Agent language controlled by `AI_LANG` (`ru`/`en`).
 
 ### Servers
@@ -62,13 +62,15 @@ Self-hosted server panels are a crowded niche — but none of them ship an AI ag
 
 ```bash
 cp .env.example .env
-# edit .env — at minimum set APP_PASSWORD; to enable the agent add AI_API_KEY
-# (and AI_MODEL if you want a different model); AI_LANG=en for an English-speaking agent
+# edit .env — these values are used ONCE at the first start (seeded into
+# data/settings.json): APP_PASSWORD for the web UI, AI_API_KEY (+AI_API_BASE/
+# AI_MODEL) for the agent. Leave them empty to set everything in the UI:
+# onboarding asks for the password and the AI key before the first login.
 
 docker compose up -d --build
 ```
 
-Open [http://localhost:8080](http://localhost:8080), sign in with the password from `.env`, add a server, and go.
+Open [http://localhost:8080](http://localhost:8080), sign in with the password from onboarding (or `.env`), add a server, and go. After the first start the env values above are no longer read — configuration lives in `data/settings.json` (a Settings page is planned; until then edit the file and restart).
 
 Notes:
 
@@ -84,23 +86,23 @@ Environment variables are set via `.env` (template: `.env.example`); inside the 
 | Variable | Default | Description |
 |---|---|---|
 | `APP_PORT` / `APP_HOST` | `8080` / `0.0.0.0` | HTTP/WS port and bind address |
-| `APP_PASSWORD` | `admin` | Password for the web UI |
-| `DATA_DIR` | `/data` (docker) | Directory with `profiles.json`, `db-connections.json`, `ai-dialogues.json`, `memory/`, … |
+| `APP_PASSWORD` | empty | Password for the web UI. **Seed only, first start**: hashed into `data/settings.json`; empty — set via onboarding. Afterwards env is ignored (Settings page / file + restart) |
+| `DATA_DIR` | `/data` (docker) | Directory with `settings.json`, `profiles.json`, `db-connections.json`, `ai-dialogues.json`, `memory/`, … |
 | `KEYS_DIR` | `/keys` (docker) | Directory with SSH keys |
 | `WEB_DIST` | auto-detected | Path to the built frontend |
-| `AI_API_BASE` | `https://api.openai.com/v1` | Base URL of an OpenAI-compatible API |
-| `AI_API_KEY` | empty | API key; without it the agent is unavailable |
-| `AI_MODEL` | `gpt-4.1-mini` | Agent model |
+| `AI_API_BASE` | `https://api.deepseek.com/v1` | Base URL of an OpenAI-compatible API. **Seed only, first start** (with the key it picks the provider preset); afterwards — `data/settings.json` |
+| `AI_API_KEY` | empty | API key; without it (in settings or seed) the agent is unavailable. **Seed only, first start**; afterwards — `data/settings.json` |
+| `AI_MODEL` | `deepseek-v4-flash` | Agent model. **Seed only, first start**; afterwards — `data/settings.json` |
 | `AI_MAX_STEPS` | `30` | Step limit of the agent loop |
 | `AI_TEMPERATURE` | `0.2` | Model temperature |
-| `AI_SEARCH_API_BASE` | empty | Anthropic-compatible web-search endpoint for the agent (DeepSeek: `https://api.deepseek.com/anthropic`, same `AI_API_KEY`). Empty — search is disabled and the tool is not announced to the model |
+| `AI_SEARCH_API_BASE` | empty | Anthropic-compatible web-search endpoint (env-only). The DeepSeek preset has search built in — same key, no env needed; this variable is for other providers (e.g. OpenAI chat + DeepSeek search). Empty and not DeepSeek — search is disabled and the tool is not announced to the model |
 | `AI_SEARCH_MODEL` | `deepseek-v4-flash` | Model used for web search |
 | `AI_LANG` | `ru` | Agent language — the system prompt and plan instruction. `en` — English; unknown values fall back to `ru` |
 | `TUNNEL_PORT_MIN` / `TUNNEL_PORT_MAX` | `10000` / `10049` | Port range for SSH tunnels (local end) |
 
 ### Data storage
 
-Server profiles live in `data/profiles.json` (volume `./data`), DB connections in `data/db-connections.json`, saved snippets in `data/snippets.json`, agent dialogues in `data/ai-dialogues.json`, the AI usage/cost journal in `data/ai-usage.json`, and agent memory in `data/memory/<profileId>/MEMORY.md`. SSH keys are mounted from `./keys` into `/keys` inside the container.
+Server profiles live in `data/profiles.json` (volume `./data`), DB connections in `data/db-connections.json`, saved snippets in `data/snippets.json`, agent dialogues in `data/ai-dialogues.json`, the AI usage/cost journal in `data/ai-usage.json`, and agent memory in `data/memory/<profileId>/MEMORY.md`. App configuration (web password hash, AI provider/key/base/model) lives in `data/settings.json` — the single source of truth at runtime. SSH keys are mounted from `./keys` into `/keys` inside the container.
 
 ## Security
 

@@ -1,5 +1,5 @@
 import { config } from '../config.js';
-import { getAiConfig } from '../services/settings.js';
+import { getAiSettings } from '../services/settings.js';
 
 export interface ToolFunction {
   name: string;
@@ -111,12 +111,12 @@ function normalizeMessage(data: Record<string, unknown>): ChatMessage {
  * non-streaming parse if the endpoint replies with a plain JSON body.
  */
 export async function streamChatCompletion(opts: StreamOptions): Promise<ChatCompletionResult> {
-  // Ключ и base — мерж «settings поверх env» (docs/onboarding-plan.md):
-  // заданный в onboarding ключ/URL приоритетнее env.
-  const { apiBase, apiKey } = getAiConfig();
+  // base/ключ/модель — только из settings.json (docs/settings-model-plan.md):
+  // мержа с env больше нет, env сеется в settings при первом старте.
+  const { apiBase, apiKey, model } = getAiSettings();
   const url = `${apiBase}/chat/completions`;
   const body = JSON.stringify({
-    model: config.ai.model,
+    model,
     messages: opts.messages,
     tools: opts.tools,
     tool_choice: opts.tools?.length ? 'auto' : undefined,

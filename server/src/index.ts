@@ -8,7 +8,7 @@ import { config, ensureDirs } from './config.js';
 import { SESSION_COOKIE, hasSession, readCookie, requireAuth } from './auth.js';
 import { authRouter } from './routes/auth.js';
 import { setupRouter } from './routes/setup.js';
-import { getAiConfig } from './services/settings.js';
+import { getAiSettings, seedSettingsFromEnv } from './services/settings.js';
 import { profilesRouter } from './routes/profiles.js';
 import { keysRouter } from './routes/keys.js';
 import { filesRouter } from './routes/files.js';
@@ -34,6 +34,10 @@ import { attachTerminal } from './ws/terminal.js';
 import { handleAgentWs } from './ws/agent.js';
 
 ensureDirs();
+// Seed из env при первом старте (docs/settings-model-plan.md): settings.json
+// ещё нет, env задан → значения копируются в settings (пароль хешем). После
+// этого env не читается никогда — источник правды data/settings.json.
+seedSettingsFromEnv();
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -153,8 +157,10 @@ server.on('upgrade', (req, socket, head) => {
 
 server.listen(config.port, config.host, () => {
   console.log(`ssh-commander listening on http://${config.host}:${config.port}`);
-  if (!getAiConfig().apiKey) {
-    console.warn('AI_API_KEY is not set — AI agent will be unavailable until configured.');
+  if (!getAiSettings().apiKey) {
+    console.warn(
+      'AI key is not configured (data/settings.json) — AI agent will be unavailable until set.',
+    );
   }
   if (!fs.existsSync(config.webDist)) {
     console.warn(`Web UI not found at ${config.webDist} — serving API only.`);

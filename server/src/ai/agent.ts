@@ -7,6 +7,7 @@ import { getToolDefs, READ_ONLY_TOOLS } from './tools.js';
 import { checkReadOnlyCommand } from './guard.js';
 import { readMemory, writeMemory, memoryPromptBlock } from './memory.js';
 import { isSearchConfigured, searchWeb, type WebSearchUsage } from './web-search.js';
+import { getAiSettings } from '../services/settings.js';
 import { computeCostUsd } from './pricing.js';
 import { recordUsage, usageTotalsByDialogue } from './usage.js';
 import {
@@ -499,8 +500,10 @@ export class AgentSession {
         tokenFilter.flush();
         assistant = result.message;
         // Шаг планирования — тоже платный вызов: учитываем в журнале.
+        // Модель — из settings (getAiSettings), не из env: env сеется в
+        // settings при первом старте, дальше не читается.
         if (result.usage) {
-          this.recordChatUsage('plan', config.ai.model, result.usage);
+          this.recordChatUsage('plan', getAiSettings().model, result.usage);
         }
       } catch (err) {
         if (this.stopRequested) {
@@ -566,7 +569,7 @@ export class AgentSession {
           assistant = result.message;
           // Каждый вызов чата — платная запись в журнале (решения 5, 6).
           if (result.usage) {
-            this.recordChatUsage('chat', config.ai.model, result.usage);
+            this.recordChatUsage('chat', getAiSettings().model, result.usage);
           }
         } catch (err) {
           if (this.stopRequested) {

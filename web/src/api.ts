@@ -13,23 +13,31 @@ export class ApiError extends Error {
   }
 }
 
-// Первичная настройка (onboarding, docs/onboarding-plan.md): пароль и ключ
-// AI-API задаются в UI при первом запуске, до первого входа.
+// Первичная настройка (onboarding, docs/settings-model-plan.md): пароль и
+// опциональный AI-конфиг задаются в UI при первом запуске, до первого входа.
 
 export interface SetupStatus {
   required: boolean;
 }
+
+export type AiProvider = 'deepseek' | 'openai' | 'custom';
 
 /** Публичный статус onboarding: «пароль не настроен» — показать экран настройки. */
 export function fetchSetupStatus(): Promise<SetupStatus> {
   return api<SetupStatus>('/api/setup/status');
 }
 
-/** Одноразовый POST: пароль + опциональные ключ и base URL. Ответ — авто-вход. */
+/**
+ * Одноразовый POST: пароль + опциональный AI-конфиг. AI-поля (включая
+ * aiProvider/aiModel — обязательны при ключе) уходят только с непустым ключом,
+ * иначе посеянные env'ом AI-поля затирались бы пустой формой. Ответ — авто-вход.
+ */
 export function submitSetup(input: {
   password: string;
   aiApiKey?: string;
+  aiProvider?: AiProvider;
   aiApiBase?: string;
+  aiModel?: string;
 }): Promise<{ ok: boolean }> {
   return api('/api/setup', { method: 'POST', body: JSON.stringify(input) });
 }

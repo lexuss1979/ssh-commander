@@ -1,11 +1,16 @@
 import { config } from '../config.js';
-import { getAiConfig } from '../services/settings.js';
+import { getAiSettings } from '../services/settings.js';
 
 // Anthropic-совместимый endpoint DeepSeek: серверный web search работает
-// только там (не в OpenAI-совместимом /chat/completions). Ключ общий с AI_API_KEY.
+// только там (не в OpenAI-совместимом /chat/completions). Ключ общий с
+// aiApiKey из settings.json.
 const SEARCH_TIMEOUT_MS = 90_000;
 const MAX_QUERY_LENGTH = 400;
 const MAX_TOKENS = 2048;
+
+// Константа, не настройка: только этот endpoint поддерживает серверный
+// инструмент web_search у DeepSeek. Менять/выносить в UI нельзя.
+const DEEPSEEK_SEARCH_BASE = 'https://api.deepseek.com/anthropic';
 
 /** Лимит реальных поисковых запросов внутри одного вызова инструмента. */
 export const MAX_USES_PER_CALL = 3;
@@ -27,9 +32,13 @@ export interface WebSearchUsage {
 }
 
 export function isSearchConfigured(): boolean {
-  // Ключ — мерж «settings поверх env»: заданный в onboarding ключ включает
-  // поиск автоматически, если AI_SEARCH_API_BASE задан в env (env-only).
-  return Boolean(config.ai.searchApiBase && getAiConfig().apiKey);
+  const ai = getAiSettings();
+  if (!ai.apiKey) return false;
+  // DeepSeek-пресет: поиск включён автоматически (2 в 1, тот же ключ).
+  if (ai.provider === 'deepseek') return true;
+  // Остальные: поиск только при явно заданном env AI_SEARCH_API_BASE
+  // (обратная совместимость; позволяет связку «чат OpenAI + поиск DeepSeek»).
+  return Boolean(config.ai.searchApiBase);
 }
 
 export function sanitizeQuery(raw: unknown): string {
@@ -155,9 +164,16 @@ export async function searchWeb(rawQuery: string): Promise<WebSearchResult> {
   if (!isSearchConfigured()) {
     return {
       ok: false,
-      output: 'Веб-поиск не настроен: задайте AI_SEARCH_API_BASE и AI_API_KEY.',
+      output:
+        'Веб-поиск недоступен: из коробки работает только с провайдером DeepSeek (тот же ключ); ' +
+        'для остальных задайте AI_SEARCH_API_BASE в env.',
     };
   }
+
+  const ai = getAiSettings();
+  // База поиска: у DeepSeek-пресета — константный Anthropic-endpoint (тот же
+  // ключ); у остальных — env AI_SEARCH_API_BASE (env-only, как и модель поиска).
+  const searchBase = ai.provider === 'deepseek' ? DEEPSEEK_SEARCH_BASE : config.ai.searchApiBase;
 
   const controller = new AbortController();
   const timer = setTimeout(
@@ -165,11 +181,11 @@ export async function searchWeb(rawQuery: string): Promise<WebSearchResult> {
     SEARCH_TIMEOUT_MS,
   );
   try {
-    const res = await fetch(`${config.ai.searchApiBase}/v1/messages`, {
+    const res = await fetch(`${searchBase}/v1/messages`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-api-key': getAiConfig().apiKey,
+        'x-api-key': ai.apiKey,
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify(

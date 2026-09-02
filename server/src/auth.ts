@@ -16,8 +16,9 @@ function pruneSessions(): void {
 }
 
 export function createSession(password: string): string | null {
-  // Проверка через settings-сервис (docs/onboarding-plan.md): хеш из
-  // settings.json → scrypt; настроек нет → фолбэк env (config.appPassword).
+  // Проверка через settings-сервис (docs/settings-model-plan.md): только хеш
+  // из settings.json → scrypt; env-фолбэка нет — env-пароль сеется хешем
+  // при первом старте.
   if (!verifyPassword(password)) return null;
   const token = crypto.randomBytes(32).toString('hex');
   sessions.set(token, Date.now() + config.sessionTtlMs);
