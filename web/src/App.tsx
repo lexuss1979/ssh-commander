@@ -18,6 +18,7 @@ import { ServicesPage } from './pages/ServicesPage';
 import { NginxPage } from './pages/NginxPage';
 import { DatabasesPage } from './pages/DatabasesPage';
 import { AiCostsPage } from './pages/AiCostsPage';
+import { SettingsPage } from './pages/SettingsPage';
 import { TerminalPage } from './pages/TerminalPage';
 import { FilesPage } from './pages/FilesPage';
 import { DockerPage } from './pages/DockerPage';
@@ -58,7 +59,8 @@ type Tab =
   | 'nginx'
   | 'ports'
   | 'cron'
-  | 'services';
+  | 'services'
+  | 'settings';
 
 const TABS: Array<{ id: Tab; labelKey: I18nKey }> = [
   { id: 'overview', labelKey: 'tabs.overview' },
@@ -555,6 +557,15 @@ export default function App() {
             <span className="muted">{t('app.aiCostsSubtitle')}</span>
           </button>
 
+          <button
+            type="button"
+            className={`profile-list-item${tab === 'settings' ? ' active' : ''}`}
+            onClick={() => setTab('settings')}
+          >
+            <strong>{t('app.settings')}</strong>
+            <span className="muted">{t('app.settingsSubtitle')}</span>
+          </button>
+
           <div className="sidebar-divider" />
 
           <label className="sidebar-label">{t('app.sites')}</label>
@@ -699,7 +710,10 @@ export default function App() {
             <div className={`tab-page ${tab === 'ai-costs' ? '' : 'hidden'}`}>
               <AiCostsPage visible={tab === 'ai-costs'} />
             </div>
-            {!activeProfile && tab !== 'servers' && tab !== 'ai-costs' && (
+            {/* Страница «Настройки» (эпик 23) — без keep-alive: монтируется
+                при открытии вкладки, GET отдаёт свежий статус каждый раз. */}
+            {tab === 'settings' && <SettingsPage showError={showError} />}
+            {!activeProfile && tab !== 'servers' && tab !== 'ai-costs' && tab !== 'settings' && (
               <div className="empty-state">
                 <p>{t('app.addServerFirst')}</p>
                 <button className="btn btn-primary" onClick={() => setShowProfiles(true)}>

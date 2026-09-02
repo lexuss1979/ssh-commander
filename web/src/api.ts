@@ -1,5 +1,6 @@
 import type { AlertsResponse, FileSearchResult, Profile } from './types';
 import { activeLocale, t } from './i18n/core';
+import type { AiProvider } from './ai-providers';
 
 export class ApiError extends Error {
   status: number;
@@ -20,8 +21,6 @@ export interface SetupStatus {
   required: boolean;
 }
 
-export type AiProvider = 'deepseek' | 'openai' | 'custom';
-
 /** Публичный статус onboarding: «пароль не настроен» — показать экран настройки. */
 export function fetchSetupStatus(): Promise<SetupStatus> {
   return api<SetupStatus>('/api/setup/status');
@@ -40,6 +39,45 @@ export function submitSetup(input: {
   aiModel?: string;
 }): Promise<{ ok: boolean }> {
   return api('/api/setup', { method: 'POST', body: JSON.stringify(input) });
+}
+
+// Страница «Настройки» (эпик 23): смена пароля и AI-конфига после первого
+// запуска. Ключ API сервер наружу не отдаёт — только факт «задан».
+
+/** Маскированный AI-статус (ответ GET/PUT /api/settings). */
+export interface AiSettingsStatus {
+  /** null — пресет не выбран (ключ не задан). */
+  provider: AiProvider | null;
+  /** Ключ задан; само значение наружу не возвращается никогда. */
+  apiKeySet: boolean;
+  apiBase: string;
+  model: string;
+  /** Честный статус веб-поиска, включая env-оверрайд для не-DeepSeek. */
+  searchAvailable: boolean;
+}
+
+export interface SettingsStatus {
+  ai: AiSettingsStatus;
+}
+
+export function fetchSettings(): Promise<SettingsStatus> {
+  return api<SettingsStatus>('/api/settings');
+}
+
+/**
+ * PUT /api/settings: смена пароля — парой currentPassword+newPassword;
+ * замена AI-конфига — только целиком (ключ write-only); aiApiKey: null —
+ * очистка ключа (агент недоступен). Ответ — обновлённый GET-статус.
+ */
+export function updateSettings(input: {
+  currentPassword?: string;
+  newPassword?: string;
+  aiApiKey?: string | null;
+  aiProvider?: AiProvider;
+  aiApiBase?: string;
+  aiModel?: string;
+}): Promise<SettingsStatus> {
+  return api<SettingsStatus>('/api/settings', { method: 'PUT', body: JSON.stringify(input) });
 }
 
 // Глобальный обработчик 401: App подписывается, чтобы при истёкшей сессии

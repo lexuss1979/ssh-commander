@@ -8,6 +8,7 @@ import { config, ensureDirs } from './config.js';
 import { SESSION_COOKIE, hasSession, readCookie, requireAuth } from './auth.js';
 import { authRouter } from './routes/auth.js';
 import { setupRouter } from './routes/setup.js';
+import { settingsRouter } from './routes/settings.js';
 import { getAiSettings, seedSettingsFromEnv } from './services/settings.js';
 import { profilesRouter } from './routes/profiles.js';
 import { keysRouter } from './routes/keys.js';
@@ -71,6 +72,8 @@ app.use('/api/snippets', requireAuth, snippetsRouter);
 app.use('/api/packages', requireAuth, packagesRouter);
 app.use('/api/alerts', requireAuth, alertsRouter);
 app.use('/api/nginx', requireAuth, nginxRouter);
+// Страница «Настройки» (эпик 23): смена пароля и AI-конфига — за авторизацией.
+app.use('/api/settings', requireAuth, settingsRouter);
 
 // SPA static files (built web app).
 if (fs.existsSync(config.webDist)) {

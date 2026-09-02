@@ -253,6 +253,56 @@ describe('providerFromBase', () => {
   });
 });
 
+describe('updateSettings (эпик 23, routes/settings.ts)', () => {
+  const fullSettings = {
+    passwordHash: 'scrypt$aa$bb',
+    aiProvider: 'deepseek' as const,
+    aiApiKey: 'sk-1',
+    aiApiBase: 'https://api.deepseek.com/v1',
+    aiModel: 'deepseek-chat',
+  };
+
+  it('мерж поверх текущих: переданное поле меняется, остальные сохраняются', async () => {
+    cleanDir();
+    const settings = await freshSettings();
+    settings.saveSettings({ ...fullSettings });
+
+    const saved = settings.updateSettings({ passwordHash: 'scrypt$cc$dd' });
+    expect(saved).toEqual({ ...fullSettings, passwordHash: 'scrypt$cc$dd' });
+    expect(onDisk()).toEqual({ ...fullSettings, passwordHash: 'scrypt$cc$dd' });
+  });
+
+  it('null у AI-поля удаляет ключ из объекта (очистка = агент недоступен)', async () => {
+    cleanDir();
+    const settings = await freshSettings();
+    settings.saveSettings({ ...fullSettings });
+
+    settings.updateSettings({
+      aiProvider: null,
+      aiApiKey: null,
+      aiApiBase: null,
+      aiModel: null,
+    });
+
+    expect(settings.getSettings()).toEqual({ passwordHash: 'scrypt$aa$bb' });
+    expect(onDisk()).toEqual({ passwordHash: 'scrypt$aa$bb' });
+    // Возврата к env нет: ключ пуст, пресет не выбран — агент недоступен.
+    expect(settings.getAiSettings()).toEqual({
+      provider: null,
+      apiKey: '',
+      apiBase: 'https://api.openai.com/v1',
+      model: 'gpt-4.1-mini',
+    });
+  });
+
+  it('настроек нет — патч создаёт файл', async () => {
+    cleanDir();
+    const settings = await freshSettings();
+    settings.updateSettings({ aiApiKey: 'sk-seed' });
+    expect(settings.getSettings()).toEqual({ aiApiKey: 'sk-seed' });
+  });
+});
+
 describe('триггер onboarding', () => {
   it('есть passwordHash → false', async () => {
     cleanDir();

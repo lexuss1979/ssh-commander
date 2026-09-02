@@ -1,23 +1,12 @@
 import { useState } from 'react';
 import { useT } from '../i18n';
 import { submitSetup } from '../api';
+import { PROVIDERS, type AiProvider } from '../ai-providers';
 
 interface Props {
   onComplete: () => Promise<void>;
   showError: (msg: string) => void;
 }
-
-type Provider = 'deepseek' | 'openai' | 'custom';
-
-// Пресеты несут base и модель (docs/settings-model-plan.md): пресет без
-// модели не работает. «Свой URL» — поля формы; срез хвостового '/' делает
-// сервер. Эпик 23 вынесет таблицу в общий модуль вместе со страницей
-// «Настройки».
-const PROVIDERS: Record<Provider, { base: string; model: string }> = {
-  deepseek: { base: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash' },
-  openai: { base: 'https://api.openai.com/v1', model: 'gpt-4.1-mini' },
-  custom: { base: '', model: '' },
-};
 
 /**
  * Первичная настройка (docs/settings-model-plan.md): экран вместо LoginPage
@@ -30,7 +19,7 @@ export function OnboardingPage({ onComplete, showError }: Props) {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [apiKey, setApiKey] = useState('');
-  const [provider, setProvider] = useState<Provider>('deepseek');
+  const [provider, setProvider] = useState<AiProvider>('deepseek');
   const [model, setModel] = useState(PROVIDERS.deepseek.model);
   const [customBase, setCustomBase] = useState('');
   const [busy, setBusy] = useState(false);
@@ -130,7 +119,7 @@ export function OnboardingPage({ onComplete, showError }: Props) {
           id="ob-provider"
           value={provider}
           onChange={(e) => {
-            const p = e.target.value as Provider;
+            const p = e.target.value as AiProvider;
             setProvider(p);
             // Смена провайдера подставляет модель пресета — остаётся редактируемой.
             setModel(PROVIDERS[p].model);

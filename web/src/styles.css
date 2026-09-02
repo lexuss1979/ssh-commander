@@ -5474,3 +5474,49 @@ body.resizing-agent {
   line-height: 1.5;
   margin: 2px 0;
 }
+
+/* Страница «Настройки» (эпик 23): смена пароля и AI-конфига. Секции —
+   карточки на --bg-raised, форма уже на всю ширину (глобальные input). */
+.settings-page {
+  padding: 16px;
+  gap: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.settings-loading {
+  padding: 16px;
+}
+
+.settings-section {
+  max-width: 520px;
+  margin-bottom: 20px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-raised);
+}
+
+.settings-section h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.settings-section .field-label {
+  display: block;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.settings-hint {
+  margin: 6px 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}

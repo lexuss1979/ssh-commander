@@ -204,3 +204,27 @@ export function getAiSettings(): {
 export function onboardingRequired(): boolean {
   return !load()?.passwordHash;
 }
+
+/** Патч настроек: значение null/undefined у поля удаляет его из объекта. */
+export type SettingsPatch = { [K in keyof AppSettings]?: AppSettings[K] | null };
+
+/**
+ * Мерж-патч поверх текущих настроек (эпик 23, routes/settings.ts): переданное
+ * поле перезаписывается, null/undefined — удаляется (очистка AI-полей = «агент
+ * недоступен», возврата к env нет — он читался только при первом старте).
+ * Поля, которых нет в патче, сохраняются. Атомарность и corrupt-guard — в
+ * saveSettings. Возвращает сохранённый объект (копию).
+ */
+export function updateSettings(patch: SettingsPatch): AppSettings {
+  const next: Record<string, unknown> = { ...(getSettings() ?? {}) };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null || value === undefined) {
+      delete next[key];
+    } else {
+      next[key] = value;
+    }
+  }
+  const saved = next as AppSettings;
+  saveSettings(saved);
+  return { ...saved };
+}
