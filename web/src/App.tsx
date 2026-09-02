@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ApiError, api, fetchAlerts, fetchOverview, setUnauthorizedHandler } from './api';
+import { ApiError, api, fetchAlerts, fetchOverview, fetchSetupStatus, setUnauthorizedHandler } from './api';
 import type { AgentAskMode, AlertRuleState, Profile } from './types';
 import {
   loadAlertsSettings,
@@ -9,6 +9,7 @@ import {
   type AlertsSettings,
 } from './alerts';
 import { LoginPage } from './pages/LoginPage';
+import { OnboardingPage } from './pages/OnboardingPage';
 import { ServersPage } from './pages/ServersPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { PortsPage } from './pages/PortsPage';
@@ -97,6 +98,9 @@ function loadAgentOpen(): boolean {
 export default function App() {
   const { lang, setLang, t } = useT();
   const [authed, setAuthed] = useState<boolean | null>(null);
+  // Первичная настройка (docs/onboarding-plan.md): true — рендерим
+  // OnboardingPage вместо LoginPage, пока пароль не задан в UI.
+  const [onboarding, setOnboarding] = useState(false);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [activeProfileId, setActiveProfileId] = useState('');
   const [tab, setTab] = useState<Tab>('servers');
@@ -210,13 +214,39 @@ export default function App() {
     return () => setUnauthorizedHandler(null);
   }, []);
 
+  // Bootstrap (docs/onboarding-plan.md): сначала публичный статус первичной
+  // настройки, затем обычная проверка сессии через /api/profiles. Пока статус
+  // не пришёл — прежний loading; required → OnboardingPage (авто-вход после
+  // POST /api/setup, cookie ставит сервер).
   useEffect(() => {
-    api<Profile[]>('/api/profiles')
-      .then((list) => {
+    let cancelled = false;
+    void (async () => {
+      let required = false;
+      try {
+        const status = await fetchSetupStatus();
+        required = status.required;
+      } catch {
+        // Пробный запрос: отказ (сеть/старый сервер) не должен показывать
+        // ошибку — просто пробуем обычный bootstrap (401 уведёт на логин
+        // глобальным обработчиком).
+      }
+      if (cancelled) return;
+      if (required) {
+        setOnboarding(true);
+        // authed=false, не true: иначе стартует сайдбар-опрос, чей
+        // неавторизованный /api/overview → 401 → глобальный обработчик
+        // выкинул бы на логин после успешного setup. Экран не меняется —
+        // guard `if (onboarding)` в рендере стоит раньше `if (!authed)`.
+        setAuthed(false);
+        return;
+      }
+      try {
+        const list = await api<Profile[]>('/api/profiles');
+        if (cancelled) return;
         applyProfiles(list);
         setAuthed(true);
-      })
-      .catch((err) => {
+      } catch (err) {
+        if (cancelled) return;
         // На логин уводит только 401 (сработает и глобальный обработчик);
         // прочие ошибки (сеть, 5xx) — показываем toast, пользователь остаётся.
         if (!(err instanceof ApiError && err.status === 401)) {
@@ -224,7 +254,11 @@ export default function App() {
           return;
         }
         setAuthed(false);
-      });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [applyProfiles, showError]);
 
   // Точки доступности серверов в сайдбаре + алерты: один тик — два запроса
@@ -336,6 +370,14 @@ export default function App() {
     },
     [loadProfiles],
   );
+
+  // Onboarding завершён: сессия уже стоит (POST /api/setup поставил cookie) —
+  // подтягиваем профили и открываем приложение.
+  const handleOnboardingComplete = useCallback(async () => {
+    await loadProfiles();
+    setAuthed(true);
+    setOnboarding(false);
+  }, [loadProfiles]);
 
   const handleLogout = useCallback(async () => {
     await api('/api/auth/logout', { method: 'POST' }).catch(() => undefined);
@@ -450,6 +492,16 @@ export default function App() {
     return (
       <>
         <div className="boot">{t('common.loading')}</div>
+        {toast && <div className="toast">{toast}</div>}
+      </>
+    );
+  }
+
+  // Первичная настройка — вместо страницы логина (пароль ещё не задан).
+  if (onboarding) {
+    return (
+      <>
+        <OnboardingPage onComplete={handleOnboardingComplete} showError={showError} />
         {toast && <div className="toast">{toast}</div>}
       </>
     );

@@ -236,6 +236,24 @@ button {
   margin: 0;
 }
 
+/* Первичная настройка (docs/onboarding-plan.md): та же карточка, что у логина,
+   плюс подписи полей и компактная подсказка. */
+.onboarding .field-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: -8px;
+}
+
+.onboarding .onboarding-hint {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.onboarding .onboarding-error {
+  color: var(--danger);
+  font-size: 13px;
+}
+
 /* Layout */
 .app {
   display: flex;

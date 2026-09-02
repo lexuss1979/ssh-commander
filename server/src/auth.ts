@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import { config } from './config.js';
+import { verifyPassword } from './services/settings.js';
 
 export const SESSION_COOKIE = 'sc_session';
 
@@ -15,7 +16,9 @@ function pruneSessions(): void {
 }
 
 export function createSession(password: string): string | null {
-  if (password !== config.appPassword) return null;
+  // Проверка через settings-сервис (docs/onboarding-plan.md): хеш из
+  // settings.json → scrypt; настроек нет → фолбэк env (config.appPassword).
+  if (!verifyPassword(password)) return null;
   const token = crypto.randomBytes(32).toString('hex');
   sessions.set(token, Date.now() + config.sessionTtlMs);
   return token;

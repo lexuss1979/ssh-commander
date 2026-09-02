@@ -1,12 +1,23 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
 // До динамического импорта модуля: config читает env при загрузке.
 process.env.AI_API_BASE = 'http://mock-api';
 process.env.AI_API_KEY = 'test-key';
 process.env.AI_MODEL = 'test-model';
 process.env.AI_TEMPERATURE = '0.2';
+// Изоляция settings.json: streamChatCompletion ходит через getAiConfig()
+// (services/settings.ts) — пустой data-каталог даёт env-фолбэк.
+const dataDir = mkdtempSync(path.join(tmpdir(), 'sc-client-'));
+process.env.DATA_DIR = dataDir;
 
 const client = await import('../src/ai/client.js');
+
+afterAll(() => {
+  rmSync(dataDir, { recursive: true, force: true });
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();

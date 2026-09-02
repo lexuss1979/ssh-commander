@@ -13,6 +13,27 @@ export class ApiError extends Error {
   }
 }
 
+// Первичная настройка (onboarding, docs/onboarding-plan.md): пароль и ключ
+// AI-API задаются в UI при первом запуске, до первого входа.
+
+export interface SetupStatus {
+  required: boolean;
+}
+
+/** Публичный статус onboarding: «пароль не настроен» — показать экран настройки. */
+export function fetchSetupStatus(): Promise<SetupStatus> {
+  return api<SetupStatus>('/api/setup/status');
+}
+
+/** Одноразовый POST: пароль + опциональные ключ и base URL. Ответ — авто-вход. */
+export function submitSetup(input: {
+  password: string;
+  aiApiKey?: string;
+  aiApiBase?: string;
+}): Promise<{ ok: boolean }> {
+  return api('/api/setup', { method: 'POST', body: JSON.stringify(input) });
+}
+
 // Глобальный обработчик 401: App подписывается, чтобы при истёкшей сессии
 // вернуть пользователя на страницу логина с любой страницы.
 let unauthorizedHandler: (() => void) | null = null;

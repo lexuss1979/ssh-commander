@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { getAiConfig } from '../services/settings.js';
 
 export interface ToolFunction {
   name: string;
@@ -110,7 +111,10 @@ function normalizeMessage(data: Record<string, unknown>): ChatMessage {
  * non-streaming parse if the endpoint replies with a plain JSON body.
  */
 export async function streamChatCompletion(opts: StreamOptions): Promise<ChatCompletionResult> {
-  const url = `${config.ai.apiBase}/chat/completions`;
+  // Ключ и base — мерж «settings поверх env» (docs/onboarding-plan.md):
+  // заданный в onboarding ключ/URL приоритетнее env.
+  const { apiBase, apiKey } = getAiConfig();
+  const url = `${apiBase}/chat/completions`;
   const body = JSON.stringify({
     model: config.ai.model,
     messages: opts.messages,
@@ -142,7 +146,7 @@ export async function streamChatCompletion(opts: StreamOptions): Promise<ChatCom
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${config.ai.apiKey}`,
+        authorization: `Bearer ${apiKey}`,
       },
       body,
       signal,

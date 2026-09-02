@@ -7,6 +7,8 @@ import { WebSocketServer } from 'ws';
 import { config, ensureDirs } from './config.js';
 import { SESSION_COOKIE, hasSession, readCookie, requireAuth } from './auth.js';
 import { authRouter } from './routes/auth.js';
+import { setupRouter } from './routes/setup.js';
+import { getAiConfig } from './services/settings.js';
 import { profilesRouter } from './routes/profiles.js';
 import { keysRouter } from './routes/keys.js';
 import { filesRouter } from './routes/files.js';
@@ -42,6 +44,9 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.use('/api/auth', authRouter);
+// Первичная настройка (onboarding, docs/onboarding-plan.md) — без requireAuth:
+// публичный статус и одноразовый POST, доступный только до первого setup.
+app.use('/api/setup', setupRouter);
 app.use('/api/profiles', requireAuth, profilesRouter);
 app.use('/api/keys', requireAuth, keysRouter);
 app.use('/api/files', requireAuth, filesRouter);
@@ -148,10 +153,7 @@ server.on('upgrade', (req, socket, head) => {
 
 server.listen(config.port, config.host, () => {
   console.log(`ssh-commander listening on http://${config.host}:${config.port}`);
-  if (config.appPassword === 'admin') {
-    console.warn('WARNING: using default password. Set APP_PASSWORD to change it.');
-  }
-  if (!config.ai.apiKey) {
+  if (!getAiConfig().apiKey) {
     console.warn('AI_API_KEY is not set — AI agent will be unavailable until configured.');
   }
   if (!fs.existsSync(config.webDist)) {

@@ -59,7 +59,11 @@ describe('key import', () => {
     expect(entry.name).toBe('id_rsa');
     expect(entry.path).toBe(path.join(dir, 'id_rsa'));
     expect(fs.readFileSync(entry.path, 'utf8')).toBe(OPENSSH_KEY);
-    expect(fs.statSync(entry.path).mode & 0o777).toBe(0o600);
+    // Права 0600 проверяем только на POSIX: Windows-стат chmod не отражает
+    // (тот же класс пропуска, что у bootstrap.test.ts).
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(entry.path).mode & 0o777).toBe(0o600);
+    }
     // Временных файлов после записи не остаётся.
     expect(fs.readdirSync(dir)).toEqual(['id_rsa']);
   });
@@ -77,6 +81,8 @@ describe('key import', () => {
     const updated = '-----BEGIN OPENSSH PRIVATE KEY-----\nbmV3\n-----END OPENSSH PRIVATE KEY-----\n';
     saveKey(dir, 'id_rsa', updated, true);
     expect(fs.readFileSync(path.join(dir, 'id_rsa'), 'utf8')).toBe(updated);
-    expect(fs.statSync(path.join(dir, 'id_rsa')).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(path.join(dir, 'id_rsa')).mode & 0o777).toBe(0o600);
+    }
   });
 });

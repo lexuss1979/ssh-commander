@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { getAiConfig } from '../services/settings.js';
 
 // Anthropic-совместимый endpoint DeepSeek: серверный web search работает
 // только там (не в OpenAI-совместимом /chat/completions). Ключ общий с AI_API_KEY.
@@ -26,7 +27,9 @@ export interface WebSearchUsage {
 }
 
 export function isSearchConfigured(): boolean {
-  return Boolean(config.ai.searchApiBase && config.ai.apiKey);
+  // Ключ — мерж «settings поверх env»: заданный в onboarding ключ включает
+  // поиск автоматически, если AI_SEARCH_API_BASE задан в env (env-only).
+  return Boolean(config.ai.searchApiBase && getAiConfig().apiKey);
 }
 
 export function sanitizeQuery(raw: unknown): string {
@@ -166,7 +169,7 @@ export async function searchWeb(rawQuery: string): Promise<WebSearchResult> {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-api-key': config.ai.apiKey,
+        'x-api-key': getAiConfig().apiKey,
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify(
