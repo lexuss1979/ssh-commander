@@ -16,5 +16,8 @@ keys/*
 .eslintcache
 data/ai-usage.json
 data/ai-usage.json.*
+data/settings.json
+# Локальные материалы продвижения — не публикуются
+promo/
 # HTML-превью UI-прототипов (локальные моки, не часть приложения)
 previews/
