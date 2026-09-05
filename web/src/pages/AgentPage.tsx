@@ -782,8 +782,14 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                           setHistoryOpen(false);
                         }}
                       >
-                        <div className="dialogue-item-title" title={d.title}>
-                          {d.title}
+                        <div
+                          className="dialogue-item-title"
+                          title={d.title}
+                        >
+                          {/* 'Новый диалог' — persisted-сентинел автотитула
+                              (server/src/ai/dialogues.ts); на сервере не
+                              переводится, локализуем только отображение. */}
+                          {d.title === 'Новый диалог' ? t('agent.dialogueUntitled') : d.title}
                         </div>
                         {d.extraProfileIds && d.extraProfileIds.length > 0 && (
                           <span

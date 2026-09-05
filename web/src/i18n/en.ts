@@ -843,6 +843,7 @@ export const en: typeof ru = {
   'agent.historyTitle': 'Dialogue history',
   'agent.dialogues': 'Dialogues',
   'agent.new': 'New',
+  'agent.dialogueUntitled': 'New dialogue',
   'agent.emptyDialogues': 'No dialogues yet',
   'agent.multiServerTitle': 'Multi-server dialogue: {n} more server(s) attached',
   'agent.deleteDialogueTitle': 'Delete dialogue',

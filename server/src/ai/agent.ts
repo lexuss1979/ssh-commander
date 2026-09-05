@@ -23,6 +23,7 @@ import {
   createSuggestionTokenFilter,
   extractSuggestion,
 } from './suggest.js';
+import { aiStr } from './strings.js';
 import { exec, withSftp } from '../ssh/manager.js';
 import {
   readFile as sftpReadFile,
@@ -195,17 +196,11 @@ export class AgentSession {
     }
     const known = this.findProfileByName(trimmed);
     if (known) {
-      return {
-        error:
-          `Сервер «${known.name}» не подключён к диалогу — вызови connect_server ` +
-          'или попроси пользователя подключить его.',
-      };
+      return { error: aiStr(this.lang, 'serverNotAttached', { name: known.name }) };
     }
     const available = attached.map((p) => p.name).join(', ');
     return {
-      error:
-        `Неизвестный сервер «${trimmed}». Подключённые к диалогу серверы: ${available}. ` +
-        'Полный список профилей — инструмент list_servers.',
+      error: aiStr(this.lang, 'unknownServer', { name: trimmed, available }),
     };
   }
 
@@ -213,7 +208,7 @@ export class AgentSession {
   attachServerById(profileId: string): { ok: true } | { ok: false; error: string } {
     const profile = getProfile(profileId);
     if (!profile) {
-      return { ok: false, error: `Профиль ${profileId} не найден` };
+      return { ok: false, error: aiStr(this.lang, 'profileNotFound', { id: profileId }) };
     }
     if (!this.attached.has(profile.id)) {
       try {
@@ -230,7 +225,7 @@ export class AgentSession {
   /** Отключение сервера от диалога (WS detach_server). Домашний — нельзя. */
   detachServerById(profileId: string): { ok: true } | { ok: false; error: string } {
     if (profileId === this.homeProfile.id) {
-      return { ok: false, error: 'Домашний сервер диалога отцепить нельзя' };
+      return { ok: false, error: aiStr(this.lang, 'homeServerDetach') };
     }
     if (this.attached.delete(profileId)) {
       try {
@@ -500,6 +495,7 @@ export class AgentSession {
           tools: toolsForRequest(true),
           signal: this.loopAbort.signal,
           onToken: (token) => tokenFilter.push(token),
+          lang: this.lang,
         });
         tokenFilter.flush();
         assistant = result.message;
@@ -511,7 +507,7 @@ export class AgentSession {
         }
       } catch (err) {
         if (this.stopRequested) {
-          this.send({ type: 'done', stopped: true, note: 'Агент остановлен пользователем.' });
+          this.send({ type: 'done', stopped: true, note: aiStr(this.lang, 'stoppedByUser') });
         } else {
           this.send({ type: 'error', message: String((err as Error).message ?? err) });
         }
@@ -568,6 +564,7 @@ export class AgentSession {
             tools: getToolDefs(),
             signal: this.loopAbort.signal,
             onToken: (token) => tokenFilter.push(token),
+            lang: this.lang,
           });
           tokenFilter.flush();
           assistant = result.message;
@@ -577,7 +574,7 @@ export class AgentSession {
           }
         } catch (err) {
           if (this.stopRequested) {
-            this.send({ type: 'done', stopped: true, note: 'Агент остановлен пользователем.' });
+            this.send({ type: 'done', stopped: true, note: aiStr(this.lang, 'stoppedByUser') });
           } else {
             this.send({ type: 'error', message: String((err as Error).message ?? err) });
           }
@@ -633,9 +630,10 @@ export class AgentSession {
             this.send({ type: 'tool_pending', callId: call.id, name, args, server });
             const decision = await this.waitDecision(call.id);
             if (decision === 'rejected' || decision === 'aborted') {
-              const output = decision === 'aborted'
-                ? 'Агент остановлен пользователем.'
-                : 'Пользователь отклонил выполнение этого действия.';
+              const output = aiStr(
+                this.lang,
+                decision === 'aborted' ? 'stoppedByUser' : 'rejectedByUser',
+              );
               this.send({
                 type: 'tool_result',
                 callId: call.id,
@@ -675,9 +673,9 @@ export class AgentSession {
       }
 
       if (this.stopRequested) {
-        this.send({ type: 'done', stopped: true, note: 'Агент остановлен пользователем.' });
+        this.send({ type: 'done', stopped: true, note: aiStr(this.lang, 'stoppedByUser') });
       } else {
-        this.send({ type: 'done', note: `Достигнут лимит шагов (${config.ai.maxSteps}).` });
+        this.send({ type: 'done', note: aiStr(this.lang, 'stepLimitReached', { n: config.ai.maxSteps }) });
       }
     } catch (err) {
       this.send({ type: 'error', message: String((err as Error).message ?? err) });
@@ -703,7 +701,7 @@ export class AgentSession {
   private truncate(text: string): { output: string; truncated: boolean } {
     if (text.length <= MAX_TOOL_OUTPUT) return { output: text, truncated: false };
     return {
-      output: `${text.slice(0, MAX_TOOL_OUTPUT)}\n\n… (вывод обрезан, показано ${MAX_TOOL_OUTPUT} символов)`,
+      output: `${text.slice(0, MAX_TOOL_OUTPUT)}\n\n${aiStr(this.lang, 'outputTruncated', { n: MAX_TOOL_OUTPUT })}`,
       truncated: true,
     };
   }
@@ -714,10 +712,10 @@ export class AgentSession {
    * sees the failure instead of a silent "ok".
    */
   private execToolResult(result: ExecResult): { status: 'ok' | 'error'; output: string; truncated: boolean } {
-    const body = [result.stdout, result.stderr].filter(Boolean).join('\n') || '(пустой вывод)';
+    const body = [result.stdout, result.stderr].filter(Boolean).join('\n') || aiStr(this.lang, 'emptyOutput');
     const output = `${body}\n(exit code: ${result.code ?? 'unknown'})`;
     if (result.code !== 0) {
-      return { status: 'error', ...this.truncate(`Команда завершилась с ошибкой.\n${output}`) };
+      return { status: 'error', ...this.truncate(`${aiStr(this.lang, 'commandFailed')}\n${output}`) };
     }
     return { status: 'ok', ...this.truncate(output) };
   }
@@ -743,24 +741,30 @@ export class AgentSession {
   private connectServer(name: string): { status: 'ok' | 'error'; output: string; truncated: boolean } {
     const trimmed = name.trim();
     if (!trimmed) {
-      return { status: 'error', output: 'Не указано имя сервера (параметр server).', truncated: false };
+      return { status: 'error', output: aiStr(this.lang, 'serverNameMissing'), truncated: false };
     }
     const target = this.findProfileByName(trimmed);
     if (!target) {
       const available = listProfiles().map((p) => p.name).join(', ');
       return {
         status: 'error',
-        output: `Неизвестный сервер «${trimmed}». Доступные профили: ${available || '(профилей нет)'}.`,
+        output: aiStr(this.lang, 'unknownServerProfile', {
+          name: trimmed,
+          available: available || aiStr(this.lang, 'noProfiles'),
+        }),
         truncated: false,
       };
     }
     if (this.attached.has(target.id)) {
-      return { status: 'ok', output: `Сервер «${target.name}» уже подключён к диалогу.`, truncated: false };
+      return { status: 'ok', output: aiStr(this.lang, 'serverAlreadyConnected', { name: target.name }), truncated: false };
     }
     attachProfileToDialogue(this.dialogueId, target.id);
     this.attached.set(target.id, target);
     this.notifyServers();
-    let output = `Сервер «${target.name}» (${target.username}@${target.host}) подключён к диалогу.`;
+    let output = aiStr(this.lang, 'serverConnected', {
+      name: target.name,
+      target: `${target.username}@${target.host}`,
+    });
     const memoryBlock = memoryPromptBlock(target.id, this.lang);
     if (memoryBlock) {
       output += `\n\n${memoryBlock}`;
@@ -787,7 +791,7 @@ export class AgentSession {
         if (!isSearchConfigured()) {
           return {
             status: 'error',
-            output: 'Веб-поиск не настроен на сервере приложения (AI_SEARCH_API_BASE пуст).',
+            output: aiStr(this.lang, 'searchNotConfigured'),
             truncated: false,
           };
         }
@@ -795,11 +799,11 @@ export class AgentSession {
         if (this.searchCalls > MAX_SEARCH_CALLS_PER_RUN) {
           return {
             status: 'error',
-            output: `Достигнут лимит поисковых запросов (${MAX_SEARCH_CALLS_PER_RUN} за запуск).`,
+            output: aiStr(this.lang, 'searchCallsLimit', { n: MAX_SEARCH_CALLS_PER_RUN }),
             truncated: false,
           };
         }
-        const result = await searchWeb(String(args.query ?? ''));
+        const result = await searchWeb(String(args.query ?? ''), this.lang);
         if (result.usage) {
           this.recordSearchUsage(config.ai.searchModel, result.usage);
         }
@@ -818,7 +822,7 @@ export class AgentSession {
           const command = String(args.command ?? '');
           const guard = checkReadOnlyCommand(command);
           if (!guard.ok) {
-            return { status: 'error', output: `Отклонено: ${guard.reason}`, truncated: false };
+            return { status: 'error', output: `${aiStr(this.lang, 'rejectedPrefix')}: ${guard.reason}`, truncated: false };
           }
           const result = await exec(profile, command, { timeoutMs: 60000 });
           return this.execToolResult(result);
@@ -832,25 +836,25 @@ export class AgentSession {
           const path = String(args.path ?? '');
           const stat = await withSftp(profile, (sftp) => sftpStat(sftp, path));
           if ((stat.size ?? 0) > 256 * 1024) {
-            return { status: 'error', output: 'Файл больше 256 КБ — используйте exec_readonly (head/tail).', truncated: false };
+            return { status: 'error', output: aiStr(this.lang, 'fileTooLarge'), truncated: false };
           }
           const content = await withSftp(profile, (sftp) => sftpReadFile(sftp, path, 'utf8'));
           return { status: 'ok', ...this.truncate(content) };
         }
         case 'read_memory': {
-          const content = readMemory(profile.id);
+          const content = readMemory(profile.id, this.lang);
           return {
             status: 'ok',
-            ...this.truncate(content ?? '(MEMORY.md пока нет — записей из прошлых сессий нет)'),
+            ...this.truncate(content ?? aiStr(this.lang, 'memoryAbsent')),
           };
         }
         case 'write_memory': {
           const content = String(args.content ?? '');
           if (!content.trim()) {
-            return { status: 'error', output: 'Пустое содержимое MEMORY.md — запись отменена.', truncated: false };
+            return { status: 'error', output: aiStr(this.lang, 'memoryEmptyContent'), truncated: false };
           }
-          const { bytes } = writeMemory(profile.id, content);
-          return { status: 'ok', output: `MEMORY.md обновлён (${bytes} байт).`, truncated: false };
+          const { bytes } = writeMemory(profile.id, content, this.lang);
+          return { status: 'ok', output: aiStr(this.lang, 'memoryUpdated', { n: bytes }), truncated: false };
         }
         case 'list_dir': {
           const path = String(args.path ?? '/');
@@ -860,27 +864,27 @@ export class AgentSession {
             const isDir = (a.mode & 0o170000) === 0o040000;
             return `${isDir ? 'd' : '-'} ${a.size ?? 0}\t${e.filename}`;
           });
-          const output = lines.length ? lines.join('\n') : '(директория пуста)';
+          const output = lines.length ? lines.join('\n') : aiStr(this.lang, 'dirEmpty');
           return { status: 'ok', ...this.truncate(output) };
         }
         case 'write_file': {
           const path = String(args.path ?? '');
           const content = String(args.content ?? '');
           await withSftp(profile, (sftp) => sftpWriteFile(sftp, path, content));
-          return { status: 'ok', output: `Файл ${path} записан (${content.length} символов).`, truncated: false };
+          return { status: 'ok', output: aiStr(this.lang, 'fileWritten', { path, n: content.length }), truncated: false };
         }
         case 'docker_ps': {
           const containers = await listContainers(profile);
           const lines = containers.map((c) =>
             `${String(c.ID ?? c.ContainerID ?? '').slice(0, 12)} ${String(c.Image ?? '')} ${String(c.Status ?? '')} ${String(c.Names ?? '')}`,
           );
-          return { status: 'ok', ...this.truncate(lines.join('\n') || '(контейнеров нет)') };
+          return { status: 'ok', ...this.truncate(lines.join('\n') || aiStr(this.lang, 'noContainers')) };
         }
         case 'docker_logs': {
           const id = String(args.containerId ?? '');
           const tail = String(args.tail ?? '100');
           const result = await dockerExec(profile, ['logs', '--tail', tail, id], { timeoutMs: 60000 });
-          const output = [result.stdout, result.stderr].filter(Boolean).join('\n') || '(логов нет)';
+          const output = [result.stdout, result.stderr].filter(Boolean).join('\n') || aiStr(this.lang, 'noLogs');
           return { status: 'ok', ...this.truncate(output) };
         }
         case 'docker_inspect': {
@@ -900,6 +904,7 @@ export class AgentSession {
             sections,
             privileged: sudoPassword != null,
             sudoPassword,
+            lang: this.lang,
           });
           return { status: 'ok', ...this.truncate(output) };
         }
@@ -942,14 +947,15 @@ export class AgentSession {
                   snap.value,
                   [],
                   limit,
-                  `крупнейшие файлы недоступны: ${(files.reason as Error).message}`,
+                  aiStr(this.lang, 'diskFilesUnavailable', { message: (files.reason as Error).message }),
+                  this.lang,
                 ),
               ),
             };
           }
           return {
             status: 'ok',
-            ...this.truncate(formatAgentDiskUsage(path, snap.value, files.value.files, limit)),
+            ...this.truncate(formatAgentDiskUsage(path, snap.value, files.value.files, limit, undefined, this.lang)),
           };
         }
         case 'docker_action': {
@@ -981,16 +987,16 @@ export class AgentSession {
               });
               break;
             default:
-              return { status: 'error', output: `Неизвестное действие docker_action: ${action}`, truncated: false };
+              return { status: 'error', output: aiStr(this.lang, 'unknownDockerAction', { action }), truncated: false };
           }
-          return { status: 'ok', output: output || 'Готово.', truncated: false };
+          return { status: 'ok', output: output || aiStr(this.lang, 'done'), truncated: false };
         }
         default:
-          return { status: 'error', output: `Неизвестный инструмент: ${name}`, truncated: false };
+          return { status: 'error', output: aiStr(this.lang, 'unknownTool', { name }), truncated: false };
       }
     } catch (err) {
       const msg = String((err as Error).message ?? err);
-      return { status: 'error', output: `Ошибка: ${msg}`, truncated: false };
+      return { status: 'error', output: `${aiStr(this.lang, 'errorPrefix')}: ${msg}`, truncated: false };
     }
   }
 }

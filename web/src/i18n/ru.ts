@@ -856,6 +856,7 @@ export const ru = {
   'agent.historyTitle': 'История диалогов',
   'agent.dialogues': 'Диалоги',
   'agent.new': 'Новый',
+  'agent.dialogueUntitled': 'Новый диалог',
   'agent.emptyDialogues': 'Пока нет диалогов',
   'agent.multiServerTitle': 'Мульти-серверный диалог: подключено ещё {n} серверов',
   'agent.deleteDialogueTitle': 'Удалить диалог',

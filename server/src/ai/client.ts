@@ -1,5 +1,7 @@
 import { config } from '../config.js';
 import { getAiSettings } from '../services/settings.js';
+import { aiStr } from './strings.js';
+import type { PromptLang } from './prompts.js';
 
 export interface ToolFunction {
   name: string;
@@ -35,6 +37,8 @@ export interface StreamOptions {
   signal?: AbortSignal;
   onToken?: (token: string) => void;
   onToolCalls?: (calls: ToolCall[]) => void;
+  /** Язык сессии агента — для пользовательски-видимых ошибок (таймаут). */
+  lang?: PromptLang;
 }
 
 /**
@@ -133,7 +137,7 @@ export async function streamChatCompletion(opts: StreamOptions): Promise<ChatCom
   // (opts.signal) продолжает работать на всём протяжении запроса.
   const connectTimeout = new AbortController();
   const timer = setTimeout(
-    () => connectTimeout.abort(new Error('AI API не ответил за 120 секунд (таймаут ожидания ответа)')),
+    () => connectTimeout.abort(new Error(aiStr(opts.lang ?? 'ru', 'apiTimeout'))),
     120_000,
   );
   const signal = opts.signal

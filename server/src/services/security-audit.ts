@@ -1,6 +1,8 @@
 import { exec } from '../ssh/manager.js';
 import { shq } from '../util/shell.js';
 import { inspect, listContainers, type DockerEntity } from './docker.js';
+import { aiStr } from '../ai/strings.js';
+import type { PromptLang } from '../ai/prompts.js';
 import type { ExecResult, Profile } from '../types.js';
 
 /**
@@ -47,38 +49,42 @@ export interface AuditCommand {
   timeoutMs?: number;
 }
 
-/** Команды секции — чистая функция, фиксированный белый список. */
-export function commandsForSection(section: AuditSectionId): AuditCommand[] {
+/**
+ * Команды секции — чистая функция, фиксированный белый список.
+ * Заголовки подсекций и echo-заглушки — на языке сессии агента
+ * (ai/strings.ts); сами команды от языка не зависят.
+ */
+export function commandsForSection(section: AuditSectionId, lang: PromptLang = 'ru'): AuditCommand[] {
   switch (section) {
     case 'auth':
       return [
         {
-          title: 'Настройки sshd',
+          title: aiStr(lang, 'auditTitleSshd'),
           command:
             `grep -Ei '^[[:space:]]*(PermitRootLogin|PasswordAuthentication|PermitEmptyPasswords|MaxAuthTries|Port)[[:space:]]' ` +
             `/etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null || true`,
         },
         {
-          title: 'Пользователи с UID 0',
+          title: aiStr(lang, 'auditTitleUid0'),
           command: `awk -F: '$3==0 {print $1}' /etc/passwd`,
         },
         {
-          title: 'Пользователи с login-shell',
+          title: aiStr(lang, 'auditTitleLoginShell'),
           command: `awk -F: '$7 ~ /(bash|sh|zsh)$/ {print $1, $7}' /etc/passwd`,
           maxLines: 40,
         },
         {
-          title: 'Пустые пароли (/etc/shadow)',
+          title: aiStr(lang, 'auditTitleEmptyPasswords'),
           command: `awk -F: '$2=="" {print $1}' /etc/shadow`,
           rootOnly: true,
         },
         {
-          title: 'NOPASSWD в sudoers',
+          title: aiStr(lang, 'auditTitleNopasswd'),
           command: `grep -r NOPASSWD /etc/sudoers /etc/sudoers.d/ 2>/dev/null`,
           rootOnly: true,
         },
         {
-          title: 'Ключи root (/root/.ssh/authorized_keys)',
+          title: aiStr(lang, 'auditTitleRootKeys'),
           command: `cat /root/.ssh/authorized_keys 2>/dev/null || true`,
           rootOnly: true,
           maxLines: 40,
@@ -87,17 +93,17 @@ export function commandsForSection(section: AuditSectionId): AuditCommand[] {
     case 'network':
       return [
         {
-          title: 'Утилиты фаервола',
-          command: `command -v ufw iptables nft firewall-cmd 2>/dev/null || echo '(утилиты фаервола не найдены)'`,
+          title: aiStr(lang, 'auditTitleFirewallUtils'),
+          command: `command -v ufw iptables nft firewall-cmd 2>/dev/null || echo '${aiStr(lang, 'auditEchoNoFirewallUtils')}'`,
         },
         {
-          title: 'Открытые порты',
-          command: `ss -tuln 2>/dev/null || netstat -tuln 2>/dev/null || echo '(нет ни ss, ни netstat)'`,
-          rootCommand: `ss -tulpn 2>/dev/null || netstat -tulnp 2>/dev/null || echo '(нет ни ss, ни netstat)'`,
+          title: aiStr(lang, 'auditTitleOpenPorts'),
+          command: `ss -tuln 2>/dev/null || netstat -tuln 2>/dev/null || echo '${aiStr(lang, 'auditEchoNoSsNetstat')}'`,
+          rootCommand: `ss -tulpn 2>/dev/null || netstat -tulnp 2>/dev/null || echo '${aiStr(lang, 'auditEchoNoSsNetstat')}'`,
           maxLines: 80,
         },
         {
-          title: 'Статус фаервола (ufw/iptables)',
+          title: aiStr(lang, 'auditTitleFirewallStatus'),
           command: `ufw status 2>/dev/null; iptables -L -n 2>/dev/null | head -50; true`,
           rootOnly: true,
           maxLines: 60,
@@ -106,11 +112,11 @@ export function commandsForSection(section: AuditSectionId): AuditCommand[] {
     case 'updates':
       return [
         {
-          title: 'Пакетный менеджер',
+          title: aiStr(lang, 'auditTitlePkgManager'),
           command: `command -v apt-get dnf yum apk zypper 2>/dev/null`,
         },
         {
-          title: 'Доступные обновления',
+          title: aiStr(lang, 'auditTitleUpdates'),
           command:
             `if command -v apt-get >/dev/null 2>&1; then\n` +
             `  apt list --upgradable 2>/dev/null | head -100\n` +
@@ -121,36 +127,36 @@ export function commandsForSection(section: AuditSectionId): AuditCommand[] {
             `elif command -v apk >/dev/null 2>&1; then\n` +
             `  apk version -l '<' 2>/dev/null | head -100\n` +
             `else\n` +
-            `  echo 'неизвестный пакетный менеджер — проверка обновлений пропущена'\n` +
+            `  echo '${aiStr(lang, 'auditEchoUnknownPkgMgr')}'\n` +
             `fi`,
           maxLines: 100,
         },
         {
-          title: 'Автообновления (unattended-upgrades)',
+          title: aiStr(lang, 'auditTitleAutoUpdates'),
           command:
             `if command -v apt-get >/dev/null 2>&1; then\n` +
             `  dpkg -l unattended-upgrades 2>/dev/null | grep '^ii'\n` +
             `  ls -l /etc/apt/apt.conf.d/20auto-upgrades 2>/dev/null\n` +
             `else\n` +
-            `  echo 'не apt-система — проверка пропущена'\n` +
+            `  echo '${aiStr(lang, 'auditEchoNotApt')}'\n` +
             `fi`,
         },
       ];
     case 'activity':
       return [
         {
-          title: 'Последние входы (last)',
+          title: aiStr(lang, 'auditTitleLastLogins'),
           command: `last -n 20 2>/dev/null || true`,
           maxLines: 25,
         },
         {
-          title: 'Неудачные входы (lastb)',
-          command: `lastb -n 20 2>/dev/null || echo '(lastb недоступен)'`,
+          title: aiStr(lang, 'auditTitleFailedLogins'),
+          command: `lastb -n 20 2>/dev/null || echo '${aiStr(lang, 'auditEchoNoLastb')}'`,
           rootOnly: true,
           maxLines: 25,
         },
         {
-          title: 'Неудачные SSH-логины из журнала',
+          title: aiStr(lang, 'auditTitleFailedSsh'),
           command:
             `journalctl -u ssh -u sshd --no-pager -n 200 2>/dev/null | grep -i failed | tail -20; ` +
             `grep -i 'failed' /var/log/auth.log 2>/dev/null | tail -20; true`,
@@ -158,12 +164,12 @@ export function commandsForSection(section: AuditSectionId): AuditCommand[] {
           maxLines: 45,
         },
         {
-          title: 'Топ процессов по CPU',
+          title: aiStr(lang, 'auditTitleTopCpu'),
           command: `ps aux --sort=-%cpu | head -15`,
           maxLines: 20,
         },
         {
-          title: 'SUID-бинарники',
+          title: aiStr(lang, 'auditTitleSuid'),
           command: `find / -xdev -perm -4000 -type f 2>/dev/null | head -100`,
           maxLines: 100,
           timeoutMs: FIND_TIMEOUT_MS,
@@ -172,24 +178,24 @@ export function commandsForSection(section: AuditSectionId): AuditCommand[] {
     case 'filesystem':
       return [
         {
-          title: 'Права на ключевые файлы',
+          title: aiStr(lang, 'auditTitleKeyFilePerms'),
           command: `ls -l /etc/shadow /etc/passwd /etc/ssh/sshd_config 2>/dev/null`,
         },
         {
-          title: 'World-writable файлы в системных путях',
+          title: aiStr(lang, 'auditTitleWorldWritable'),
           command: `find /etc /usr /bin /sbin -xdev -type f -perm -0002 2>/dev/null | head -50`,
           maxLines: 50,
           timeoutMs: FIND_TIMEOUT_MS,
         },
         {
-          title: 'Cron (текущий пользователь и системный)',
+          title: aiStr(lang, 'auditTitleCron'),
           command:
             `crontab -l 2>/dev/null; echo '--- /etc/crontab:'; cat /etc/crontab 2>/dev/null; ` +
             `echo '--- /etc/cron.d:'; ls -la /etc/cron.d/ 2>/dev/null; true`,
           maxLines: 60,
         },
         {
-          title: 'Cron root',
+          title: aiStr(lang, 'auditTitleCronRoot'),
           command: `crontab -l -u root 2>/dev/null || true`,
           rootOnly: true,
           maxLines: 40,
@@ -211,27 +217,27 @@ export function sudoWrap(command: string): string {
 }
 
 /** Обрезка вывода подсекции по строкам и символам с пометкой. */
-export function limitLines(text: string, maxLines: number): string {
+export function limitLines(text: string, maxLines: number, lang: PromptLang = 'ru'): string {
   const lines = text.split('\n');
   let body =
     lines.length <= maxLines
       ? text
-      : `${lines.slice(0, maxLines).join('\n')}\n… (обрезано: показано ${maxLines} из ${lines.length} строк)`;
+      : `${lines.slice(0, maxLines).join('\n')}\n${aiStr(lang, 'auditTruncatedLines', { shown: maxLines, total: lines.length })}`;
   if (body.length > SUBSECTION_MAX_CHARS) {
-    body = `${body.slice(0, SUBSECTION_MAX_CHARS)}\n… (обрезано по объёму)`;
+    body = `${body.slice(0, SUBSECTION_MAX_CHARS)}\n${aiStr(lang, 'auditTruncatedChars')}`;
   }
   return body;
 }
 
 /** Проблемы контейнера по данным docker inspect — чистая функция. */
-export function findContainerIssues(inspectData: DockerEntity): string[] {
+export function findContainerIssues(inspectData: DockerEntity, lang: PromptLang = 'ru'): string[] {
   const issues: string[] = [];
   const hostConfig = (inspectData.HostConfig ?? {}) as Record<string, unknown>;
   if (hostConfig.Privileged === true) {
-    issues.push('privileged-режим');
+    issues.push(aiStr(lang, 'auditIssuePrivileged'));
   }
   if (hostConfig.NetworkMode === 'host') {
-    issues.push('сеть host');
+    issues.push(aiStr(lang, 'auditIssueHostNetwork'));
   }
   const sources: string[] = [];
   if (Array.isArray(hostConfig.Binds)) {
@@ -245,10 +251,10 @@ export function findContainerIssues(inspectData: DockerEntity): string[] {
     }
   }
   if (sources.some((s) => s === '/var/run/docker.sock')) {
-    issues.push('монтирует /var/run/docker.sock');
+    issues.push(aiStr(lang, 'auditIssueDockerSock'));
   }
   if (sources.some((s) => s === '/')) {
-    issues.push('монтирует корень ФС (/)');
+    issues.push(aiStr(lang, 'auditIssueRootMount'));
   }
   return issues;
 }
@@ -271,6 +277,8 @@ export interface AuditOptions {
   privileged?: boolean;
   /** sudo-пароль из сессии агента; в вывод и команды не попадает. */
   sudoPassword?: string;
+  /** Язык отчёта — язык сессии агента (дефолт ru). */
+  lang?: PromptLang;
 }
 
 export function normalizeSections(sections?: string[]): AuditSectionId[] {
@@ -284,6 +292,7 @@ export function normalizeSections(sections?: string[]): AuditSectionId[] {
 async function auditDocker(
   profile: Profile,
   deps: AuditDeps,
+  lang: PromptLang = 'ru',
 ): Promise<string[]> {
   const listFn = deps.listContainersFn ?? listContainers;
   const inspectFn = deps.inspectFn ?? inspect;
@@ -291,19 +300,19 @@ async function auditDocker(
   try {
     containers = await listFn(profile);
   } catch (err) {
-    return [`docker недоступен: ${String((err as Error).message ?? err)}`];
+    return [aiStr(lang, 'auditDockerUnavailable', { message: String((err as Error).message ?? err) })];
   }
-  if (!containers.length) return ['контейнеров нет'];
+  if (!containers.length) return [aiStr(lang, 'auditNoContainers')];
   const lines: string[] = [];
   for (const c of containers.slice(0, 25)) {
     const id = String(c.ID ?? c.ContainerID ?? '');
     const name = String(c.Names ?? id.slice(0, 12));
     try {
       const [data] = await inspectFn(profile, id);
-      const issues = data ? findContainerIssues(data) : [];
+      const issues = data ? findContainerIssues(data, lang) : [];
       lines.push(issues.length ? `${name}: ${issues.join('; ')}` : `${name}: ok`);
     } catch (err) {
-      lines.push(`${name}: не удалось выполнить inspect (${String((err as Error).message ?? err)})`);
+      lines.push(`${name}: ${aiStr(lang, 'auditInspectFailed', { message: String((err as Error).message ?? err) })}`);
     }
   }
   return lines;
@@ -322,6 +331,7 @@ export async function runSecurityAudit(
   const execFn = deps.execFn ?? exec;
   const sections = normalizeSections(opts.sections);
   const password = opts.privileged && opts.sudoPassword ? opts.sudoPassword : null;
+  const lang = opts.lang ?? 'ru';
 
   // Проверяем sudo один раз: пароль уходит в stdin, не в командную строку.
   let sudoOk = false;
@@ -336,11 +346,7 @@ export async function runSecurityAudit(
 
   const parts: string[] = [];
   if (opts.privileged && !sudoOk) {
-    parts.push(
-      password
-        ? '> Привилегированный режим запрошен, но sudo не сработал — root-проверки пропущены.'
-        : '> sudo-пароль не задан — root-проверки пропущены (мягкая деградация).',
-    );
+    parts.push(aiStr(lang, password ? 'auditSudoFailed' : 'auditSudoNotSet'));
   }
   let total = parts.join('\n').length;
   let truncated = false;
@@ -349,12 +355,12 @@ export async function runSecurityAudit(
     if (truncated) break;
     const sectionParts: string[] = [`## ${section}`];
     if (section === 'docker') {
-      sectionParts.push(...(await auditDocker(profile, deps)));
+      sectionParts.push(...(await auditDocker(profile, deps, lang)));
     } else {
-      for (const cmd of commandsForSection(section)) {
+      for (const cmd of commandsForSection(section, lang)) {
         const useSudo = sudoOk && (cmd.rootOnly || cmd.rootCommand != null);
         if (cmd.rootOnly && !sudoOk) {
-          sectionParts.push(`### ${cmd.title}\nпропущено: нет прав (нужен sudo)`);
+          sectionParts.push(`### ${cmd.title}\n${aiStr(lang, 'auditSkippedNoPerms')}`);
           continue;
         }
         const command = useSudo ? sudoWrap(cmd.rootCommand ?? cmd.command) : cmd.command;
@@ -366,20 +372,18 @@ export async function runSecurityAudit(
             stdin,
           });
           body = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
-          if (!body) body = '(пустой вывод)';
+          if (!body) body = aiStr(lang, 'emptyOutput');
           if (result.code !== 0) body += `\n(exit code: ${result.code ?? 'unknown'})`;
         } catch (err) {
-          body = `ошибка выполнения: ${String((err as Error).message ?? err)}`;
+          body = aiStr(lang, 'auditExecError', { message: String((err as Error).message ?? err) });
         }
-        sectionParts.push(`### ${cmd.title}\n${limitLines(body, cmd.maxLines ?? DEFAULT_MAX_LINES)}`);
+        sectionParts.push(`### ${cmd.title}\n${limitLines(body, cmd.maxLines ?? DEFAULT_MAX_LINES, lang)}`);
       }
     }
     const sectionText = sectionParts.join('\n');
     if (total + sectionText.length > TOTAL_LIMIT) {
       truncated = true;
-      parts.push(
-        `… (вывод обрезан по объёму: секция «${section}» и далее пропущены — запросите их отдельно через параметр sections)`,
-      );
+      parts.push(aiStr(lang, 'auditTruncatedTotal', { section }));
       break;
     }
     parts.push(sectionText);

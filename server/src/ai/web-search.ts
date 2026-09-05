@@ -1,5 +1,7 @@
 import { config } from '../config.js';
 import { getAiSettings } from '../services/settings.js';
+import { aiStr } from './strings.js';
+import type { PromptLang } from './prompts.js';
 
 // Anthropic-совместимый endpoint DeepSeek: серверный web search работает
 // только там (не в OpenAI-совместимом /chat/completions). Ключ общий с
@@ -55,6 +57,7 @@ export function sanitizeQuery(raw: unknown): string {
 export function buildSearchBody(
   query: string,
   opts: { model: string; maxUses: number },
+  lang: PromptLang = 'ru',
 ): Record<string, unknown> {
   return {
     model: opts.model,
@@ -62,9 +65,8 @@ export function buildSearchBody(
     messages: [
       {
         role: 'user',
-        content:
-          'Найди в интернете ответ на вопрос администратора Linux-сервера и изложи его кратко по-русски. ' +
-          'В конце перечисли источники (заголовок и URL). Вопрос: ' + query,
+        // Промпт сводки — на языке сессии агента (см. ai/strings.ts).
+        content: aiStr(lang, 'searchSummaryPrompt', { query }),
       },
     ],
     tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: opts.maxUses }],
@@ -134,18 +136,20 @@ export function parseSearchResponse(data: Record<string, unknown>): ParsedSearch
   return { text: textParts.join('\n\n'), queries, sources, usage };
 }
 
-/** Форматирование результатов для tool-вывода агенту. */
-export function formatSearchOutput(parsed: ParsedSearchResponse): string {
+/** Форматирование результатов для tool-вывода агенту (язык — язык сессии). */
+export function formatSearchOutput(parsed: ParsedSearchResponse, lang: PromptLang = 'ru'): string {
   const parts: string[] = [];
   if (parsed.text) parts.push(parsed.text);
-  if (parsed.queries.length) parts.push(`Запросы поиска: ${parsed.queries.join('; ')}`);
+  if (parsed.queries.length) {
+    parts.push(`${aiStr(lang, 'searchQueriesLabel')}: ${parsed.queries.join('; ')}`);
+  }
   if (parsed.sources.length) {
     const lines = parsed.sources.map(
       (s, i) => `${i + 1}. ${s.title ? `${s.title} — ` : ''}${s.url}`,
     );
-    parts.push(`Источники:\n${lines.join('\n')}`);
+    parts.push(`${aiStr(lang, 'searchSourcesLabel')}:\n${lines.join('\n')}`);
   }
-  return parts.join('\n\n') || '(поиск не дал результатов)';
+  return parts.join('\n\n') || aiStr(lang, 'searchNoResults');
 }
 
 function extractErrorMessage(data: Record<string, unknown> | null): string | null {
@@ -158,16 +162,11 @@ function extractErrorMessage(data: Record<string, unknown> | null): string | nul
  * форматирование ответа. Никогда не бросает — ошибки возвращаются текстом
  * (паттерн runTool).
  */
-export async function searchWeb(rawQuery: string): Promise<WebSearchResult> {
+export async function searchWeb(rawQuery: string, lang: PromptLang = 'ru'): Promise<WebSearchResult> {
   const query = sanitizeQuery(rawQuery);
-  if (!query) return { ok: false, output: 'Пустой поисковый запрос.' };
+  if (!query) return { ok: false, output: aiStr(lang, 'searchEmptyQuery') };
   if (!isSearchConfigured()) {
-    return {
-      ok: false,
-      output:
-        'Веб-поиск недоступен: из коробки работает только с провайдером DeepSeek (тот же ключ); ' +
-        'для остальных задайте AI_SEARCH_API_BASE в env.',
-    };
+    return { ok: false, output: aiStr(lang, 'searchUnavailable') };
   }
 
   const ai = getAiSettings();
@@ -177,7 +176,7 @@ export async function searchWeb(rawQuery: string): Promise<WebSearchResult> {
 
   const controller = new AbortController();
   const timer = setTimeout(
-    () => controller.abort(new Error('Поиск не ответил за 90 секунд (таймаут)')),
+    () => controller.abort(new Error(aiStr(lang, 'searchTimeout'))),
     SEARCH_TIMEOUT_MS,
   );
   try {
@@ -189,18 +188,18 @@ export async function searchWeb(rawQuery: string): Promise<WebSearchResult> {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify(
-        buildSearchBody(query, { model: config.ai.searchModel, maxUses: MAX_USES_PER_CALL }),
+        buildSearchBody(query, { model: config.ai.searchModel, maxUses: MAX_USES_PER_CALL }, lang),
       ),
       signal: controller.signal,
     });
     const data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
     if (!res.ok || !data || data.type === 'error') {
       const message = extractErrorMessage(data) ?? `HTTP ${res.status}`;
-      return { ok: false, output: `Ошибка поиска (API): ${message}` };
+      return { ok: false, output: aiStr(lang, 'searchApiError', { message }) };
     }
-    return { ok: true, output: formatSearchOutput(parseSearchResponse(data)) };
+    return { ok: true, output: formatSearchOutput(parseSearchResponse(data), lang) };
   } catch (err) {
-    return { ok: false, output: `Ошибка поиска: ${String((err as Error).message ?? err)}` };
+    return { ok: false, output: aiStr(lang, 'searchError', { message: String((err as Error).message ?? err) }) };
   } finally {
     clearTimeout(timer);
   }

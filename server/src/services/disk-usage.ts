@@ -2,6 +2,8 @@ import { exec, getSftp } from '../ssh/manager.js';
 import { stat as sftpStat } from '../ssh/sftp.js';
 import { shq } from '../util/shell.js';
 import { basename } from '../util/path.js';
+import { aiStr } from '../ai/strings.js';
+import type { PromptLang } from '../ai/prompts.js';
 import type { ExecResult, Profile } from '../types.js';
 
 /**
@@ -257,8 +259,10 @@ export function clampAgentLimit(value: unknown): number {
   return Math.min(AGENT_MAX_LIMIT, Math.round(n));
 }
 
-function humanSize(bytes: number): string {
-  const units = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ'];
+function humanSize(bytes: number, lang: PromptLang = 'ru'): string {
+  const units = lang === 'en'
+    ? ['B', 'KB', 'MB', 'GB', 'TB']
+    : ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ'];
   let v = bytes;
   let i = 0;
   while (v >= 1024 && i < units.length - 1) {
@@ -268,37 +272,38 @@ function humanSize(bytes: number): string {
   return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
-/** Текстовый отчёт для инструмента агента disk_usage. */
+/** Текстовый отчёт для инструмента агента disk_usage (язык — язык сессии агента). */
 export function formatAgentDiskUsage(
   path: string,
   snapshot: DiskUsageSnapshot,
   files: DiskUsageFile[],
   limit: number,
   filesNote?: string,
+  lang: PromptLang = 'ru',
 ): string {
   const lines: string[] = [];
-  lines.push(`Размер ${path}: ${snapshot.totalBytes} Б (${humanSize(snapshot.totalBytes)})`);
-  lines.push('Крупнейшие подкаталоги:');
+  lines.push(aiStr(lang, 'duSize', { path, bytes: snapshot.totalBytes, human: humanSize(snapshot.totalBytes, lang) }));
+  lines.push(aiStr(lang, 'duLargestDirs'));
   if (snapshot.children.length === 0) {
-    lines.push('  (подкаталогов нет)');
+    lines.push(`  ${aiStr(lang, 'duNoSubdirs')}`);
   }
   for (const [i, c] of snapshot.children.slice(0, limit).entries()) {
-    lines.push(`  ${i + 1}. ${c.name} — ${c.bytes} Б (${c.pctOfParent}%)`);
+    lines.push(`  ${i + 1}. ${c.name} — ${aiStr(lang, 'duBytes', { bytes: c.bytes })} (${c.pctOfParent}%)`);
   }
-  lines.push('Крупнейшие файлы:');
+  lines.push(aiStr(lang, 'duLargestFiles'));
   if (filesNote) {
     lines.push(`  ${filesNote}`);
   } else if (files.length === 0) {
-    lines.push('  (файлов нет)');
+    lines.push(`  ${aiStr(lang, 'duNoFiles')}`);
   }
   for (const [i, f] of files.slice(0, limit).entries()) {
-    lines.push(`  ${i + 1}. ${f.path} — ${f.bytes} Б`);
+    lines.push(`  ${i + 1}. ${f.path} — ${aiStr(lang, 'duBytes', { bytes: f.bytes })}`);
   }
   if (snapshot.incomplete) {
-    lines.push(`(недоступно: ${snapshot.incomplete.unreadable} каталогов — нужны права доступа)`);
+    lines.push(aiStr(lang, 'duUnreadable', { n: snapshot.incomplete.unreadable }));
   }
   if (snapshot.truncated) {
-    lines.push('(вывод du обрезан — сумма неполная)');
+    lines.push(aiStr(lang, 'duTruncatedTotal'));
   }
   return lines.join('\n');
 }

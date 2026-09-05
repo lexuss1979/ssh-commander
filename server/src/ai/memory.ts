@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { memoryPromptHeader, type PromptLang } from './prompts.js';
+import { aiStr } from './strings.js';
 
 /**
  * Per-profile agent memory: a MEMORY.md file stored in DATA_DIR/memory.
@@ -28,7 +29,7 @@ export function memoryPath(profileId: string): string {
  * Oversized files are truncated with a note, so a rogue huge file cannot
  * blow up the model context.
  */
-export function readMemory(profileId: string): string | null {
+export function readMemory(profileId: string, lang: PromptLang = 'ru'): string | null {
   const file = memoryPath(profileId);
   let content: string;
   try {
@@ -40,7 +41,7 @@ export function readMemory(profileId: string): string | null {
     return content;
   }
   const head = Buffer.from(content, 'utf8').subarray(0, MAX_MEMORY_BYTES).toString('utf8');
-  return `${head}\n\n… (MEMORY.md больше ${MAX_MEMORY_BYTES} байт, показано начало)`;
+  return `${head}\n\n${aiStr(lang, 'memoryTruncated', { max: MAX_MEMORY_BYTES })}`;
 }
 
 /**
@@ -48,12 +49,10 @@ export function readMemory(profileId: string): string | null {
  * profiles/dialogues stores). Callers must pass the full new content, keeping
  * existing notes — that contract is enforced at the prompt/tool level.
  */
-export function writeMemory(profileId: string, content: string): { path: string; bytes: number } {
+export function writeMemory(profileId: string, content: string, lang: PromptLang = 'ru'): { path: string; bytes: number } {
   const bytes = Buffer.byteLength(content, 'utf8');
   if (bytes > MAX_MEMORY_BYTES) {
-    throw new Error(
-      `MEMORY.md слишком большой: ${bytes} байт, лимит ${MAX_MEMORY_BYTES} байт. Сократи заметки.`,
-    );
+    throw new Error(aiStr(lang, 'memoryTooLarge', { bytes, max: MAX_MEMORY_BYTES }));
   }
   const file = memoryPath(profileId);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -70,7 +69,7 @@ export function writeMemory(profileId: string, content: string): { path: string;
  * passed from the client over the agent WebSocket).
  */
 export function memoryPromptBlock(profileId: string, lang: PromptLang = 'ru'): string | null {
-  const content = readMemory(profileId);
+  const content = readMemory(profileId, lang);
   if (content === null) {
     return null;
   }
