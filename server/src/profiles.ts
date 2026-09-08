@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import { config } from './config.js';
+import { assertKeyPathAllowed } from './services/keys.js';
 import type { Profile } from './types.js';
 
 export const profileInputSchema = z.object({
@@ -63,7 +64,8 @@ function persist(list: Profile[]): void {
   }
   fs.mkdirSync(config.dataDir, { recursive: true });
   const tmp = `${storePath()}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ profiles: list }, null, 2));
+  // 0600: файл хранит SSH-пароли и passphrase открытым текстом.
+  fs.writeFileSync(tmp, JSON.stringify({ profiles: list }, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, storePath());
   cache = list.map((p) => ({ ...p }));
 }
@@ -75,6 +77,27 @@ function assertSecret(data: Pick<Profile, 'authType'> & Partial<Pick<Profile, 'k
   if (data.authType === 'password' && !data.password) {
     throw new Error('password is required for password auth');
   }
+  // Ключ — только из KEYS_DIR (services/keys.ts): профиль не должен уметь
+  // читать произвольный файл на хосте приложения.
+  if (data.keyPath) {
+    assertKeyPathAllowed(data.keyPath);
+  }
+}
+
+/**
+ * Профиль без секретов — форма ответа API. Пароль и passphrase наружу не
+ * отдаются: клиенту достаточно знать, что секрет задан (пустое поле формы =
+ * «не менять», сервер и так сохраняет прежнее значение). Паттерн — как у
+ * `toSafeDbConnection` в services/db-connections.ts.
+ */
+export type SafeProfile = Omit<Profile, 'password' | 'keyPassphrase'> & {
+  hasPassword: boolean;
+  hasKeyPassphrase: boolean;
+};
+
+export function toSafeProfile(profile: Profile): SafeProfile {
+  const { password, keyPassphrase, ...rest } = profile;
+  return { ...rest, hasPassword: Boolean(password), hasKeyPassphrase: Boolean(keyPassphrase) };
 }
 
 /**

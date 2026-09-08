@@ -36,6 +36,8 @@ WORKDIR /app
 COPY --from=web-builder /app/web/dist ./web/dist
 COPY --from=server-builder /app/server/dist ./dist
 COPY --from=server-deps /app/server/node_modules ./node_modules
-ENV DATA_DIR=/data KEYS_DIR=/keys WEB_DIST=/app/web/dist
+# APP_HOST=0.0.0.0 нужен только внутри контейнера: наружу порт публикуется
+# как 127.0.0.1:8080 (docker-compose.yml). Дефолт приложения — 127.0.0.1.
+ENV DATA_DIR=/data KEYS_DIR=/keys WEB_DIST=/app/web/dist APP_HOST=0.0.0.0
 EXPOSE 8080
 CMD ["node", "dist/index.js"]

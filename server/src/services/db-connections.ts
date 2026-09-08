@@ -142,7 +142,8 @@ function persist(list: DbConnection[]): void {
   }
   fs.mkdirSync(config.dataDir, { recursive: true });
   const tmp = `${storePath()}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ connections: list }, null, 2));
+  // 0600: файл хранит пароли подключений к БД открытым текстом.
+  fs.writeFileSync(tmp, JSON.stringify({ connections: list }, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, storePath());
   cache = list;
 }

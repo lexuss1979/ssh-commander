@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import { StringDecoder } from 'node:string_decoder';
 import { Client, ClientChannel, SFTPWrapper } from 'ssh2';
+import { checkHostKey, hostKeyMismatchMessage, type HostKeyCheck } from '../services/known-hosts.js';
+import { assertKeyPathAllowed } from '../services/keys.js';
 import type { ExecResult, Profile } from '../types.js';
 
 interface Connection {
@@ -18,7 +20,17 @@ function connKey(profileId: string): string {
   return profileId;
 }
 
-function connectOptions(profile: Profile) {
+/**
+ * Причина отказа, выставленная `hostVerifier`. Колбэк умеет только вернуть
+ * `false` — ssh2 после этого сообщает лишь общий «handshake failed», поэтому
+ * человеческий текст кладём в этот holder и подменяем им ошибку промиса.
+ */
+interface HostKeyRejection {
+  message?: string;
+  check?: HostKeyCheck;
+}
+
+function connectOptions(profile: Profile, rejection: HostKeyRejection = {}) {
   const opts: Record<string, unknown> = {
     host: profile.host,
     port: profile.port,
@@ -26,9 +38,23 @@ function connectOptions(profile: Profile) {
     readyTimeout: 15000,
     keepaliveInterval: 30000,
     keepaliveCountMax: 3,
+    // Без этого колбэка ssh2 принимает любой ключ хоста: подмена DNS или
+    // маршрута отдаёт пароль профиля чужому серверу молча (TOFU — известные
+    // отпечатки в data/known-hosts.json).
+    hostVerifier: (key: Buffer) => {
+      const check = checkHostKey(profile.host, profile.port, key);
+      rejection.check = check;
+      if (check.status === 'mismatch') {
+        rejection.message = hostKeyMismatchMessage(profile.host, profile.port, check);
+        return false;
+      }
+      return true;
+    },
   };
   if (profile.authType === 'key' && profile.keyPath) {
-    opts.privateKey = fs.readFileSync(profile.keyPath);
+    // Путь к ключу — только внутри KEYS_DIR: иначе профиль превращается в
+    // чтение произвольного файла на хосте приложения (экспорт это уже требует).
+    opts.privateKey = fs.readFileSync(assertKeyPathAllowed(profile.keyPath));
     if (profile.keyPassphrase) {
       opts.passphrase = profile.keyPassphrase;
     }
@@ -60,6 +86,7 @@ export async function getClient(profile: Profile): Promise<Client> {
 function connect(key: string, profile: Profile): Promise<Connection> {
   const client = new Client();
   const conn: Connection = { client, profileId: profile.id, sftpPromise: null };
+  const rejection: HostKeyRejection = {};
 
   // Handlers are attached before connect(): on failure the client is closed
   // and never lands in `connections`; on success `close` drops the cached
@@ -84,9 +111,9 @@ function connect(key: string, profile: Profile): Promise<Connection> {
       } catch {
         /* noop */
       }
-      reject(new Error(`SSH error: ${err.message}`));
+      reject(new Error(rejection.message ?? `SSH error: ${err.message}`));
     });
-    client.connect(connectOptions(profile));
+    client.connect(connectOptions(profile, rejection));
   });
 }
 
@@ -347,9 +374,19 @@ export function closeProfileConnection(profileId: string): void {
  * and closes it right away. Resolves with the server banner (may be empty),
  * rejects with the ssh2 error (auth failure, timeout, unreadable key, ...).
  */
-export function testConnection(profile: Profile): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
+export interface TestConnectionResult {
+  banner: string;
+  /** Отпечаток ключа хоста (`SHA256:…`) — пользователю есть что сверить. */
+  fingerprint?: string;
+  algo?: string;
+  /** `new` — хост увиден впервые и только что запомнен. */
+  hostKeyStatus?: HostKeyCheck['status'];
+}
+
+export function testConnection(profile: Profile): Promise<TestConnectionResult> {
+  return new Promise<TestConnectionResult>((resolve, reject) => {
     const client = new Client();
+    const rejection: HostKeyRejection = {};
     let banner = '';
     let settled = false;
     const done = (err?: Error): void => {
@@ -360,8 +397,16 @@ export function testConnection(profile: Profile): Promise<string> {
       } catch {
         /* already closed */
       }
-      if (err) reject(err);
-      else resolve(banner);
+      if (err) {
+        reject(rejection.message ? new Error(rejection.message) : err);
+      } else {
+        resolve({
+          banner,
+          fingerprint: rejection.check?.fingerprint,
+          algo: rejection.check?.algo,
+          hostKeyStatus: rejection.check?.status,
+        });
+      }
     };
     client.on('banner', (msg: string) => {
       banner = msg;
@@ -370,7 +415,7 @@ export function testConnection(profile: Profile): Promise<string> {
     client.once('error', (err) => done(err));
     try {
       // Shorter timeout than for cached connections: the user is waiting.
-      client.connect({ ...connectOptions(profile), readyTimeout: 10000 });
+      client.connect({ ...connectOptions(profile, rejection), readyTimeout: 10000 });
     } catch (err) {
       // connectOptions throws synchronously, e.g. unreadable key file.
       done(err as Error);

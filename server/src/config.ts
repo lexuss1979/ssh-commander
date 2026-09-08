@@ -39,7 +39,11 @@ function float(name: string, def: number): number {
 }
 
 export const config = {
-  host: process.env.APP_HOST || '0.0.0.0',
+  // Дефолт — петлевой адрес: инструмент однопользовательский и без TLS, а
+  // «слушает только 127.0.0.1» раньше обеспечивал лишь маппинг портов в
+  // docker-compose. Внутри контейнера нужен 0.0.0.0 (иначе публикация порта
+  // не работает) — он задан переменной в Dockerfile.
+  host: process.env.APP_HOST || '127.0.0.1',
   port: int('APP_PORT', 8080),
   dataDir: process.env.DATA_DIR || path.resolve('data'),
   keysDir: resolveDir('KEYS_DIR', 'keys'),
@@ -70,5 +74,46 @@ export const config = {
 export function ensureDirs(): void {
   for (const dir of [config.dataDir, config.keysDir]) {
     fs.mkdirSync(dir, { recursive: true });
+  }
+  hardenDataPermissions();
+}
+
+/**
+ * Права 0600 на файлы данных при старте.
+ *
+ * Сторы теперь пишутся с явным mode, но файлы, созданные прежними версиями,
+ * остались с 0644 — их не исправит ни одна будущая запись, если содержимое не
+ * менялось. В них лежат SSH-пароли, пароли БД и выдержки с серверов.
+ * Ошибки игнорируются: на некоторых ФС (bind-монты Windows) chmod бессмысленен,
+ * и это не повод не стартовать.
+ */
+function hardenDataPermissions(): void {
+  const targets: string[] = [];
+  const walk = (dir: string, depth: number): void => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (depth > 0) walk(full, depth - 1);
+      } else if (entry.isFile()) {
+        targets.push(full);
+      }
+    }
+  };
+  // data/ целиком (включая memory/<profileId>/MEMORY.md) и каталог ключей.
+  walk(config.dataDir, 2);
+  walk(config.keysDir, 0);
+  for (const file of targets) {
+    try {
+      const { mode } = fs.statSync(file);
+      if ((mode & 0o077) !== 0) fs.chmodSync(file, 0o600);
+    } catch {
+      /* файл мог исчезнуть или ФС не поддерживает права */
+    }
   }
 }

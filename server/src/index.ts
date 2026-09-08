@@ -33,6 +33,7 @@ import { nginxRouter } from './routes/nginx.js';
 import { requireProfile } from './profiles.js';
 import { attachTerminal } from './ws/terminal.js';
 import { handleAgentWs, parseAgentLang } from './ws/agent.js';
+import { isAllowedOrigin, isLoopbackHostname } from './util/origin.js';
 
 ensureDirs();
 // Seed из env при первом старте (docs/settings-model-plan.md): settings.json
@@ -43,6 +44,19 @@ seedSettingsFromEnv();
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
+
+/**
+ * Кросс-сайтовые запросы отсекаются по `Origin` (util/origin.ts) до любого
+ * роутера: до этого единственной защитой был `sameSite: 'lax'` на cookie.
+ * Health намеренно остаётся открытым — им пользуются healthcheck'и.
+ */
+app.use('/api', (req, res, next) => {
+  if (isAllowedOrigin(req.headers.origin)) {
+    next();
+    return;
+  }
+  res.status(403).json({ error: 'Запрос с постороннего источника отклонён' });
+});
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
@@ -106,14 +120,18 @@ if (fs.existsSync(config.webDist)) {
   });
 }
 
+// Необработанная ошибка: полный текст — в лог, наружу общий ответ. Сообщения
+// Node содержат пути внутри контейнера и детали реализации; роуты со своими
+// осмысленными текстами сюда не доходят — они отвечают сами.
 app.use(
   (
     err: Error,
-    _req: express.Request,
+    req: express.Request,
     res: express.Response,
     _next: express.NextFunction,
   ) => {
-    res.status(500).json({ error: err.message });
+    console.error(`Unhandled error on ${req.method} ${req.path}:`, err);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   },
 );
 
@@ -122,6 +140,13 @@ const wss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+  // Тот же гейт, что у /api: WS-рукопожатие с чужой страницы — это готовый
+  // терминал на серверах пользователя.
+  if (!isAllowedOrigin(req.headers.origin)) {
+    socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+    socket.destroy();
+    return;
+  }
   const token = readCookie(req.headers.cookie, SESSION_COOKIE);
   if (!token || !hasSession(token)) {
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
@@ -161,6 +186,13 @@ server.on('upgrade', (req, socket, head) => {
 
 server.listen(config.port, config.host, () => {
   console.log(`ssh-commander listening on http://${config.host}:${config.port}`);
+  if (!isLoopbackHostname(config.host)) {
+    console.warn(
+      `WARNING: APP_HOST=${config.host} — the app is reachable from the network. ` +
+        'It is a single-user local tool without TLS: one password guards SSH access to every server. ' +
+        'Use 127.0.0.1 unless the port is deliberately published (Docker publishes it as 127.0.0.1:8080).',
+    );
+  }
   if (!getAiSettings().apiKey) {
     console.warn(
       'AI key is not configured (data/settings.json) — AI agent will be unavailable until set.',

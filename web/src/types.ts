@@ -13,8 +13,10 @@ export interface Profile {
   username: string;
   authType: 'key' | 'password';
   keyPath?: string;
-  keyPassphrase?: string;
-  password?: string;
+  /** Секреты наружу не отдаются (server: toSafeProfile) — только факт «задан».
+   * Пустое поле формы при правке = «не менять». */
+  hasPassword?: boolean;
+  hasKeyPassphrase?: boolean;
   dockerCommand?: string;
   note?: string;
   /** Закреплённые пути логов для быстрого доступа в FilesPage (эпик 14). */

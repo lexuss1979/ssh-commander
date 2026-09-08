@@ -153,7 +153,9 @@ describe('profile transfer', () => {
   it('does not embed keys outside the keys directory', () => {
     const outside = path.join(dataDir, 'outside-key');
     fs.writeFileSync(outside, OPENSSH_KEY);
-    profiles.createProfile(baseInput({ authType: 'key', keyPath: outside, password: undefined }));
+    // createProfile такой путь уже не примет (keyPath ограничен KEYS_DIR),
+    // но профиль мог остаться от прежней версии — экспорт обязан его пропустить.
+    profiles.importProfile(baseInput({ authType: 'key', keyPath: outside, password: undefined }));
     const backup = JSON.parse(buildExport({ includeSecrets: true }));
     expect(backup.keys).toEqual([]);
   });

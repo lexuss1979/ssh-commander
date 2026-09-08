@@ -84,7 +84,8 @@ function persist(list: Snippet[]): void {
   }
   fs.mkdirSync(config.dataDir, { recursive: true });
   const tmp = `${storePath()}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ snippets: list }, null, 2));
+  // 0600: в сохранённых командах бывают секреты (риск уровня терминала).
+  fs.writeFileSync(tmp, JSON.stringify({ snippets: list }, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, storePath());
   cache = list;
 }

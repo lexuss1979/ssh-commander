@@ -85,7 +85,7 @@ Environment variables are set via `.env` (template: `.env.example`); inside the 
 
 | Variable | Default | Description |
 |---|---|---|
-| `APP_PORT` / `APP_HOST` | `8080` / `0.0.0.0` | HTTP/WS port and bind address |
+| `APP_PORT` / `APP_HOST` | `8080` / `127.0.0.1` | HTTP/WS port and bind address. The default is loopback; the Docker image sets `0.0.0.0` internally so the published port works. A non-loopback address prints a warning at startup |
 | `APP_PASSWORD` | empty | Password for the web UI. **Seed only, first start**: hashed into `data/settings.json`; empty — set via onboarding. Afterwards env is ignored (Settings page / file + restart) |
 | `DATA_DIR` | `/data` (docker) | Directory with `settings.json`, `profiles.json`, `db-connections.json`, `ai-dialogues.json`, `memory/`, … |
 | `KEYS_DIR` | `/keys` (docker) | Directory with SSH keys |
@@ -101,14 +101,17 @@ Environment variables are set via `.env` (template: `.env.example`); inside the 
 
 ### Data storage
 
-Server profiles live in `data/profiles.json` (volume `./data`), DB connections in `data/db-connections.json`, saved snippets in `data/snippets.json`, agent dialogues in `data/ai-dialogues.json`, the AI usage/cost journal in `data/ai-usage.json`, and agent memory in `data/memory/<profileId>/MEMORY.md`. App configuration (web password hash, AI provider/key/base/model) lives in `data/settings.json` — the single source of truth at runtime. SSH keys are mounted from `./keys` into `/keys` inside the container.
+Server profiles live in `data/profiles.json` (volume `./data`), DB connections in `data/db-connections.json`, saved snippets in `data/snippets.json`, agent dialogues in `data/ai-dialogues.json`, the AI usage/cost journal in `data/ai-usage.json`, and agent memory in `data/memory/<profileId>/MEMORY.md`. App configuration (web password hash, AI provider/key/base/model) lives in `data/settings.json` — the single source of truth at runtime. SSH keys are mounted from `./keys` into `/keys` inside the container, and a profile's key path must stay inside that directory. Host key fingerprints live in `data/known-hosts.json`. Every file under `data/` is written with `0600`, and startup fixes the permissions of files left by older versions.
 
 ## Security
 
 **Read this before exposing anything.**
 
-- The recommended deployment (`docker compose`) publishes the app **only to `127.0.0.1`** — it is not reachable from the network. Don't change the port mapping or `APP_HOST` unless you understand the risk: this tool is not built to be exposed.
-- It is a **single-user local tool**: SSH passwords and key passphrases are stored **in plain text** in `data/profiles.json`; database passwords likewise in `data/db-connections.json`. Never publish the `data/` volume and never expose the container beyond localhost.
+- The app binds **`127.0.0.1` by default** and `docker compose` publishes it only there — it is not reachable from the network. Don't change the port mapping or `APP_HOST` unless you understand the risk: this tool is not built to be exposed.
+- SSH host keys are verified on the **trust-on-first-use** model, like `ssh(1)`: the first key is remembered in `data/known-hosts.json`, and a changed key aborts the connection instead of handing your password to whoever answered.
+- Requests from another origin are rejected on both the API and the WebSocket handshake, so a page in another tab cannot drive your terminal.
+- It is a **single-user local tool**: SSH passwords and key passphrases are stored **in plain text** in `data/profiles.json`; database passwords likewise in `data/db-connections.json`. Never publish the `data/` volume and never expose the container beyond localhost. The API never sends those secrets back to the browser — a saved secret shows as “set”, and an empty field means “keep it”.
+- A profile backup contains your SSH passwords and the private keys themselves, so exporting with secrets **requires an encryption passphrase**; without one you get a backup without secrets.
 - SSH tunnels open an **unauthenticated listener** on `127.0.0.1:<port>` — any local process or user can reach the forwarded service without the app password (the same trust model as a local terminal).
 - The AI agent **never executes mutating actions without your approval**; auto-run read-only commands pass a conservative **allow-list** (reading utilities only — no interpreters, no network clients). Reading a file that looks like a secret store (`.env`, private keys, `.pgpass`) asks for approval too.
 - Secret values are **stripped from tool output** before it reaches the model, the UI or `data/ai-dialogues.json`: PEM private keys, `NAME=value` pairs with a telling name, known token shapes, passwords in URLs, and every `Env` value in `docker inspect`. The same filter runs on `write_memory`, so the agent's memory cannot store secrets — enforced in code, not only asked for in the prompt. Redaction is pattern-based: treat it as a safety net, not a guarantee.

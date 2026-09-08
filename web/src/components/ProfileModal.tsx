@@ -129,6 +129,16 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
     void loadKeys();
   }, []);
 
+  // Профиль в правке: по нему видно, есть ли уже сохранённый секрет —
+  // тогда пустое поле означает «не менять», а не ошибку валидации.
+  const editingProfile = editingId ? profiles.find((p) => p.id === editingId) : undefined;
+  const keepsPassword = Boolean(
+    editingProfile && editingProfile.authType === 'password' && editingProfile.hasPassword,
+  );
+  const keepsPassphrase = Boolean(
+    editingProfile && editingProfile.authType === 'key' && editingProfile.hasKeyPassphrase,
+  );
+
   const startEdit = (p: Profile) => {
     setEditingId(p.id);
     setMode('form');
@@ -140,8 +150,9 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
       username: p.username,
       authType: p.authType,
       keyPath: p.keyPath ?? '',
-      keyPassphrase: p.keyPassphrase ?? '',
-      password: p.password ?? '',
+      // Секреты сервер не отдаёт: поля остаются пустыми, пустое = «не менять».
+      keyPassphrase: '',
+      password: '',
       dockerCommand: p.dockerCommand ?? 'docker',
       note: p.note ?? '',
     });
@@ -191,7 +202,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
       showError(t('profileModal.errorKeyPath'));
       return null;
     }
-    if (form.authType === 'password' && !form.password) {
+    if (form.authType === 'password' && !form.password && !keepsPassword) {
       showError(t('profileModal.errorPassword'));
       return null;
     }
@@ -204,7 +215,8 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
       keyPath: form.authType === 'key' ? form.keyPath : undefined,
       // Пустое поле passphrase = «не менять» при редактировании / «без passphrase» при создании.
       keyPassphrase: form.authType === 'key' ? form.keyPassphrase || undefined : undefined,
-      password: form.authType === 'password' ? form.password : undefined,
+      // Пустой пароль при правке = «не менять»: сервер оставит сохранённый.
+      password: form.authType === 'password' ? form.password || undefined : undefined,
       dockerCommand: form.dockerCommand || 'docker',
       note: form.note || undefined,
     };
@@ -217,11 +229,20 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
     if (!payload) return;
     setTestResult({ phase: 'testing' });
     try {
-      const res = await api<{ ok: boolean; banner: string }>('/api/profiles/test-connection', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      setTestResult({ phase: 'ok', banner: res.banner ?? '' });
+      const res = await api<{ ok: boolean; banner: string; fingerprint?: string; hostKeyStatus?: string }>(
+        '/api/profiles/test-connection',
+        {
+          method: 'POST',
+          // savedId — чтобы сервер подставил сохранённый секрет: в форме его нет.
+          body: JSON.stringify(editingId ? { ...payload, savedId: editingId } : payload),
+        },
+      );
+      const fingerprint = res.fingerprint
+        ? t(res.hostKeyStatus === 'new' ? 'profileModal.hostKeyNew' : 'profileModal.hostKeyKnown', {
+            fingerprint: res.fingerprint,
+          })
+        : '';
+      setTestResult({ phase: 'ok', banner: [res.banner, fingerprint].filter(Boolean).join('\n') });
     } catch (err) {
       setTestResult({ phase: 'error', message: (err as Error).message });
     }
@@ -464,7 +485,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
                     type="password"
                     value={form.keyPassphrase}
                     onChange={(e) => set('keyPassphrase', e.target.value)}
-                    placeholder="••••••••"
+                    placeholder={keepsPassphrase ? t('profileModal.secretKeep') : '••••••••'}
                   />
                 </label>
               </>
@@ -475,7 +496,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
                   type="password"
                   value={form.password}
                   onChange={(e) => set('password', e.target.value)}
-                  placeholder="••••••••"
+                  placeholder={keepsPassword ? t('profileModal.secretKeep') : '••••••••'}
                 />
               </label>
             )}

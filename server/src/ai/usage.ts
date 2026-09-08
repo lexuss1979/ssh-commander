@@ -123,7 +123,7 @@ function persist(list: UsageRecord[]): void {
   }
   fs.mkdirSync(config.dataDir, { recursive: true });
   const tmp = `${storePath()}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ usage: list }, null, 2));
+  fs.writeFileSync(tmp, JSON.stringify({ usage: list }, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, storePath());
   cache = list.map((r) => ({ ...r }));
 }

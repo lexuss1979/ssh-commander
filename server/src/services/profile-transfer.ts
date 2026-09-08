@@ -242,10 +242,13 @@ export function importBackup(raw: string, passphrase?: string): ImportSummary {
 
   const existingNames = new Set(listProfiles().map((p) => p.name));
   for (const data of profiles) {
-    // Перепривязываем ключ к пути в KEYS_DIR текущей установки.
+    // Перепривязываем ключ к пути в KEYS_DIR текущей установки — всегда, а не
+    // только для вложенных в бэкап ключей: путь из чужой установки (например
+    // /keys/... из Docker в локальный запуск) не пройдёт проверку keyPath.
+    // Файла может не оказаться — ниже это попадёт в needSecrets, как и раньше.
     if (data.keyPath) {
       const mapped = keyPaths.get(path.basename(data.keyPath));
-      if (mapped) data.keyPath = mapped;
+      data.keyPath = mapped ?? path.join(config.keysDir, sanitizeKeyFileName(path.basename(data.keyPath)));
     }
     let name = data.name;
     for (let n = 2; existingNames.has(name); n += 1) {

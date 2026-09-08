@@ -3,8 +3,10 @@ import { z } from 'zod';
 import {
   createProfile,
   deleteProfile,
+  getProfile,
   listProfiles,
   parseProfileInput,
+  toSafeProfile,
   updateProfile,
   updateProfileLogPaths,
 } from '../profiles.js';
@@ -16,8 +18,14 @@ import { closeProfileConnection, testConnection } from '../ssh/manager.js';
 
 export const profilesRouter = Router();
 
+/**
+ * Список профилей **без секретов** (`toSafeProfile`): пароль SSH и passphrase
+ * наружу не отдаются — раньше они уезжали в браузер на каждой загрузке списка
+ * и подставлялись в форму. Клиенту хватает `hasPassword`/`hasKeyPassphrase`:
+ * пустое поле формы означает «не менять», сервер сохраняет прежнее значение.
+ */
 profilesRouter.get('/', (_req, res) => {
-  res.json(listProfiles());
+  res.json(listProfiles().map(toSafeProfile));
 });
 
 /**
@@ -28,9 +36,22 @@ profilesRouter.get('/', (_req, res) => {
  */
 profilesRouter.post('/test-connection', async (req, res) => {
   try {
-    const data = parseProfileInput(req.body);
-    const banner = await testConnection({ ...data, id: 'probe' });
-    res.json({ ok: true, banner });
+    // Секрет в форму больше не подставляется (toSafeProfile), поэтому при
+    // проверке сохранённого профиля он берётся из стора по savedId — тот же
+    // приём, что у подключений БД (routes/db.ts).
+    const body = { ...(req.body as Record<string, unknown>) };
+    const savedId = typeof body.savedId === 'string' ? body.savedId : '';
+    const saved = savedId ? getProfile(savedId) : undefined;
+    if (saved) {
+      if (!body.password) body.password = saved.password;
+      if (!body.keyPassphrase) body.keyPassphrase = saved.keyPassphrase;
+      if (!body.keyPath) body.keyPath = saved.keyPath;
+    }
+    const data = parseProfileInput(body);
+    const result = await testConnection({ ...data, id: 'probe' });
+    // Отпечаток ключа хоста: пользователю есть что сверить с `ssh-keyscan`,
+    // а при первом подключении — увидеть, что именно запомнено (TOFU).
+    res.json({ ok: true, ...result });
   } catch (err) {
     const message =
       err instanceof z.ZodError
@@ -58,10 +79,18 @@ profilesRouter.post('/:id/reconnect', (req, res) => {
  */
 profilesRouter.post('/export', (req, res) => {
   try {
-    const includeSecrets = req.body?.includeSecrets !== false;
+    // Секреты — только по явному запросу и только в шифрованном файле:
+    // дефолт «включить» + необязательный пароль давал открытый файл с паролями
+    // SSH и содержимым приватных ключей на пустом теле запроса.
+    const includeSecrets = req.body?.includeSecrets === true;
     const passphrase = typeof req.body?.passphrase === 'string' && req.body.passphrase
       ? req.body.passphrase
       : undefined;
+    if (includeSecrets && !passphrase) {
+      throw new ProfileTransferError(
+        'Экспорт с секретами требует пароль шифрования: без него файл содержал бы пароли SSH и приватные ключи открытым текстом',
+      );
+    }
     const body = buildExport({ includeSecrets, passphrase });
     res.setHeader('content-disposition', 'attachment; filename="ssh-commander-profiles.json"');
     res.type('application/json').send(body);
@@ -112,7 +141,7 @@ const bootstrapInputSchema = z.object({
 profilesRouter.post('/bootstrap', async (req, res) => {
   try {
     const result = await bootstrapServer(bootstrapInputSchema.parse(req.body));
-    res.status(201).json(result);
+    res.status(201).json({ ...result, profile: toSafeProfile(result.profile) });
   } catch (err) {
     if (err instanceof z.ZodError) {
       res.status(400).json({ error: err.issues.map((issue) => issue.message).join('; ') });
@@ -126,7 +155,7 @@ profilesRouter.post('/bootstrap', async (req, res) => {
 
 profilesRouter.post('/', (req, res) => {
   try {
-    res.status(201).json(createProfile(req.body));
+    res.status(201).json(toSafeProfile(createProfile(req.body)));
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
   }
@@ -135,7 +164,7 @@ profilesRouter.post('/', (req, res) => {
 profilesRouter.put('/:id', (req, res) => {
   try {
     closeProfileConnection(req.params.id);
-    res.json(updateProfile(req.params.id, req.body));
+    res.json(toSafeProfile(updateProfile(req.params.id, req.body)));
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
   }
@@ -156,7 +185,7 @@ profilesRouter.put('/:id/log-paths', (req, res) => {
       res.status(400).json({ error: 'paths должен быть массивом строк (до 50)' });
       return;
     }
-    res.json(updateProfileLogPaths(req.params.id, parsed.data.paths));
+    res.json(toSafeProfile(updateProfileLogPaths(req.params.id, parsed.data.paths)));
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
   }

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { config } from '../config.js';
 
 /** Приватные ключи маленькие; больше — почти наверняка мусор. */
 export const MAX_KEY_BYTES = 64 * 1024;
@@ -44,6 +45,25 @@ export function sanitizeKeyFileName(name: string): string {
     throw new KeyImportError('В имени файла допустимы только латиница, цифры и символы . _ -');
   }
   return trimmed;
+}
+
+/**
+ * Путь к ключу профиля обязан лежать внутри каталога ключей.
+ *
+ * Иначе `keyPath` — это чтение произвольного файла на хосте приложения силами
+ * SSH-клиента: экспорт бэкапа такую проверку делал давно (`profile-transfer.ts`),
+ * подключение — нет. Возвращает нормализованный путь, его и открывают.
+ */
+export function assertKeyPathAllowed(keyPath: string, keysDir: string = config.keysDir): string {
+  const dir = path.resolve(keysDir);
+  const resolved = path.resolve(keyPath);
+  if (resolved !== dir && !resolved.startsWith(dir + path.sep)) {
+    throw new KeyImportError(
+      `Путь к ключу должен быть внутри каталога ключей (${dir}): ${keyPath}. ` +
+        'Импортируйте ключ через форму сервера — он сохранится туда с правами 0600.',
+    );
+  }
+  return resolved;
 }
 
 /** Проверяет, что содержимое похоже на приватный ключ (PEM/OpenSSH). */

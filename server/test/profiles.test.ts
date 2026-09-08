@@ -5,11 +5,17 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 const dataDir = mkdtempSync(path.join(tmpdir(), 'sc-profiles-'));
 process.env.DATA_DIR = dataDir;
+// Путь к ключу проверяется на принадлежность KEYS_DIR (services/keys.ts),
+// поэтому у теста свой каталог ключей.
+const keysDir = mkdtempSync(path.join(tmpdir(), 'sc-profiles-keys-'));
+process.env.KEYS_DIR = keysDir;
+const KEY_PATH = path.join(keysDir, 'id_rsa');
 
 const profiles = await import('../src/profiles.js');
 
 afterAll(() => {
   rmSync(dataDir, { recursive: true, force: true });
+  rmSync(keysDir, { recursive: true, force: true });
 });
 
 function baseInput(overrides: Record<string, unknown> = {}) {
@@ -25,6 +31,27 @@ function baseInput(overrides: Record<string, unknown> = {}) {
 }
 
 describe('profiles store', () => {
+  it('rejects a key path outside the keys directory', () => {
+    expect(() =>
+      profiles.createProfile(
+        baseInput({ authType: 'key', keyPath: '/etc/ssl/private/other.key', password: undefined }),
+      ),
+    ).toThrow(/каталога ключей/);
+  });
+
+  it('hides secrets in the API shape (toSafeProfile)', () => {
+    const created = profiles.createProfile(
+      baseInput({ name: 'safe-shape', password: 'secret-1' }),
+    );
+    const safe = profiles.toSafeProfile(created) as Record<string, unknown>;
+    expect(safe.password).toBeUndefined();
+    expect(safe.keyPassphrase).toBeUndefined();
+    expect(safe.hasPassword).toBe(true);
+    expect(safe.hasKeyPassphrase).toBe(false);
+    expect(safe.name).toBe('safe-shape');
+    profiles.deleteProfile(created.id);
+  });
+
   it('creates, reads, updates and deletes a profile', () => {
     const p = profiles.createProfile(baseInput());
     expect(p.id).toBeTruthy();
@@ -61,10 +88,10 @@ describe('profiles store', () => {
     ).toThrow(/keyPath is required/);
     const updated = profiles.updateProfile(
       p.id,
-      baseInput({ authType: 'key', keyPath: '/keys/id_rsa', password: undefined }),
+      baseInput({ authType: 'key', keyPath: KEY_PATH, password: undefined }),
     );
     expect(updated.authType).toBe('key');
-    expect(updated.keyPath).toBe('/keys/id_rsa');
+    expect(updated.keyPath).toBe(KEY_PATH);
     // Old password is kept in storage but no longer required.
     profiles.deleteProfile(p.id);
   });
@@ -80,12 +107,12 @@ describe('profiles store', () => {
 
   it('stores key passphrase and keeps it on partial update', () => {
     const p = profiles.createProfile(
-      baseInput({ authType: 'key', keyPath: '/keys/id_rsa', keyPassphrase: 'phrase-1' }),
+      baseInput({ authType: 'key', keyPath: KEY_PATH, keyPassphrase: 'phrase-1' }),
     );
     expect(p.keyPassphrase).toBe('phrase-1');
 
     // Update without the passphrase keeps the stored one.
-    const input = baseInput({ authType: 'key', keyPath: '/keys/id_rsa', note: 'n' }) as Record<
+    const input = baseInput({ authType: 'key', keyPath: KEY_PATH, note: 'n' }) as Record<
       string,
       unknown
     >;
@@ -96,7 +123,7 @@ describe('profiles store', () => {
     // Passing a new passphrase replaces it.
     const replaced = profiles.updateProfile(
       p.id,
-      baseInput({ authType: 'key', keyPath: '/keys/id_rsa', keyPassphrase: 'phrase-2' }),
+      baseInput({ authType: 'key', keyPath: KEY_PATH, keyPassphrase: 'phrase-2' }),
     );
     expect(replaced.keyPassphrase).toBe('phrase-2');
     profiles.deleteProfile(p.id);
