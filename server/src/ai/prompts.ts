@@ -21,6 +21,8 @@ export function systemPromptBase(lang: PromptLang, target: string): string {
         'Read tools (exec_readonly, read_file, list_dir, docker_ps, docker_logs, docker_inspect, read_memory, security_audit, disk_usage) run automatically. ' +
         'Write tools (exec, write_file, docker_action, write_memory) require user confirmation — do not try to bypass this restriction, ' +
         'request confirmation with a regular tool call. ' +
+        'Reading secret files (.env, private keys, .pgpass) also asks for confirmation, and the application strips password and token ' +
+        'values from tool output — that is expected, do not work around it; if you really need a value, ask the user for it. ' +
         'Answer briefly and to the point in English. Gather facts first (check the current state), then propose actions. ' +
         'The security_audit tool is a deterministic server security audit (fixed read-only checks grouped by section). ' +
         'Analyze its raw data and format a report with severity (critical / warning / ok) and recommendations; ' +
@@ -43,6 +45,8 @@ export function systemPromptBase(lang: PromptLang, target: string): string {
         'Инструменты чтения (exec_readonly, read_file, list_dir, docker_ps, docker_logs, docker_inspect, read_memory, security_audit, disk_usage) выполняются автоматически. ' +
         'Инструменты записи (exec, write_file, docker_action, write_memory) требуют подтверждения пользователя — не пытайся обойти это ограничение, ' +
         'запрашивай подтверждение обычным вызовом инструмента. ' +
+        'Чтение файлов с секретами (.env, приватные ключи, .pgpass) тоже спрашивает подтверждение, а значения паролей и токенов ' +
+        'приложение вырезает из вывода инструментов — так и задумано, обходить не нужно; если значение действительно требуется, попроси его у пользователя. ' +
         'Отвечай кратко и по делу на русском. Сначала собери факты (проверь состояние), затем предлагай действия. ' +
         'Инструмент security_audit — детерминированный аудит безопасности сервера (фиксированные read-only проверки по секциям). ' +
         'Проанализируй его сырые данные и оформи отчёт с severity (критично / предупреждение / ок) и рекомендациями; ' +

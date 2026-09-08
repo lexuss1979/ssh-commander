@@ -25,6 +25,8 @@ export const AI_STRINGS = {
     rejectedByUser: 'Пользователь отклонил выполнение этого действия.',
     stepLimitReached: 'Достигнут лимит шагов ({n}).',
     outputTruncated: '… (вывод обрезан, показано {n} символов)',
+    // redact.ts — маркер вырезанного секрета в выводе инструмента
+    secretRedacted: '<секрет скрыт приложением, {n} симв.>',
     // agent.ts — выводы инструментов
     emptyOutput: '(пустой вывод)',
     commandFailed: 'Команда завершилась с ошибкой.',
@@ -136,6 +138,7 @@ export const AI_STRINGS = {
     rejectedByUser: 'The user rejected this action.',
     stepLimitReached: 'Step limit reached ({n}).',
     outputTruncated: '… (output truncated, showing {n} characters)',
+    secretRedacted: '<secret hidden by the app, {n} chars>',
     emptyOutput: '(empty output)',
     commandFailed: 'The command failed.',
     serverNameMissing: 'Server name is missing (the server parameter).',

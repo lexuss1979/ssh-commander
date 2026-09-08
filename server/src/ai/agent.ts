@@ -3,8 +3,9 @@ import { config } from '../config.js';
 import { streamChatCompletion, type ChatMessage, type TokenUsage, type ToolCall } from './client.js';
 import { sanitizeMessages } from './messages.js';
 import { buildPlanRequestMessages, toolsForRequest } from './plan.js';
-import { getToolDefs, READ_ONLY_TOOLS } from './tools.js';
+import { getToolDefs, isAutoRunnable } from './tools.js';
 import { checkReadOnlyCommand } from './guard.js';
+import { redactDockerEnv, redactSecrets } from './redact.js';
 import { readMemory, writeMemory, memoryPromptBlock } from './memory.js';
 import { isSearchConfigured, searchWeb, type WebSearchUsage } from './web-search.js';
 import { getAiSettings } from '../services/settings.js';
@@ -603,7 +604,9 @@ export class AgentSession {
         for (const call of calls) {
           if (this.stopRequested) break;
           const { name, args } = this.parseCall(call);
-          const readOnly = READ_ONLY_TOOLS.has(name);
+          // Автоматически — только read-only вызов без признаков чтения
+          // секретов (ai/tools.ts): `read_file .env` уходит на approve.
+          const readOnly = isAutoRunnable(name, args);
           const server = this.serverLabelFor(name, args);
 
           if (readOnly) {
@@ -698,10 +701,18 @@ export class AgentSession {
     return { name, args };
   }
 
+  /**
+   * Единая точка выхода данных сервера: вывод инструмента идёт отсюда сразу
+   * в контекст модели (то есть внешнему провайдеру), в UI и в персист диалога.
+   * Поэтому здесь же — редакция секретов (ai/redact.ts), и обязательно ДО
+   * обрезки: у обрезанного PEM-блока не остаётся хвостового `-----END`,
+   * по которому его можно опознать.
+   */
   private truncate(text: string): { output: string; truncated: boolean } {
-    if (text.length <= MAX_TOOL_OUTPUT) return { output: text, truncated: false };
+    const safe = redactSecrets(text, this.lang);
+    if (safe.length <= MAX_TOOL_OUTPUT) return { output: safe, truncated: false };
     return {
-      output: `${text.slice(0, MAX_TOOL_OUTPUT)}\n\n${aiStr(this.lang, 'outputTruncated', { n: MAX_TOOL_OUTPUT })}`,
+      output: `${safe.slice(0, MAX_TOOL_OUTPUT)}\n\n${aiStr(this.lang, 'outputTruncated', { n: MAX_TOOL_OUTPUT })}`,
       truncated: true,
     };
   }
@@ -849,7 +860,10 @@ export class AgentSession {
           };
         }
         case 'write_memory': {
-          const content = String(args.content ?? '');
+          // Промпт запрещает писать в память секреты, но это лишь инструкция:
+          // MEMORY.md переживает сессию и грузится в контекст при каждом старте,
+          // поэтому содержимое прогоняется через ту же редакцию.
+          const content = redactSecrets(String(args.content ?? ''), this.lang);
           if (!content.trim()) {
             return { status: 'error', output: aiStr(this.lang, 'memoryEmptyContent'), truncated: false };
           }
@@ -890,7 +904,11 @@ export class AgentSession {
         case 'docker_inspect': {
           const target = String(args.target ?? '');
           const data = await inspect(profile, target);
-          return { status: 'ok', ...this.truncate(JSON.stringify(data, null, 2)) };
+          // Значения Env вырезаются структурно, до текста: `docker inspect` —
+          // самый ёмкий источник чужих секретов (весь .env приложения одним
+          // куском), и на имена переменных полагаться надёжнее, чем на regex.
+          const safe = redactDockerEnv(data, this.lang);
+          return { status: 'ok', ...this.truncate(JSON.stringify(safe, null, 2)) };
         }
         case 'security_audit': {
           const sections = Array.isArray(args.sections)

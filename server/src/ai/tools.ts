@@ -1,4 +1,5 @@
 import type { ToolDef } from './client.js';
+import { isSensitivePath, sensitivePathsIn } from './redact.js';
 import { isSearchConfigured } from './web-search.js';
 
 const str = (description: string) => ({ type: 'string', description });
@@ -19,7 +20,12 @@ export const toolDefs: ToolDef[] = [
     function: {
       name: 'exec_readonly',
       description:
-        'Выполнить безопасную команду чтения на сервере (ls, cat, head, tail, grep, find, df, free, ps, ss и т.п.). Выполняется автоматически без подтверждения. Команды записи, удаления и управления системой в этом инструменте запрещены — используйте exec.',
+        'Выполнить безопасную команду чтения на сервере. Выполняется автоматически без подтверждения. ' +
+        'Разрешён фиксированный список утилит чтения: ls, cat, head, tail, stat, file, find, du, df, wc, grep, sort, uniq, cut, ' +
+        'strings, od, xxd, diff, sha256sum, uname, hostname, uptime, date, whoami, id, w, who, last, lscpu, lsblk, lsof, free, ' +
+        'vmstat, dmesg, journalctl, printenv, ps, pgrep, pstree, top, ss, netstat (полный список — allow-лист сервера). ' +
+        'Конвейеры, перенаправление и подстановка команд запрещены; интерпретаторы (sh, python, awk, sed), сетевые клиенты ' +
+        '(curl, nc, socat, ssh) и любые изменяющие команды — только через exec, с подтверждением пользователя.',
       parameters: {
         type: 'object',
         properties: {
@@ -292,6 +298,22 @@ export const READ_ONLY_TOOLS = new Set([
   'web_search',
   'list_servers',
 ]);
+
+/**
+ * Выполняется ли вызов автоматически, без подтверждения пользователя.
+ *
+ * Read-only мало: чтение файла секретов (`.env`, `id_rsa`, `.pgpass`) — тоже
+ * «только чтение», но прочитанное сразу уходит внешнему провайдеру, и вернуть
+ * его оттуда уже нельзя. Редакция (`ai/redact.ts`) регулярная и полной
+ * гарантии не даёт, поэтому такие чтения проходят через обычный approve —
+ * решение остаётся за пользователем.
+ */
+export function isAutoRunnable(name: string, args: Record<string, unknown>): boolean {
+  if (!READ_ONLY_TOOLS.has(name)) return false;
+  if (name === 'read_file') return !isSensitivePath(String(args.path ?? ''));
+  if (name === 'exec_readonly') return sensitivePathsIn(String(args.command ?? '')).length === 0;
+  return true;
+}
 
 /**
  * Инструменты, объявляемые модели: web_search включается, только когда поиск

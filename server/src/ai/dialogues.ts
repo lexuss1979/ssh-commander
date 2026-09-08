@@ -102,7 +102,8 @@ function persist(list: Dialogue[]): void {
   }
   fs.mkdirSync(config.dataDir, { recursive: true });
   const tmp = `${storePath()}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ dialogues: list }, null, 2));
+  // 0600: в диалогах оседает всё, что агент прочитал на серверах.
+  fs.writeFileSync(tmp, JSON.stringify({ dialogues: list }, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, storePath());
   cache = list.map((d) => ({ ...d, messages: [...d.messages] }));
 }
