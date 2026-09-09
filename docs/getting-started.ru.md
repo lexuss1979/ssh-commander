@@ -6,17 +6,27 @@
 
 ## 1. Запусти приложение
 
-[Инструкция готового образа](installation.md) описывает установку без Git и Node/npm, бэкапы, обновление и переход со сборки из исходников. Первый образ (`0.1.1`) готовится к выпуску; до публикации используй сборку ниже.
+Нужны запущенный Docker с Compose v2 и Linux-сервер с SSH-доступом. ssh-commander запускается **на твоём компьютере**, а не на VPS. Git и Node/npm не нужны; само приложение серверы не арендует. Создай пустую папку и скачай Compose версии `0.1.1`:
 
-Нужны Git, запущенный Docker с Compose v2 и Linux-сервер с SSH-доступом. ssh-commander запускается **на твоём компьютере**, а не на VPS. Само приложение серверы не арендует.
-
-Выполни на своём компьютере:
+Linux/macOS:
 
 ```bash
-git clone https://github.com/lexuss1979/ssh-commander.git
+mkdir ssh-commander
 cd ssh-commander
-docker compose up -d --build
+curl --fail --location https://raw.githubusercontent.com/lexuss1979/ssh-commander/v0.1.1/docker-compose.release.yml --output compose.yaml
+docker compose up -d
 ```
+
+Windows PowerShell:
+
+```powershell
+New-Item -ItemType Directory ssh-commander
+Set-Location ssh-commander
+Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/lexuss1979/ssh-commander/v0.1.1/docker-compose.release.yml' -OutFile compose.yaml
+docker compose up -d
+```
+
+[Бэкапы, обновление и сборка из исходников](installation.md).
 
 Открой [http://localhost:8080](http://localhost:8080). При первом запуске задай пароль длиной не менее 8 символов и повтори его. API-ключ пока можно пропустить. Нажми **«Завершить настройку»**. Файл `.env` для этого пути не нужен.
 

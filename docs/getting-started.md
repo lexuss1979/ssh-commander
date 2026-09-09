@@ -6,17 +6,27 @@ Connect a Linux server, ask the agent to inspect it, then move on to your own ta
 
 ## 1. Start the App
 
-The [prebuilt-image instructions](installation.en.md) cover installation without Git or Node/npm, backups, updates and migration from a source build. The first image (`0.1.1`) is being prepared; until publication, use the source build below.
+You need a running Docker installation with Compose v2 and a Linux server you can access over SSH. Run ssh-commander **on your own computer**, not on the VPS. Git and Node/npm are not required; the app does not rent servers for you. Create an empty directory and download Compose for version `0.1.1`:
 
-You need Git, a running Docker installation with Compose v2, and a Linux server you can access over SSH. Run ssh-commander **on your own computer**, not on the VPS. The app does not rent servers for you.
-
-Run these commands on your computer:
+Linux/macOS:
 
 ```bash
-git clone https://github.com/lexuss1979/ssh-commander.git
+mkdir ssh-commander
 cd ssh-commander
-docker compose up -d --build
+curl --fail --location https://raw.githubusercontent.com/lexuss1979/ssh-commander/v0.1.1/docker-compose.release.yml --output compose.yaml
+docker compose up -d
 ```
+
+Windows PowerShell:
+
+```powershell
+New-Item -ItemType Directory ssh-commander
+Set-Location ssh-commander
+Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/lexuss1979/ssh-commander/v0.1.1/docker-compose.release.yml' -OutFile compose.yaml
+docker compose up -d
+```
+
+[Backups, updates and source builds](installation.en.md).
 
 Open [http://localhost:8080](http://localhost:8080). On first launch, choose an app password of at least 8 characters and repeat it. You can leave the API key empty for now. Click **Finish setup**. No `.env` file is needed for this path.
 

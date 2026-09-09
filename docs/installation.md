@@ -4,18 +4,18 @@
 
 Готовый образ запускается на вашем компьютере с Docker и Compose v2; Git и Node/npm не нужны. Платформы — `linux/amd64` и `linux/arm64`: это архитектура компьютера с Docker, а не удалённого VPS. 32-битный ARM не поддерживается.
 
-**Подготовка выпуска:** первый образ `0.1.1` ещё не опубликован. Сейчас используйте [сборку из исходников](#сборка-из-исходников). Команды установки из образа применимы после появления в [Releases](https://github.com/lexuss1979/ssh-commander/releases) выпуска с `docker-compose.release.yml` и проверенным публичным образом. В `v0.1.0` этого файла нет.
+Текущая версия образа — **0.1.1**. [Release notes](https://github.com/lexuss1979/ssh-commander/releases/tag/v0.1.1) · [GHCR](https://github.com/lexuss1979/ssh-commander/pkgs/container/ssh-commander). В `v0.1.0` готового образа и release Compose ещё не было.
 
 ## Установка из образа
 
-Создайте новую пустую папку. В выбранном выпуске откройте исходный код по тегу, файл `docker-compose.release.yml` и кнопку **Raw**. Подставьте скопированный URL вместо `COMPOSE_URL` ниже: адрес должен содержать конкретный тег, а не `main`. Не запускайте новый экземпляр на портах существующей установки.
+Создайте новую пустую папку. Команды скачивают Compose из конкретного тега `v0.1.1`, версия образа закреплена в файле. Не запускайте новый экземпляр на портах существующей установки.
 
 Linux/macOS:
 
 ```bash
 mkdir ssh-commander
 cd ssh-commander
-curl --fail --location 'COMPOSE_URL' --output compose.yaml
+curl --fail --location 'https://raw.githubusercontent.com/lexuss1979/ssh-commander/v0.1.1/docker-compose.release.yml' --output compose.yaml
 docker compose up -d
 ```
 
@@ -24,7 +24,7 @@ Windows PowerShell:
 ```powershell
 New-Item -ItemType Directory ssh-commander
 Set-Location ssh-commander
-Invoke-WebRequest -Uri 'COMPOSE_URL' -OutFile compose.yaml
+Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/lexuss1979/ssh-commander/v0.1.1/docker-compose.release.yml' -OutFile compose.yaml
 docker compose up -d
 ```
 

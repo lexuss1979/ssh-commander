@@ -53,15 +53,27 @@
 
 ## Быстрый старт
 
-**Готовый образ:** [установка и обновление без Git и Node/npm](docs/installation.md), Docker на amd64/arm64. Первый образ (`0.1.1`) готовится к выпуску; пока он не опубликован, используй сборку из исходников ниже.
+Запускай ssh-commander **на своём компьютере** с Docker Compose v2. Готовый образ **0.1.1** поддерживает amd64/arm64; Git и Node/npm не нужны. Подключи к нему уже арендованный Linux VPS; само приложение серверы не арендует.
 
-Запускай ssh-commander **на своём компьютере**: нужны Git и Docker с Compose v2. Подключи к нему уже арендованный Linux VPS; само приложение серверы не арендует.
+Linux/macOS:
 
 ```bash
-git clone https://github.com/lexuss1979/ssh-commander.git
+mkdir ssh-commander
 cd ssh-commander
-docker compose up -d --build
+curl --fail --location https://raw.githubusercontent.com/lexuss1979/ssh-commander/v0.1.1/docker-compose.release.yml --output compose.yaml
+docker compose up -d
 ```
+
+Windows PowerShell:
+
+```powershell
+New-Item -ItemType Directory ssh-commander
+Set-Location ssh-commander
+Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/lexuss1979/ssh-commander/v0.1.1/docker-compose.release.yml' -OutFile compose.yaml
+docker compose up -d
+```
+
+[Бэкапы, обновление и переход со сборки](docs/installation.md) · [Сборка из исходников](docs/installation.md#сборка-из-исходников).
 
 Открой [http://localhost:8080](http://localhost:8080), задай пароль приложения и добавь API-ключ своего AI-провайдера. Укажи SSH-адрес сервера и данные для входа, затем попроси агента проверить его состояние. Файл `.env` не нужен. Ключ AI можно пропустить: терминал, файлы и другие ручные инструменты работают и без агента.
 
@@ -69,7 +81,7 @@ docker compose up -d --build
 
 [![Быстрый старт: клонирование, сборка Docker, настройка и работающий SSH-терминал](docs/media/quickstart.gif)](docs/media/quickstart.mp4)
 
-[Смотреть быстрый старт (MP4, 37 с)](docs/media/quickstart.mp4). В ролике ключ AI пропущен, подключение идёт к тестовому серверу; для работы агента добавь свой ключ в «Настройках».
+[Смотреть быстрый старт (MP4, 37 с)](docs/media/quickstart.mp4). В ролике показана установка со сборкой из исходников; ключ AI пропущен, подключение идёт к тестовому серверу; для работы агента добавь свой ключ в «Настройках».
 
 Пароль, провайдер, ключ и модель AI затем меняются в **«Настройках»** (шестерёнка внизу сайдбара), без перезапуска. Конфигурация хранится в `data/settings.json`.
 
@@ -77,12 +89,7 @@ docker compose up -d --build
 
 SSH-ключи можно положить в `keys/` или импортировать через форму сервера («Импортировать…», сохранение с правами `0600`). В профиле укажи путь внутри контейнера, например `/keys/id_rsa`.
 
-> Собирать фронтенд вручную не нужно — Dockerfile собирает его внутри образа.
-> Если в браузере появляется «Cannot GET /», значит контейнер запущен со старой
-> версией образа: выполни `docker compose up -d --build` ещё раз (флаг `--build`
-> обязателен после изменения кода).
-
-Для готового образа используй [порядок обновления образа](docs/installation.md#обновление); `--build` относится только к установке из исходников.
+Для обновления готового образа используй [порядок резервного копирования и обновления](docs/installation.md#обновление). При установке из исходников после изменения кода требуется `docker compose up -d --build`; фронтенд собирается внутри Docker.
 
 ## Стоимость и данные
 

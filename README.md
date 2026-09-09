@@ -53,15 +53,27 @@ This is an interactive assistant, not an autonomous 24/7 on-call service. It can
 
 ## Quick start
 
-**Prebuilt image:** [installation and updates without Git or Node/npm](docs/installation.en.md), for Docker on amd64/arm64. The first image (`0.1.1`) is being prepared; until it is published, use the source build below.
+Run ssh-commander **on your own computer** with Docker Compose v2. The prebuilt **0.1.1** image supports amd64/arm64; Git and Node/npm are not required. Connect it to a Linux VPS you already have; the app does not rent servers for you.
 
-Run ssh-commander **on your own computer** with Git and Docker Compose v2. Connect it to a Linux VPS you already have; the app does not rent servers for you.
+Linux/macOS:
 
 ```bash
-git clone https://github.com/lexuss1979/ssh-commander.git
+mkdir ssh-commander
 cd ssh-commander
-docker compose up -d --build
+curl --fail --location https://raw.githubusercontent.com/lexuss1979/ssh-commander/v0.1.1/docker-compose.release.yml --output compose.yaml
+docker compose up -d
 ```
+
+Windows PowerShell:
+
+```powershell
+New-Item -ItemType Directory ssh-commander
+Set-Location ssh-commander
+Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/lexuss1979/ssh-commander/v0.1.1/docker-compose.release.yml' -OutFile compose.yaml
+docker compose up -d
+```
+
+[Backups, updates and source-build migration](docs/installation.en.md) · [Build from source](docs/installation.en.md#source-build).
 
 Open [http://localhost:8080](http://localhost:8080), set an app password, and add your AI provider's API key. Add your server's SSH address and credentials, then ask the agent to check its current state. No `.env` file is needed. You can skip the AI key and still use the terminal, files and other manual tools.
 
@@ -69,7 +81,7 @@ Open [http://localhost:8080](http://localhost:8080), set an app password, and ad
 
 [![Quickstart: clone, Docker build, initial setup, and a working SSH terminal](docs/media/quickstart.gif)](docs/media/quickstart.mp4)
 
-[Watch the Quickstart demo (MP4, 37 sec)](docs/media/quickstart.mp4). This demo skips the AI key and connects to a test server; add your key in Settings to use the agent.
+[Watch the Quickstart demo (MP4, 37 sec)](docs/media/quickstart.mp4). This demo shows the source-build installation, skips the AI key and connects to a test server; add your key in Settings to use the agent.
 
 To change the password or AI provider/key/model later, open **Settings** using the gear at the bottom of the sidebar. Changes apply without a restart. Configuration is stored in `data/settings.json`.
 
@@ -79,8 +91,7 @@ Notes:
 
 - **SSH keys**: put them into `keys/`, or import them later via the UI (server form → "Import…", saved with `0600`). In a profile the key path is the in-container path, e.g. `/keys/id_rsa`. Key contents are never returned by the API.
 - There is no need to build the frontend manually — the Dockerfile builds it inside the image.
-- If the browser shows "Cannot GET /", the container runs an old image: run `docker compose up -d --build` again (`--build` is mandatory after code changes).
-- For prebuilt images, follow [the image update procedure](docs/installation.en.md#update); `--build` applies only to source installations.
+- To update a prebuilt image, follow [the backup and update procedure](docs/installation.en.md#update). Source installations require `docker compose up -d --build` after code changes.
 - SSH tunnels: the container publishes `127.0.0.1:10000-10049` (configurable via `TUNNEL_PORT_MIN`/`TUNNEL_PORT_MAX`) for forwarded ports.
 
 ## Cost and privacy

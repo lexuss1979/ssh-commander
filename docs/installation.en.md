@@ -4,18 +4,18 @@
 
 Run the prebuilt image on your computer with Docker and Compose v2; Git and Node/npm are not required. Platforms are `linux/amd64` and `linux/arm64`: the architecture of the computer running Docker, not the remote VPS. 32-bit ARM is not supported.
 
-**Release preparation:** the first image, `0.1.1`, has not been published yet. Use the [source build](#source-build) for now. Image installation applies after [Releases](https://github.com/lexuss1979/ssh-commander/releases) lists a release with `docker-compose.release.yml` and a verified public image. `v0.1.0` does not contain this file.
+The current image version is **0.1.1**. [Release notes](https://github.com/lexuss1979/ssh-commander/releases/tag/v0.1.1) · [GHCR](https://github.com/lexuss1979/ssh-commander/pkgs/container/ssh-commander). `v0.1.0` did not include a prebuilt image or release Compose.
 
 ## Install the image
 
-Create an empty directory. Browse the chosen release's source at its tag, open `docker-compose.release.yml` and click **Raw**. Substitute that URL for `COMPOSE_URL` below: it must contain a specific tag, not `main`. Do not run a second installation on ports used by an existing one.
+Create an empty directory. These commands download Compose from the specific `v0.1.1` tag; the file pins the image version. Do not run a second installation on ports used by an existing one.
 
 Linux/macOS:
 
 ```bash
 mkdir ssh-commander
 cd ssh-commander
-curl --fail --location 'COMPOSE_URL' --output compose.yaml
+curl --fail --location 'https://raw.githubusercontent.com/lexuss1979/ssh-commander/v0.1.1/docker-compose.release.yml' --output compose.yaml
 docker compose up -d
 ```
 
@@ -24,7 +24,7 @@ Windows PowerShell:
 ```powershell
 New-Item -ItemType Directory ssh-commander
 Set-Location ssh-commander
-Invoke-WebRequest -Uri 'COMPOSE_URL' -OutFile compose.yaml
+Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/lexuss1979/ssh-commander/v0.1.1/docker-compose.release.yml' -OutFile compose.yaml
 docker compose up -d
 ```
 
