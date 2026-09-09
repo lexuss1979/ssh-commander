@@ -38,6 +38,8 @@ export const ru = {
   'login.passwordPlaceholder': 'Пароль',
   'login.submit': 'Войти',
   'login.submitting': 'Вход…',
+  'login.wrongPassword': 'Неверный пароль',
+  'login.tooManyAttempts': 'Слишком много попыток входа. Попробуйте позже.',
 
   'onboarding.subtitle': 'Задайте пароль для входа в веб-интерфейс и, опционально, ключ AI-агента.',
   'onboarding.passwordLabel': 'Пароль',

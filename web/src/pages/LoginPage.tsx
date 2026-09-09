@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useT } from '../i18n';
+import { ApiError } from '../api';
 
 interface Props {
   onLogin: (password: string) => Promise<void>;
@@ -17,7 +18,15 @@ export function LoginPage({ onLogin, showError }: Props) {
     try {
       await onLogin(password);
     } catch (err) {
-      showError((err as Error).message);
+      // Тексты ошибок входа переводим на клиенте по статус-коду: серверные
+      // строки захардкожены на русском, а язык UI к этому моменту уже известен.
+      if (err instanceof ApiError && err.status === 401) {
+        showError(t('login.wrongPassword'));
+      } else if (err instanceof ApiError && err.status === 429) {
+        showError(t('login.tooManyAttempts'));
+      } else {
+        showError((err as Error).message);
+      }
     } finally {
       setBusy(false);
     }

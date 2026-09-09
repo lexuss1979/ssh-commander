@@ -25,6 +25,8 @@ export const en: typeof ru = {
   'login.passwordPlaceholder': 'Password',
   'login.submit': 'Sign in',
   'login.submitting': 'Signing in…',
+  'login.wrongPassword': 'Wrong password',
+  'login.tooManyAttempts': 'Too many login attempts. Try again later.',
 
   'onboarding.subtitle': 'Set the password for the web interface and, optionally, an AI agent API key.',
   'onboarding.passwordLabel': 'Password',
