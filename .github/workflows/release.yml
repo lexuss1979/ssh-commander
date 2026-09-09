@@ -34,6 +34,7 @@ jobs:
             for (const file of ['package.json', 'package-lock.json']) {
               const pkg = JSON.parse(fs.readFileSync(`${dir}/${file}`));
               if (pkg.version !== tag.slice(1)) throw Error(`${dir}/${file}: version mismatch`);
+              if (file === 'package-lock.json' && pkg.packages?.['']?.version !== tag.slice(1)) throw Error(`${dir}/${file}: root package version mismatch`);
             }
           }
           const compose = fs.readFileSync('docker-compose.release.yml', 'utf8');

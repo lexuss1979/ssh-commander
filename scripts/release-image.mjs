@@ -15,7 +15,7 @@ const docker = (...args) => execFileSync('docker', args, { encoding: 'utf8', tim
 const revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 assert.equal(revision, sha);
 async function manifest(ref) {
-  const auth = await fetch(`https://ghcr.io/token?service=ghcr.io&scope=repository:${repository}:pull`, {
+  const auth = await fetch(`https://ghcr.io/token?service=ghcr.io&scope=repository:${repository}:pull,push`, {
     headers: { Authorization: `Basic ${Buffer.from(`${actor}:${token}`).toString('base64')}` },
     signal: AbortSignal.timeout(30_000),
   });
