@@ -9,6 +9,7 @@ import type {
 } from '../api';
 import type { Profile } from '../types';
 import { useSortBy, SortableTh } from '../hooks/useSortBy';
+import { Modal } from '../components/Modal';
 import { useT } from '../i18n';
 import type { I18nKey, I18nParams } from '../i18n';
 
@@ -102,59 +103,54 @@ function TunnelModal({
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>{t('ports.tunnelModalTitle')}</h2>
-        <div className="modal-body">
-          <label>
-            {t('ports.localPortLabel')}
-            <input
-              type="number"
-              value={localPort}
-              onChange={(e) => setLocalPort(e.target.value)}
-              min={0}
-              max={65535}
-              placeholder="0"
-            />
-            <span className="muted" style={{ fontSize: 12 }}>
-              {' '}{t('ports.portRange', { min: portRange.min, max: portRange.max })}
-            </span>
-          </label>
-          <label>
-            {t('ports.targetHostLabel')}
-            <input
-              type="text"
-              value={targetHost}
-              onChange={(e) => setTargetHost(e.target.value)}
-              placeholder={t('ports.targetHostPlaceholder')}
-            />
-          </label>
-          <label>
-            {t('ports.targetPortLabel')}
-            <input
-              type="number"
-              value={targetPort}
-              onChange={(e) => setTargetPort(e.target.value)}
-              min={1}
-              max={65535}
-              placeholder="8080"
-            />
-          </label>
-          {error && <p className="error-text">{error}</p>}
-          <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-            {t('ports.tunnelHint')}
-          </p>
-        </div>
-        <div className="modal-actions">
-          <button className="btn btn-ghost" onClick={onClose} disabled={loading}>
-            {t('common.cancel')}
-          </button>
-          <button className="btn btn-primary" onClick={handleSubmit} disabled={loading}>
-            {loading ? t('ports.creating') : t('ports.create')}
-          </button>
-        </div>
+    <Modal title={t('ports.tunnelModalTitle')} onClose={onClose}>
+      <label>
+        {t('ports.localPortLabel')}
+        <input
+          type="number"
+          value={localPort}
+          onChange={(e) => setLocalPort(e.target.value)}
+          min={0}
+          max={65535}
+          placeholder="0"
+        />
+        <span className="muted" style={{ fontSize: 12 }}>
+          {' '}{t('ports.portRange', { min: portRange.min, max: portRange.max })}
+        </span>
+      </label>
+      <label>
+        {t('ports.targetHostLabel')}
+        <input
+          type="text"
+          value={targetHost}
+          onChange={(e) => setTargetHost(e.target.value)}
+          placeholder={t('ports.targetHostPlaceholder')}
+        />
+      </label>
+      <label>
+        {t('ports.targetPortLabel')}
+        <input
+          type="number"
+          value={targetPort}
+          onChange={(e) => setTargetPort(e.target.value)}
+          min={1}
+          max={65535}
+          placeholder="8080"
+        />
+      </label>
+      {error && <p className="error-text">{error}</p>}
+      <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+        {t('ports.tunnelHint')}
+      </p>
+      <div className="modal-actions">
+        <button className="btn btn-ghost" onClick={onClose} disabled={loading}>
+          {t('common.cancel')}
+        </button>
+        <button className="btn btn-primary" onClick={handleSubmit} disabled={loading}>
+          {loading ? t('ports.creating') : t('ports.create')}
+        </button>
       </div>
-    </div>
+    </Modal>
   );
 }
 
