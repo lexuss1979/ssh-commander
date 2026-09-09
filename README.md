@@ -2,15 +2,68 @@
 
 **English** · [Русский](README.ru.md)
 
+## Your personal AI DevOps
+
+**Get your project running on a VPS, and get help when something breaks.** You don't have to become a Linux administrator first.
+
+Describe what you need. ssh-commander's AI agent connects to your server over SSH, investigates problems, runs audits, and carries out fixes **with your approval**. From your first VPS to several project servers, you have a helper that works on the actual machine, not just a chat that tells you what to try.
+
+**Free, open-source app. No ssh-commander subscription.** You pay for your servers and AI API usage with your own key.
+
 [![AI agent finds a large log and waits for approval before clearing it](docs/media/hero-disk-full.gif)](docs/media/hero-disk-full.mp4)
 
-[Watch the disk cleanup demo (MP4, 26 sec)](docs/media/hero-disk-full.mp4)
+**Disk full?** The agent investigates, finds a large log, asks before clearing it, and checks the result. [Watch the demo (MP4, 26 sec)](docs/media/hero-disk-full.mp4).
 
-A local, password-protected web app for managing remote Linux servers over SSH: terminal, file manager (SFTP), Docker Explorer, databases, systemd services, Nginx, cron — plus an AI agent that works through your SSH connection and **asks for confirmation before every mutating action**.
+## Bring the problem, not a pile of logs
 
-Runs via Docker, listens on `127.0.0.1` only. No ssh-commander account or telemetry: application state stays on your machine. The agent uses **your own API key** with an OpenAI-compatible provider; prompts and tool results are sent to that provider, which can also be self-hosted.
+In a separate chat, you're often the go-between: copy an error, get a command, run it, paste the output, repeat. Here, the agent can inspect the server itself. It reads logs, checks services and containers, and follows the evidence before proposing a fix.
 
-The focus is an AI agent that investigates through your SSH connection, shows what it wants to change, and waits for your approval.
+Start with a task in your own words:
+
+- **Your first VPS:** "I've rented a server. Check what's installed and help me get my app running."
+- **Something broke:** "My site stopped responding. Find out why and propose a fix."
+- **A second pair of eyes:** "Audit this server's security and explain what needs attention. Don't change anything yet."
+
+You don't need to know which command to run before asking for help. The agent does the investigation; you review the proposed changes. You can also open the terminal, files or Docker Explorer and take over whenever you need to.
+
+## One VPS or several
+
+Keep your project servers in one app, with per-server agent memory. Attach multiple servers to a conversation when a task spans them. Monitoring and threshold alerts help you spot problems; ask the agent to investigate when you need help.
+
+This is an interactive assistant, not an autonomous 24/7 on-call service. It can make mistakes: review commands before approving them and keep backups.
+
+## Quick start
+
+Run ssh-commander **on your own computer** with Git and Docker Compose v2. Connect it to a Linux VPS you already have; the app does not rent servers for you.
+
+```bash
+git clone https://github.com/lexuss1979/ssh-commander.git
+cd ssh-commander
+docker compose up -d --build
+```
+
+Open [http://localhost:8080](http://localhost:8080), set an app password, and add your AI provider's API key. Add your server's SSH address and credentials, then ask the agent to check its current state. No `.env` file is needed. You can skip the AI key and still use the terminal, files and other manual tools.
+
+[![Quickstart: clone, Docker build, initial setup, and a working SSH terminal](docs/media/quickstart.gif)](docs/media/quickstart.mp4)
+
+[Watch the Quickstart demo (MP4, 37 sec)](docs/media/quickstart.mp4). This demo skips the AI key and connects to a test server; add your key in Settings to use the agent.
+
+To change the password or AI provider/key/model later, open **Settings** using the gear at the bottom of the sidebar. Changes apply without a restart. Configuration is stored in `data/settings.json`.
+
+For environment-based setup, copy `.env.example` to `.env` **before the first launch** and edit it. Replace the sample `APP_PASSWORD=change-me` with your own password, or leave it empty to use onboarding. `APP_PASSWORD` and `AI_API_KEY`/`AI_API_BASE`/`AI_MODEL` only seed settings on the first launch; changing them afterwards has no effect.
+
+Notes:
+
+- **SSH keys**: put them into `keys/`, or import them later via the UI (server form → "Import…", saved with `0600`). In a profile the key path is the in-container path, e.g. `/keys/id_rsa`. Key contents are never returned by the API.
+- There is no need to build the frontend manually — the Dockerfile builds it inside the image.
+- If the browser shows "Cannot GET /", the container runs an old image: run `docker compose up -d --build` again (`--build` is mandatory after code changes).
+- SSH tunnels: the container publishes `127.0.0.1:10000-10049` (configurable via `TUNNEL_PORT_MIN`/`TUNNEL_PORT_MAX`) for forwarded ports.
+
+## Cost and privacy
+
+The app is free under the MIT license. AI usage is billed separately by your chosen provider; cost depends on the model and the task, and the app tracks estimated spending. You can use an OpenAI-compatible provider or a self-hosted model endpoint.
+
+ssh-commander runs locally, is password-protected, and listens on `127.0.0.1` only. No ssh-commander account or telemetry. Application state stays on your machine, but **AI prompts and tool results are sent to your configured provider**. Do not expose the app to the internet; read [Security](#security) before use.
 
 ## Features
 
@@ -58,33 +111,6 @@ The focus is an AI agent that investigates through your SSH connection, shows wh
 
 ### Localization
 - UI in English and Russian, dark and light themes. Switch in Settings → Interface (gear at the bottom of the sidebar), no reload; the default language follows the browser locale.
-
-## Quick start
-
-Requires Git and Docker with Compose v2.
-
-```bash
-git clone https://github.com/lexuss1979/ssh-commander.git
-cd ssh-commander
-docker compose up -d --build
-```
-
-Open [http://localhost:8080](http://localhost:8080). On first launch, set a password; the AI API key is optional. You are signed in automatically, then you can add a server and open its terminal. No `.env` file is needed for this flow.
-
-[![Quickstart: clone, Docker build, initial setup, and a working SSH terminal](docs/media/quickstart.gif)](docs/media/quickstart.mp4)
-
-[Watch the Quickstart demo (MP4, 37 sec)](docs/media/quickstart.mp4)
-
-To change the password or AI provider/key/model later, open **Settings** using the gear at the bottom of the sidebar. Changes apply without a restart. Configuration is stored in `data/settings.json`.
-
-For environment-based setup, copy `.env.example` to `.env` **before the first launch** and edit it. Replace the sample `APP_PASSWORD=change-me` with your own password, or leave it empty to use onboarding. `APP_PASSWORD` and `AI_API_KEY`/`AI_API_BASE`/`AI_MODEL` only seed settings on the first launch; changing them afterwards has no effect.
-
-Notes:
-
-- **SSH keys**: put them into `keys/`, or import them later via the UI (server form → "Import…", saved with `0600`). In a profile the key path is the in-container path, e.g. `/keys/id_rsa`. Key contents are never returned by the API.
-- There is no need to build the frontend manually — the Dockerfile builds it inside the image.
-- If the browser shows "Cannot GET /", the container runs an old image: run `docker compose up -d --build` again (`--build` is mandatory after code changes).
-- SSH tunnels: the container publishes `127.0.0.1:10000-10049` (configurable via `TUNNEL_PORT_MIN`/`TUNNEL_PORT_MAX`) for forwarded ports.
 
 ## Configuration
 
