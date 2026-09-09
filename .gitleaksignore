@@ -1,0 +1,29 @@
+# Проверенные срабатывания истории; разбор: docs/publication-readiness.md.
+# Исключается только конкретное место конкретного коммита, не файл целиком.
+
+# Неполные фиктивные PEM-блоки и API-ключ для тестов редакции.
+f0753fc8cc3abe1527bf0e96a17ecfb862857ad7:server/test/redact.test.ts:private-key:10
+f0753fc8cc3abe1527bf0e96a17ecfb862857ad7:server/test/redact.test.ts:generic-api-key:39
+
+# Пароли временного тестового HTTP-сервера.
+1f5ce2f6f4e22d660a269c93510777154f51cbf7:server/test/settings-route.test.ts:generic-api-key:24
+1f5ce2f6f4e22d660a269c93510777154f51cbf7:server/test/settings-route.test.ts:generic-api-key:183
+
+# Ключи словаря aiCosts.period*, включая повтор в merge-коммите.
+57cf6ec931fb02edfb8b362b5ddcfc1ceb0e4733:web/src/pages/AiCostsPage.tsx:generic-api-key:23
+57cf6ec931fb02edfb8b362b5ddcfc1ceb0e4733:web/src/pages/AiCostsPage.tsx:generic-api-key:24
+57cf6ec931fb02edfb8b362b5ddcfc1ceb0e4733:web/src/pages/AiCostsPage.tsx:generic-api-key:25
+a044488f9c6a949648fe632f4bed7ef8f08d3039:web/src/pages/AiCostsPage.tsx:generic-api-key:23
+a044488f9c6a949648fe632f4bed7ef8f08d3039:web/src/pages/AiCostsPage.tsx:generic-api-key:24
+a044488f9c6a949648fe632f4bed7ef8f08d3039:web/src/pages/AiCostsPage.tsx:generic-api-key:25
+
+# Имя тестового файла и проверка PEM-заголовка ключа, генерируемого в тесте.
+58bc418582faa16fd587d0443c865063cc77a30a:server/test/bootstrap.test.ts:generic-api-key:392
+58bc418582faa16fd587d0443c865063cc77a30a:server/test/bootstrap.test.ts:private-key:177
+
+# Демонстрационный TLS-ключ самоподписанного sc-test.local, не production.
+b4e24f01ad172a7efe6d56e69b101a97bb2fb6c3:server/test/nginx.manual.mjs:private-key:82
+
+# Неполная фикстура импорта OpenSSH, включая повтор в merge-коммите.
+466aeca4029e9c221bbf181524f2583fe33cee98:server/test/keys.test.ts:private-key:14
+b09365893909e57aae3ead2be6f1f8f291979bdb:server/test/keys.test.ts:private-key:14
