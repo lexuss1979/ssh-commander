@@ -14,6 +14,11 @@ Describe what you need. ssh-commander's AI agent connects to your server over SS
 
 **A new server. One request. A working website.** The agent installs Nginx, creates the page, and checks that it works. You approve the changes, then open the site. [Watch the demo (MP4, 45 sec)](docs/media/hero-new-vps.mp4). Recorded on a clean SSH test server; waiting and intermediate steps are shortened.
 
+> [!TIP]
+> **Try it without AI first.** The terminal, files and Docker work without an API key. Get familiar with the app, then enable the agent in **Settings** when you're ready.
+>
+> SSH access is needed from the start to work with your server. Enabling AI is a separate step: the agent uses the selected SSH user's permissions and asks you to approve changes.
+
 ## Bring the problem, not a pile of logs
 
 In a separate chat, you're often the go-between: copy an error, get a command, run it, paste the output, repeat. Here, the agent can inspect the server itself. It reads logs, checks services and containers, and follows the evidence before proposing a fix.
