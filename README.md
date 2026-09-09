@@ -2,6 +2,8 @@
 
 **English** · [Русский](README.ru.md)
 
+[![CI](https://github.com/lexuss1979/ssh-commander/actions/workflows/ci.yml/badge.svg)](https://github.com/lexuss1979/ssh-commander/actions/workflows/ci.yml)
+
 ## Your personal AI DevOps
 
 **Get your project running on a VPS, and get help when something breaks.** You don't have to become a Linux administrator first.
@@ -18,6 +20,14 @@ Describe what you need. ssh-commander's AI agent connects to your server over SS
 > **Try it without AI first.** The terminal, files and Docker work without an API key. Get familiar with the app, then enable the agent in **Settings** when you're ready.
 >
 > SSH access is needed from the start to work with your server. Enabling AI is a separate step: the agent uses the selected SSH user's permissions and asks you to approve changes.
+
+- Runs locally on your computer.
+- Changes require your approval; review the command and target server.
+- Automatic read-only access is limited by an allow-list.
+- AI prompts and tool results go to your configured provider.
+- SSH/database passwords and the API key are stored in plaintext in local data files.
+
+Details: [Security policy](SECURITY.md). Approval and redaction do not guarantee safety.
 
 ## Bring the problem, not a pile of logs
 
@@ -42,6 +52,8 @@ Keep your project servers in one app, with per-server agent memory. Attach multi
 This is an interactive assistant, not an autonomous 24/7 on-call service. It can make mistakes: review commands before approving them and keep backups.
 
 ## Quick start
+
+**Prebuilt image:** [installation and updates without Git or Node/npm](docs/installation.en.md), for Docker on amd64/arm64. The first image (`0.1.1`) is being prepared; until it is published, use the source build below.
 
 Run ssh-commander **on your own computer** with Git and Docker Compose v2. Connect it to a Linux VPS you already have; the app does not rent servers for you.
 
@@ -68,6 +80,7 @@ Notes:
 - **SSH keys**: put them into `keys/`, or import them later via the UI (server form → "Import…", saved with `0600`). In a profile the key path is the in-container path, e.g. `/keys/id_rsa`. Key contents are never returned by the API.
 - There is no need to build the frontend manually — the Dockerfile builds it inside the image.
 - If the browser shows "Cannot GET /", the container runs an old image: run `docker compose up -d --build` again (`--build` is mandatory after code changes).
+- For prebuilt images, follow [the image update procedure](docs/installation.en.md#update); `--build` applies only to source installations.
 - SSH tunnels: the container publishes `127.0.0.1:10000-10049` (configurable via `TUNNEL_PORT_MIN`/`TUNNEL_PORT_MAX`) for forwarded ports.
 
 ## Cost and privacy

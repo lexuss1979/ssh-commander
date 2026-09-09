@@ -1,0 +1,58 @@
+name: Bug report
+description: Report a reproducible problem (English or Russian).
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach .env, private keys, passwords, a complete data/ directory or unredacted diagnostic archives.
+        Report vulnerabilities privately: https://github.com/lexuss1979/ssh-commander/security/advisories/new
+  - type: input
+    id: version
+    attributes:
+      label: App version / image tag or digest / commit
+    validations:
+      required: true
+  - type: input
+    id: computer
+    attributes:
+      label: Local computer OS and architecture
+      placeholder: Windows 11 amd64, macOS arm64, Ubuntu 24.04 amd64...
+    validations:
+      required: true
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation method
+      options:
+        - GHCR image / release Compose
+        - Docker source build
+        - Docker dev mode
+        - Local Node.js
+    validations:
+      required: true
+  - type: input
+    id: server
+    attributes:
+      label: Remote Linux OS and version (if relevant)
+  - type: input
+    id: ai
+    attributes:
+      label: AI provider and model (if relevant, never include the API key)
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Sanitized error text
+      description: Remove secrets, personal data and private server addresses.
+      render: text

@@ -7,7 +7,13 @@
 ## Быстрые команды
 
 ```bash
-# Production (основной способ запуска)
+# Готовый образ (после публикации версии; без сборки)
+docker compose -f docker-compose.release.yml up -d
+# Обновление: сначала остановка, бэкап data/ и keys/, затем осознанная смена image
+docker compose -f docker-compose.release.yml pull
+docker compose -f docker-compose.release.yml up -d
+
+# Production из исходников
 docker compose up -d --build        # пересборка обязательна после изменений кода
 docker compose down                 # остановить
 
@@ -36,7 +42,9 @@ bash scripts/install-hooks.sh             # ставит pre-commit
 
 - `server/` — Node.js + TypeScript (ESM, strict). Express + `ws` + `ssh2`. Вход `src/index.ts`; HTTP-маршруты — `src/routes/`, бизнес-логика — `src/services/`, SSH-слой — `src/ssh/`, AI-агент — `src/ai/`, WebSocket — `src/ws/`.
 - `web/` — React 18 + Vite + xterm.js. Вход `src/main.tsx`, корневой компонент `src/App.tsx`. Layout в стиле VS Code: верхний таббар разделов профиля, левый сайдбар, постоянная панель AI-агента справа. Вкладки и панель агента — keep-alive: скрываются `display:none`, не размонтируются, WS не рвётся; страницы получают prop `visible` и ставят фоновый polling на паузу при скрытии. Страницы — `src/pages/` (в т.ч. `NginxPage.tsx` — вкладка «Nginx»), переиспользуемое — `src/components/`.
-- `Dockerfile` — multi-stage (`web-builder` → `server-builder` → `server-deps` → runtime `node:20-alpine`).
+- `Dockerfile` — multi-stage (`web-builder` → `server-builder` → `server-deps` → runtime `node:22-alpine`).
+- `docker-compose.release.yml` — самостоятельный Compose с конкретной версией GHCR-образа, loopback-портами и прежними `./data`, `./keys`; глобального `container_name` нет. До смены способа запуска остановить прежний экземпляр, два процесса не должны писать в одни данные. Инструкции: `docs/installation.md` / `docs/installation.en.md`.
+- `.github/workflows/ci.yml` → reusable `checks.yml`: обе сборки, тесты сервера, lint web и оба audit через `npm ci`, Node 22. `release.yml` запускается только на стабильном теге `vX.Y.Z`, повторяет те же проверки, публикует GHCR после smoke обеих платформ (ARM64 через QEMU). Теги версий не перезаписывать; повтор использует прежний digest. Порядок выпуска — `docs/releasing.md`.
 - `docker-compose.yml` — публикация `127.0.0.1:8080:8080`, volumes `./data:/data` и `./keys:/keys`. `docker-compose.dev.yml` + `scripts/docker-dev.sh` — dev-режим с hot-reload; изменение зависимостей (package.json/lock) требует пересборки dev-стадии через `scripts/docker-dev.sh up`.
 - `docs/roadmap.md` — план развития (эпики); перед каждым эпиком — детальное планирование. `docs/architecture.md` — детали реализации.
 - `data/` — volume: `profiles.json` (профили, пароли открытым текстом), `db-connections.json` (подключения БД, пароли открытым текстом), `settings.json` (настройки приложения — источник правды в рантайме: `passwordHash` — scrypt-хеш пароля веб-интерфейса (опционален), `aiProvider` — пресет провайдера (`deepseek`/`openai`/`custom`), `aiApiKey`/`aiApiBase`/`aiModel` — конфиг AI-агента; сеются из env при первом старте или задаются в onboarding), `snippets.json` (сохранённые команды), `ai-dialogues.json` (диалоги агента), `ai-usage.json` (журнал расходов AI: токены и стоимость каждого вызова), `ai-prices.json` (опциональный оверрайд цен моделей — справочник, битый файл не блокирует запись), `memory/<profileId>/MEMORY.md` (память агента).

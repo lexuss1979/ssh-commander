@@ -5,4 +5,14 @@ data
 keys
 *.log
 .env
-
+.env.*
+promo
+previews
+.worktrees
+.github
+docs
+**/.eslintcache
+**/coverage
+**/*.log
+**/node_modules
+**/dist

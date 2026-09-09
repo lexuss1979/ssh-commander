@@ -6,6 +6,8 @@ Connect a Linux server, ask the agent to inspect it, then move on to your own ta
 
 ## 1. Start the App
 
+The [prebuilt-image instructions](installation.en.md) cover installation without Git or Node/npm, backups, updates and migration from a source build. The first image (`0.1.1`) is being prepared; until publication, use the source build below.
+
 You need Git, a running Docker installation with Compose v2, and a Linux server you can access over SSH. Run ssh-commander **on your own computer**, not on the VPS. The app does not rent servers for you.
 
 Run these commands on your computer:
@@ -59,6 +61,8 @@ The agent starts investigating. Allowed read-only tools run automatically. Other
 - **Stop** interrupts the agent, but does not undo changes. A remote command that has already started may continue running.
 
 Even a check, such as an HTTP request, can require approval: automatic read-only access is deliberately limited. The presence of an approval button does not mean an action is safe.
+
+[Approval screenshot](media/agent-approval.png) · [Server overview screenshot](media/server-overview.png). Captured from the real UI with a synthetic SSH profile and a local scripted AI response; [capture details](media/README.md).
 
 ## 5. Move On to Your Task
 

@@ -1,0 +1,21 @@
+name: Feature request
+description: Describe a user problem and desired outcome (English or Russian).
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A request does not promise implementation. Please avoid secrets, real server data and diagnostic archives.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What task are you trying to accomplish?
+      description: Explain the problem and your current workaround.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What outcome would help?
+      description: Describe expected behavior and alternatives you considered.
+    validations:
+      required: true
