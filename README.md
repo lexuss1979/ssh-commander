@@ -2,14 +2,15 @@
 
 **English** · [Русский](README.ru.md)
 
-<!-- Screencast placeholder: add an animated GIF here — e.g. the agent investigating
-     "why is the disk full?" and asking for approval before acting on anything. -->
+[![AI agent finds a large log and waits for approval before clearing it](docs/media/hero-disk-full.gif)](docs/media/hero-disk-full.mp4)
+
+[Watch the disk cleanup demo (MP4, 26 sec)](docs/media/hero-disk-full.mp4)
 
 A local, password-protected web app for managing remote Linux servers over SSH: terminal, file manager (SFTP), Docker Explorer, databases, systemd services, Nginx, cron — plus an AI agent that works through your SSH connection and **asks for confirmation before every mutating action**.
 
-Runs via Docker, listens on `127.0.0.1` only. No cloud, no accounts, no telemetry: the agent uses **your own API key** with any OpenAI-compatible provider, and all state stays on your machine.
+Runs via Docker, listens on `127.0.0.1` only. No ssh-commander account or telemetry: application state stays on your machine. The agent uses **your own API key** with an OpenAI-compatible provider; prompts and tool results are sent to that provider, which can also be self-hosted.
 
-Self-hosted server panels are a crowded niche — but none of them ship an AI agent that operates on your servers and asks before touching anything, while keeping everything local with your own API key. That's the gap ssh-commander fills.
+The focus is an AI agent that investigates through your SSH connection, shows what it wants to change, and waits for your approval.
 
 ## Features
 
@@ -46,31 +47,37 @@ Self-hosted server panels are a crowded niche — but none of them ship an AI ag
 
 ### AI agent
 - OpenAI-compatible API with tool calling (OpenAI, OpenRouter, vLLM, DeepSeek, …).
-- **Read-only tools run automatically; anything that mutates (write a file, run a command, docker action, connect a server) waits for your approve/reject in the UI.** A conservative deny-list filters what read-only commands may even run.
+- **Read-only tools run automatically; anything that mutates (write a file, run a command, docker action, connect a server) waits for your approve/reject in the UI.** A conservative allow-list filters what read-only commands may even run.
 - Plan mode: the agent proposes a plan first, you approve it, then it executes.
 - Per-profile persistent memory (`MEMORY.md`, loaded into context at session start); secrets are never written to it.
 - Web search built in with the DeepSeek preset (same key); cost tracking per dialogue, suggested-reply hints.
-- The agent language matches the UI language (switchable in the sidebar).
+- The agent language matches the UI language (Settings → Interface).
 
 ### Servers
 - Multiple SSH profiles (password or key auth), key import from the UI (saved with `0600`), one-click bootstrap of a new server (root + password), saved command snippets that run on several servers at once, threshold alerts with a sidebar bell (availability/disk/memory/load).
 
 ### Localization
-- UI in English and Russian — switch in the sidebar, no reload; default follows the browser locale.
+- UI in English and Russian, dark and light themes. Switch in Settings → Interface (gear at the bottom of the sidebar), no reload; the default language follows the browser locale.
 
 ## Quick start
 
-```bash
-cp .env.example .env
-# edit .env — these values are used ONCE at the first start (seeded into
-# data/settings.json): APP_PASSWORD for the web UI, AI_API_KEY (+AI_API_BASE/
-# AI_MODEL) for the agent. Leave them empty to set everything in the UI:
-# onboarding asks for the password and the AI key before the first login.
+Requires Git and Docker with Compose v2.
 
+```bash
+git clone https://github.com/lexuss1979/ssh-commander.git
+cd ssh-commander
 docker compose up -d --build
 ```
 
-Open [http://localhost:8080](http://localhost:8080), sign in with the password from onboarding (or `.env`), add a server, and go. After the first start the env values above are no longer read — configuration lives in `data/settings.json` (a Settings page is planned; until then edit the file and restart).
+Open [http://localhost:8080](http://localhost:8080). On first launch, set a password; the AI API key is optional. You are signed in automatically, then you can add a server and open its terminal. No `.env` file is needed for this flow.
+
+[![Quickstart: clone, Docker build, initial setup, and a working SSH terminal](docs/media/quickstart.gif)](docs/media/quickstart.mp4)
+
+[Watch the Quickstart demo (MP4, 37 sec)](docs/media/quickstart.mp4)
+
+To change the password or AI provider/key/model later, open **Settings** using the gear at the bottom of the sidebar. Changes apply without a restart. Configuration is stored in `data/settings.json`.
+
+For environment-based setup, copy `.env.example` to `.env` **before the first launch** and edit it. Replace the sample `APP_PASSWORD=change-me` with your own password, or leave it empty to use onboarding. `APP_PASSWORD` and `AI_API_KEY`/`AI_API_BASE`/`AI_MODEL` only seed settings on the first launch; changing them afterwards has no effect.
 
 Notes:
 
@@ -86,7 +93,7 @@ Environment variables are set via `.env` (template: `.env.example`); inside the 
 | Variable | Default | Description |
 |---|---|---|
 | `APP_PORT` / `APP_HOST` | `8080` / `127.0.0.1` | HTTP/WS port and bind address. The default is loopback; the Docker image sets `0.0.0.0` internally so the published port works. A non-loopback address prints a warning at startup |
-| `APP_PASSWORD` | empty | Password for the web UI. **Seed only, first start**: hashed into `data/settings.json`; empty — set via onboarding. Afterwards env is ignored (Settings page / file + restart) |
+| `APP_PASSWORD` | empty | Password for the web UI. **Seed only, first start**: hashed into `data/settings.json`; empty — set via onboarding. Afterwards env is ignored; change it in Settings → Security |
 | `DATA_DIR` | `/data` (docker) | Directory with `settings.json`, `profiles.json`, `db-connections.json`, `ai-dialogues.json`, `memory/`, … |
 | `KEYS_DIR` | `/keys` (docker) | Directory with SSH keys |
 | `WEB_DIST` | auto-detected | Path to the built frontend |
@@ -115,7 +122,7 @@ Server profiles live in `data/profiles.json` (volume `./data`), DB connections i
 - SSH tunnels open an **unauthenticated listener** on `127.0.0.1:<port>` — any local process or user can reach the forwarded service without the app password (the same trust model as a local terminal).
 - The AI agent **never executes mutating actions without your approval**; auto-run read-only commands pass a conservative **allow-list** (reading utilities only — no interpreters, no network clients). Reading a file that looks like a secret store (`.env`, private keys, `.pgpass`) asks for approval too.
 - Secret values are **stripped from tool output** before it reaches the model, the UI or `data/ai-dialogues.json`: PEM private keys, `NAME=value` pairs with a telling name, known token shapes, passwords in URLs, and every `Env` value in `docker inspect`. The same filter runs on `write_memory`, so the agent's memory cannot store secrets — enforced in code, not only asked for in the prompt. Redaction is pattern-based: treat it as a safety net, not a guarantee.
-- The optional web search sends your query text to the configured external search API — leave `AI_SEARCH_API_BASE` empty to disable it entirely.
+- Web search sends query text to an external search API. It is enabled automatically with the DeepSeek preset. For other presets it is enabled only when `AI_SEARCH_API_BASE` is set; to disable search, use a non-DeepSeek preset and leave that variable empty.
 - Exposing this tool to the internet is a reliable way to get your servers compromised. Don't.
 
 ## Support
