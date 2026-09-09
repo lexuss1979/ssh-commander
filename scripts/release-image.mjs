@@ -52,7 +52,11 @@ assert(candidate, 'Candidate missing after build');
 const platforms = candidate.body.manifests?.map(m => `${m.platform.os}/${m.platform.architecture}`);
 for (const platform of ['linux/amd64', 'linux/arm64']) {
   assert(platforms?.includes(platform), `Missing ${platform}`);
-  const ref = `${image}@${candidate.digest}`;
+  // Classic Docker image store не хранит две архитектуры под одним digest индекса.
+  // Проверяем дочерние manifests из того же индекса, не заменяя его локальную привязку.
+  const descriptor = candidate.body.manifests.find(m => `${m.platform.os}/${m.platform.architecture}` === platform);
+  assert.match(descriptor.digest, /^sha256:[a-f0-9]{64}$/);
+  const ref = `${image}@${descriptor.digest}`;
   docker('pull', '--platform', platform, ref);
   const info = JSON.parse(docker('image', 'inspect', ref))[0];
   assert.equal(info.Architecture, platform.split('/')[1]);
