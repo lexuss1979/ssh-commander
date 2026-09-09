@@ -10,9 +10,9 @@ Describe what you need. ssh-commander's AI agent connects to your server over SS
 
 **Free, open-source app. No ssh-commander subscription.** You pay for your servers and AI API usage with your own key.
 
-[![AI agent finds a large log and waits for approval before clearing it](docs/media/hero-disk-full.gif)](docs/media/hero-disk-full.mp4)
+[![From new-vps to a working website: the agent installs Nginx, configures the site, and verifies HTTP 200](docs/media/hero-new-vps.gif)](docs/media/hero-new-vps.mp4)
 
-**Disk full?** The agent investigates, finds a large log, asks before clearing it, and checks the result. [Watch the demo (MP4, 26 sec)](docs/media/hero-disk-full.mp4).
+**A new server. One request. A working website.** The agent installs Nginx, creates the page, and checks that it works. You approve the changes, then open the site. [Watch the demo (MP4, 45 sec)](docs/media/hero-new-vps.mp4). Recorded on a clean SSH test server; waiting and intermediate steps are shortened.
 
 ## Bring the problem, not a pile of logs
 
@@ -25,6 +25,10 @@ Start with a task in your own words:
 - **A second pair of eyes:** "Audit this server's security and explain what needs attention. Don't change anything yet."
 
 You don't need to know which command to run before asking for help. The agent does the investigation; you review the proposed changes. You can also open the terminal, files or Docker Explorer and take over whenever you need to.
+
+[![AI agent finds a large log and waits for approval before clearing it](docs/media/hero-disk-full.gif)](docs/media/hero-disk-full.mp4)
+
+**Disk full?** The agent investigates, finds a large log, asks before clearing it, and checks the result. [Watch the troubleshooting demo (MP4, 26 sec)](docs/media/hero-disk-full.mp4).
 
 ## One VPS or several
 
