@@ -48,6 +48,8 @@ docker compose up -d --build
 
 Open [http://localhost:8080](http://localhost:8080), set an app password, and add your AI provider's API key. Add your server's SSH address and credentials, then ask the agent to check its current state. No `.env` file is needed. You can skip the AI key and still use the terminal, files and other manual tools.
 
+**Step by step:** [your first server and task](docs/getting-started.md) covers SSH access, AI setup, action approvals and common problems.
+
 [![Quickstart: clone, Docker build, initial setup, and a working SSH terminal](docs/media/quickstart.gif)](docs/media/quickstart.mp4)
 
 [Watch the Quickstart demo (MP4, 37 sec)](docs/media/quickstart.mp4). This demo skips the AI key and connects to a test server; add your key in Settings to use the agent.
