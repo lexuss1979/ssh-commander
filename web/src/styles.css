@@ -361,22 +361,6 @@ button {
   font-weight: 600;
 }
 
-.alerts-gear {
-  background: none;
-  border: none;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
-  padding: 3px 4px;
-  border-radius: 4px;
-}
-
-.alerts-gear:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
 .alerts-list {
   max-height: 340px;
   overflow-y: auto;
@@ -461,7 +445,7 @@ button {
   color: var(--danger);
 }
 
-/* Настройки алертов (модалка из колокольчика). */
+/* Форма порогов алертов (раздел «Алерты» модалки настроек). */
 .alerts-settings {
   display: flex;
   flex-direction: column;
@@ -611,20 +595,20 @@ button {
   color: var(--on-accent);
 }
 
-/* Кнопка «Выйти» — полноширинная, с иконкой */
-.logout-label {
+/* Кнопки футера сайдбара («Настройки», «Выйти») — полноширинные, с иконкой */
+.footer-btn-label {
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
 
-.logout-ic {
+.footer-btn-ic {
   display: inline-flex;
   width: 14px;
   height: 14px;
 }
 
-.logout-ic svg {
+.footer-btn-ic svg {
   width: 14px;
   height: 14px;
 }
@@ -1987,7 +1971,7 @@ body.resizing-agent {
   margin-top: 16px;
 }
 
-/* Кнопки-футер вне `.modal-body` (напр. «Настройки алертов») — отступ от краёв. */
+/* Кнопки-футер вне `.modal-body` (кастомные модалки без общего Modal) — отступ от краёв. */
 .modal > .modal-actions {
   padding: 0 18px 18px;
 }
@@ -5475,13 +5459,69 @@ body.resizing-agent {
   margin: 2px 0;
 }
 
-/* Страница «Настройки» (эпик 23): смена пароля и AI-конфига. Секции —
-   карточки на --bg-raised, форма уже на всю ширину (глобальные input). */
-.settings-page {
-  padding: 16px;
-  gap: 0;
+/* Модалка «Настройки»: левый вертикальный список разделов + контент
+   (стиль настроек VS Code). Секции — карточки на --bg-raised, форма уже
+   на всю ширину (глобальные input). Фиксированная высота — навигация
+   не прыгает при переключении разделов. */
+.settings-modal {
+  height: 620px;
+}
+
+.settings-modal .modal-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+}
+
+.settings-nav {
+  width: 180px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 8px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.settings-nav-item {
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-nav-item:hover {
+  background: var(--bg-hover);
+}
+
+.settings-nav-item.active {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+  font-weight: 600;
+}
+
+.settings-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 18px;
   overflow: auto;
   scrollbar-gutter: stable;
+}
+
+/* Ряды «подпись + контрол» в разделе «Интерфейс» — с отступом друг от друга. */
+.settings-section .theme-switch-row + .theme-switch-row {
+  margin-top: 12px;
 }
 
 .settings-loading {

@@ -17,27 +17,21 @@ import { CronPage } from './pages/CronPage';
 import { ServicesPage } from './pages/ServicesPage';
 import { NginxPage } from './pages/NginxPage';
 import { DatabasesPage } from './pages/DatabasesPage';
-import { AiCostsPage } from './pages/AiCostsPage';
-import { SettingsPage } from './pages/SettingsPage';
 import { TerminalPage } from './pages/TerminalPage';
 import { FilesPage } from './pages/FilesPage';
 import { DockerPage } from './pages/DockerPage';
 import { AgentPage } from './pages/AgentPage';
 import { ProfileModal } from './components/ProfileModal';
+import { SettingsModal } from './components/SettingsModal';
 import { AlertsBell } from './components/AlertsBell';
 import { useT } from './i18n';
 import type { I18nKey } from './i18n';
 
-// Иконки футера сайдбара (луна/солнце/выход) — в фирменном SVG-стиле.
-const MOON_ICON = (
+// Иконки футера сайдбара (настройки/выход) — в фирменном SVG-стиле.
+const SETTINGS_ICON = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
-  </svg>
-);
-const SUN_ICON = (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <circle cx="12" cy="12" r="4" />
-    <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
   </svg>
 );
 const LOGOUT_ICON = (
@@ -50,7 +44,6 @@ const LOGOUT_ICON = (
 
 type Tab =
   | 'servers'
-  | 'ai-costs'
   | 'overview'
   | 'terminal'
   | 'files'
@@ -59,8 +52,7 @@ type Tab =
   | 'nginx'
   | 'ports'
   | 'cron'
-  | 'services'
-  | 'settings';
+  | 'services';
 
 const TABS: Array<{ id: Tab; labelKey: I18nKey }> = [
   { id: 'overview', labelKey: 'tabs.overview' },
@@ -98,7 +90,7 @@ function loadAgentOpen(): boolean {
 }
 
 export default function App() {
-  const { lang, setLang, t } = useT();
+  const { t } = useT();
   const [authed, setAuthed] = useState<boolean | null>(null);
   // Первичная настройка (docs/onboarding-plan.md): true — рендерим
   // OnboardingPage вместо LoginPage, пока пароль не задан в UI.
@@ -119,6 +111,9 @@ export default function App() {
   // onOpenInTerminalConsumed.
   const [hostTerminalRequest, setHostTerminalRequest] = useState<{ cwd: string } | null>(null);
   const [showProfiles, setShowProfiles] = useState(false);
+  // Модалка «Настройки» (шестерёнка в футере сайдбара) — без keep-alive:
+  // монтируется при открытии, разделы запрашивают свежие данные сами.
+  const [showSettings, setShowSettings] = useState(false);
   const [toast, setToast] = useState('');
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
@@ -533,8 +528,6 @@ export default function App() {
               setActiveProfileId(id);
               setTab('overview');
             }}
-            onSaveSettings={handleAlertsSettingsSaved}
-            showError={showError}
           />
         </div>
 
@@ -546,24 +539,6 @@ export default function App() {
           >
             <strong>{t('app.servers')}</strong>
             <span className="muted">{t('app.serversSubtitle')}</span>
-          </button>
-
-          <button
-            type="button"
-            className={`profile-list-item${tab === 'ai-costs' ? ' active' : ''}`}
-            onClick={() => setTab('ai-costs')}
-          >
-            <strong>{t('app.aiCosts')}</strong>
-            <span className="muted">{t('app.aiCostsSubtitle')}</span>
-          </button>
-
-          <button
-            type="button"
-            className={`profile-list-item${tab === 'settings' ? ' active' : ''}`}
-            onClick={() => setTab('settings')}
-          >
-            <strong>{t('app.settings')}</strong>
-            <span className="muted">{t('app.settingsSubtitle')}</span>
           </button>
 
           <div className="sidebar-divider" />
@@ -629,39 +604,14 @@ export default function App() {
         </div>
 
         <div className="sidebar-footer">
-          <div className="theme-switch-row">
-            <span className="theme-switch-label">{t('common.language')}</span>
-            <div className="lang-switch" role="group" aria-label={t('common.language')}>
-              <button
-                className={`lang-switch-btn ${lang === 'ru' ? 'active' : ''}`}
-                onClick={() => setLang('ru')}
-              >
-                RU
-              </button>
-              <button
-                className={`lang-switch-btn ${lang === 'en' ? 'active' : ''}`}
-                onClick={() => setLang('en')}
-              >
-                EN
-              </button>
-            </div>
-          </div>
-          <div className="theme-switch-row">
-            <span className="theme-switch-label">{t('app.theme')}</span>
-            <button
-              className={`theme-switch ${theme}`}
-              onClick={() => setTheme((cur) => (cur === 'dark' ? 'light' : 'dark'))}
-              title={theme === 'dark' ? t('app.themeToLight') : t('app.themeToDark')}
-              aria-label={t('app.themeToggleAria')}
-            >
-              <span className="ts-icon ts-moon">{MOON_ICON}</span>
-              <span className="ts-icon ts-sun">{SUN_ICON}</span>
-              <span className="ts-knob" />
-            </button>
-          </div>
+          <button className="btn btn-block" onClick={() => setShowSettings(true)}>
+            <span className="footer-btn-label">
+              <span className="footer-btn-ic">{SETTINGS_ICON}</span> {t('app.settings')}
+            </span>
+          </button>
           <button className="btn btn-block" onClick={handleLogout}>
-            <span className="logout-label">
-              <span className="logout-ic">{LOGOUT_ICON}</span> {t('app.logout')}
+            <span className="footer-btn-label">
+              <span className="footer-btn-ic">{LOGOUT_ICON}</span> {t('app.logout')}
             </span>
           </button>
         </div>
@@ -705,15 +655,7 @@ export default function App() {
                 profiles={profiles}
               />
             </div>
-            {/* Глобальная страница вне таббара профиля (как «Серверы»): расходы
-                AI кросс-профильные, профиль не нужен. */}
-            <div className={`tab-page ${tab === 'ai-costs' ? '' : 'hidden'}`}>
-              <AiCostsPage visible={tab === 'ai-costs'} />
-            </div>
-            {/* Страница «Настройки» (эпик 23) — без keep-alive: монтируется
-                при открытии вкладки, GET отдаёт свежий статус каждый раз. */}
-            {tab === 'settings' && <SettingsPage showError={showError} />}
-            {!activeProfile && tab !== 'servers' && tab !== 'ai-costs' && tab !== 'settings' && (
+            {!activeProfile && tab !== 'servers' && (
               <div className="empty-state">
                 <p>{t('app.addServerFirst')}</p>
                 <button className="btn btn-primary" onClick={() => setShowProfiles(true)}>
@@ -873,6 +815,17 @@ export default function App() {
           }}
           showError={showError}
           onProfileCreated={(id) => setActiveProfileId(id)}
+        />
+      )}
+
+      {showSettings && (
+        <SettingsModal
+          theme={theme}
+          setTheme={setTheme}
+          alertsSettings={alertsSettings}
+          onSaveAlertsSettings={handleAlertsSettingsSaved}
+          showError={showError}
+          onClose={() => setShowSettings(false)}
         />
       )}
 
