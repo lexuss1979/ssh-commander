@@ -1,12 +1,12 @@
 node_modules/
 dist/
 .env
-data/profiles.json
-data/db-connections.json
-data/snippets.json
-data/ai-dialogues.json
-data/memory/
-data/*.tmp
+# Данные установки: профили с SSH-паролями, подключения БД, диалоги и память
+# агента, отпечатки ключей хостов, журнал расходов, а также tmp- и
+# *.corrupt-*-копии сторов. Перечислять файлы по одному нельзя: новый стор
+# (known-hosts.json) и бэкапы corrupt-guard мимо такого списка проходили.
+data/*
+!data/.gitkeep
 keys/*
 !keys/.gitkeep
 *.log
@@ -14,9 +14,6 @@ keys/*
 .qwen/
 .worktrees/
 .eslintcache
-data/ai-usage.json
-data/ai-usage.json.*
-data/settings.json
 # Локальные материалы продвижения — не публикуются
 promo/
 # HTML-превью UI-прототипов (локальные моки, не часть приложения)
