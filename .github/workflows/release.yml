@@ -3,8 +3,13 @@ name: Release image
 on:
   push:
     tags: ['v*.*.*']
-  # Повтор: выбрать существующий тег в Run workflow или Re-run failed jobs.
+  # Ручное восстановление: новые скрипты выпуска, неизменный исходный код существующего тега.
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing stable tag to publish (vX.Y.Z); required when running from main
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -15,45 +20,64 @@ concurrency:
 
 jobs:
   validate:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.version.outputs.sha }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Check stable tag and package versions
+        id: version
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           node --input-type=module <<'JS'
           import fs from 'node:fs';
+          import { execFileSync } from 'node:child_process';
           const tag = process.env.RELEASE_TAG;
           if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(tag)) throw Error('Stable vX.Y.Z tag required');
+          const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+          const sha = git('rev-parse', `refs/tags/${tag}^{commit}`);
+          if (!/^[a-f0-9]{40}$/.test(sha)) throw Error('Invalid release commit');
           for (const dir of ['server', 'web']) {
             for (const file of ['package.json', 'package-lock.json']) {
-              const pkg = JSON.parse(fs.readFileSync(`${dir}/${file}`));
+              const pkg = JSON.parse(git('show', `${sha}:${dir}/${file}`));
               if (pkg.version !== tag.slice(1)) throw Error(`${dir}/${file}: version mismatch`);
               if (file === 'package-lock.json' && pkg.packages?.['']?.version !== tag.slice(1)) throw Error(`${dir}/${file}: root package version mismatch`);
             }
           }
-          const compose = fs.readFileSync('docker-compose.release.yml', 'utf8');
+          const compose = git('show', `${sha}:docker-compose.release.yml`) + '\n';
           if (!compose.includes(`image: ghcr.io/lexuss1979/ssh-commander:${tag.slice(1)}\n`)) throw Error('Compose version mismatch');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `sha=${sha}\ntag=${tag}\n`);
           JS
   checks:
     needs: validate
     uses: ./.github/workflows/checks.yml
+    with:
+      ref: ${{ needs.validate.outputs.sha }}
   publish:
-    needs: checks
+    needs: [validate, checks]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read
       packages: write
     steps:
+      # Скрипты оркестрации отделены от контекста сборки приложения.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          path: release-tools
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.validate.outputs.sha }}
+          path: source
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
@@ -67,6 +91,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build, smoke-test and publish immutable version
+        working-directory: source
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/release-image.mjs
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: node ../release-tools/scripts/release-image.mjs

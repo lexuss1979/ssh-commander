@@ -51,7 +51,8 @@ try {
     assert.equal(settings.status, 200);
     assert.equal((await settings.json()).ai.apiKeySet, false);
     assert.equal((await fetch(`${base}/api/settings`)).status, 401);
-    const stored = readFileSync(join(root, 'data', 'settings.json'), 'utf8');
+    // На Linux файл 0600 принадлежит root контейнера, runner не может читать его с хоста.
+    const stored = docker('exec', name, 'cat', '/data/settings.json');
     assert(!stored.includes(password));
     assert.match(stored, /scrypt/);
     if (first) writeFileSync(join(root, 'expected-settings'), stored);

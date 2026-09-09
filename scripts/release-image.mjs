@@ -2,10 +2,13 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const image = 'ghcr.io/lexuss1979/ssh-commander';
 const repository = 'lexuss1979/ssh-commander';
-const { GITHUB_REF_NAME: tag, GITHUB_SHA: sha, GITHUB_TOKEN: token, GITHUB_ACTOR: actor } = process.env;
+const { GITHUB_TOKEN: token, GITHUB_ACTOR: actor } = process.env;
+const tag = process.env.RELEASE_TAG || process.env.GITHUB_REF_NAME;
+const sha = process.env.RELEASE_SHA || process.env.GITHUB_SHA;
 assert.match(tag ?? '', /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
 assert.match(sha ?? '', /^[a-f0-9]{40}$/);
 assert(token && actor);
@@ -55,7 +58,7 @@ for (const platform of ['linux/amd64', 'linux/arm64']) {
   assert.equal(info.Architecture, platform.split('/')[1]);
   assert.equal(info.Config.Labels['org.opencontainers.image.revision'], sha, 'Existing image belongs to another commit');
   assert.equal(info.Config.Labels['org.opencontainers.image.version'], version);
-  execFileSync(process.execPath, ['scripts/smoke-image.mjs', ref, platform], { stdio: 'inherit', timeout: 300_000 });
+  execFileSync(process.execPath, [fileURLToPath(new URL('./smoke-image.mjs', import.meta.url)), ref, platform], { stdio: 'inherit', timeout: 300_000 });
 }
 if (!published) docker('buildx', 'imagetools', 'create', '--tag', `${image}:${version}`, `${image}@${candidate.digest}`);
 assert.equal((await manifest(version))?.digest, candidate.digest, 'Published digest differs');
