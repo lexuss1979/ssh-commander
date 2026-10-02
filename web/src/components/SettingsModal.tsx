@@ -38,6 +38,7 @@ interface Props {
   alertsSettings: AlertsSettings;
   onSaveAlertsSettings: (s: AlertsSettings) => void;
   showError: (msg: string) => void;
+  showSuccess: (msg: string) => void;
   onClose: () => void;
 }
 
@@ -54,6 +55,7 @@ export function SettingsModal({
   alertsSettings,
   onSaveAlertsSettings,
   showError,
+  showSuccess,
   onClose,
 }: Props) {
   const { lang, setLang, t } = useT();
@@ -118,8 +120,8 @@ export function SettingsModal({
             </div>
           </section>
         )}
-        {section === 'security' && <PasswordSection showError={showError} />}
-        {section === 'ai' && <AiSection showError={showError} />}
+        {section === 'security' && <PasswordSection showError={showError} showSuccess={showSuccess} />}
+        {section === 'ai' && <AiSection showError={showError} showSuccess={showSuccess} />}
         {section === 'ai-costs' && <AiCostsPage visible />}
         {section === 'alerts' && (
           <section className="settings-section">
@@ -128,6 +130,7 @@ export function SettingsModal({
               settings={alertsSettings}
               onSave={onSaveAlertsSettings}
               showError={showError}
+              showSuccess={showSuccess}
             />
           </section>
         )}
@@ -137,7 +140,7 @@ export function SettingsModal({
 }
 
 /** Раздел «Безопасность»: смена пароля веб-интерфейса (эпик 23). */
-function PasswordSection({ showError }: { showError: (msg: string) => void }) {
+function PasswordSection({ showError, showSuccess }: { showError: (msg: string) => void; showSuccess: (msg: string) => void }) {
   const { t } = useT();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -161,7 +164,7 @@ function PasswordSection({ showError }: { showError: (msg: string) => void }) {
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      showError(t('settings.passwordChanged'));
+      showSuccess(t('settings.passwordChanged'));
     } catch (err) {
       showError((err as Error).message);
     } finally {
@@ -216,10 +219,11 @@ function PasswordSection({ showError }: { showError: (msg: string) => void }) {
 /**
  * Раздел «AI-агент»: замена AI-конфига (эпик 23). Статус запрашивается GET
  * при монтировании (каждое открытие раздела — свежий снимок), ответ PUT
- * освежает статус. Ключ write-only: поле всегда пустое, ввод заменяет,
+ * освежает статус. Ключ write-only: пустое поле сохраняет его при смене
+ * модели; ввод заменяет,
  * «Очистить ключ» шлёт aiApiKey: null (агент становится недоступен).
  */
-function AiSection({ showError }: { showError: (msg: string) => void }) {
+function AiSection({ showError, showSuccess }: { showError: (msg: string) => void; showSuccess: (msg: string) => void }) {
   const { t } = useT();
   const [status, setStatus] = useState<AiSettingsStatus | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -262,13 +266,17 @@ function AiSection({ showError }: { showError: (msg: string) => void }) {
     };
   }, [applyStatus, reloadKey]);
 
+  // Смена модели не меняет адрес сохранённого пресета, включая прокси.
+  const base = provider === 'custom' ? customBase.trim()
+    : provider === status?.provider ? status.apiBase : PROVIDERS[provider].base;
+  const canKeepKey = Boolean(status?.apiKeySet && provider === status.provider
+    && base.replace(/\/+$/, '') === status.apiBase.replace(/\/+$/, ''));
+
   const submitAi = async (e: React.FormEvent) => {
     e.preventDefault();
     const key = apiKey.trim();
     const modelName = model.trim();
-    const base = provider === 'custom' ? customBase.trim() : PROVIDERS[provider].base;
-    if (!key) {
-      // Частичной замены нет (ключ write-only): без ключа конфиг не сохранить.
+    if (!key && !canKeepKey) {
       showError(t('settings.errorKeyRequired'));
       return;
     }
@@ -282,15 +290,15 @@ function AiSection({ showError }: { showError: (msg: string) => void }) {
     }
     setAiBusy(true);
     try {
-      const res = await updateSettings({
+      const res = await updateSettings(key ? {
         aiApiKey: key,
         aiProvider: provider,
         aiApiBase: base,
         aiModel: modelName,
-      });
+      } : { aiModel: modelName });
       applyStatus(res.ai);
       setApiKey('');
-      showError(t('settings.aiSaved'));
+      showSuccess(t('settings.aiSaved'));
     } catch (err) {
       showError((err as Error).message);
     } finally {
@@ -305,7 +313,7 @@ function AiSection({ showError }: { showError: (msg: string) => void }) {
       const res = await updateSettings({ aiApiKey: null });
       applyStatus(res.ai);
       setApiKey('');
-      showError(t('settings.keyCleared'));
+      showSuccess(t('settings.keyCleared'));
     } catch (err) {
       showError((err as Error).message);
     } finally {
@@ -348,6 +356,7 @@ function AiSection({ showError }: { showError: (msg: string) => void }) {
         >
           <option value="deepseek">{t('settings.providerDeepseek')}</option>
           <option value="openai">{t('settings.providerOpenai')}</option>
+          <option value="opencode-go">{t('settings.providerOpencodeGo')}</option>
           <option value="custom">{t('settings.providerCustom')}</option>
         </select>
         <p className="muted settings-hint">
@@ -365,13 +374,16 @@ function AiSection({ showError }: { showError: (msg: string) => void }) {
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
           placeholder={
-            status.apiKeySet
+            canKeepKey
               ? t('settings.keySetPlaceholder')
               : t('settings.keyUnsetPlaceholder')
           }
           autoComplete="off"
           spellCheck={false}
         />
+        <p className="muted settings-hint">
+          {canKeepKey ? t('settings.keyKeepHint') : t('settings.keyRequiredHint')}
+        </p>
 
         {provider === 'custom' && (
           <>
@@ -402,6 +414,8 @@ function AiSection({ showError }: { showError: (msg: string) => void }) {
           autoComplete="off"
           spellCheck={false}
         />
+
+        {provider === 'opencode-go' && <p className="muted settings-hint">{t('ai.opencodeGoModelHint')}</p>}
 
         <div className="settings-actions">
           <button className="btn btn-primary" disabled={aiBusy}>

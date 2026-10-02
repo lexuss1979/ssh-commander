@@ -469,12 +469,20 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           void refreshDialogues();
           break;
         }
-        case 'error':
+        case 'error': {
           setRunning(false);
+          setPlanReady(false);
           setSuggestion('');
-          showError(String(msg.message ?? tRef.current('agent.errorFallback')));
+          const error = String(msg.message ?? tRef.current('agent.errorFallback'));
+          // Ошибка остаётся видна в чате; частичный ответ больше не стримится.
+          setMessages((prev) => [
+            ...prev.map((message) => message.streaming ? { ...message, streaming: false } : message),
+            { id: nextId++, role: 'assistant', content: `⚠️ ${error}` },
+          ]);
+          showError(error);
           void refreshDialogues();
           break;
+        }
       }
     };
     return () => {

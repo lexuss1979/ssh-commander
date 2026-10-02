@@ -45,6 +45,16 @@ const messageSchema = z.object({
   tool_calls: z.array(toolCallSchema).optional(),
   tool_call_id: z.string().optional(),
   name: z.string().optional(),
+  responsesContext: z.object({
+    model: z.string(),
+    apiBase: z.string(),
+    items: z.array(z.object({
+      type: z.literal('reasoning'),
+      id: z.string(),
+      summary: z.tuple([]),
+      encrypted_content: z.string(),
+    })),
+  }).optional(),
 });
 
 const dialogueSchema = z.object({

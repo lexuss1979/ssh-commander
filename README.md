@@ -96,6 +96,10 @@ Notes:
 
 ## Cost and privacy
 
+We **recommend DeepSeek** for agent use: in our experience with server administration tasks, it responded several times faster than the models we tried through OpenCode Go. This is a practical observation; speed depends on the model, conversation, and provider load.
+
+An **OpenCode Go subscription** is also supported, but **not every model**: Chat Completions and selected Responses models (including `gpt-6-luna`) are supported; Anthropic Messages is not supported yet. Go support is available in source builds after version 0.1.1. See the [AI provider guide](docs/ai-providers.en.md) for setup and limitations.
+
 The app is free under the MIT license. AI usage is billed separately by your chosen provider; cost depends on the model and the task, and the app tracks estimated spending. You can use an OpenAI-compatible provider or a self-hosted model endpoint.
 
 ssh-commander runs locally, is password-protected, and listens on `127.0.0.1` only. No ssh-commander account or telemetry. Application state stays on your machine, but **AI prompts and tool results are sent to your configured provider**. Do not expose the app to the internet; read [Security](#security) before use.

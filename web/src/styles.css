@@ -15,6 +15,7 @@
   --ok: #7fbf7f;
   --warn: #e5c07b;
   --toast-bg: #2a1a1d;
+  --toast-success-bg: #192b20;
   --overlay: rgba(0, 0, 0, 0.6);
   --shadow: rgba(0, 0, 0, 0.5);
   --shadow-lg: rgba(0, 0, 0, 0.6);
@@ -47,6 +48,7 @@
   --ok: #3c9150;
   --warn: #a9761b;
   --toast-bg: #fde9ec;
+  --toast-success-bg: #e6f4e9;
   --overlay: rgba(29, 39, 51, 0.35);
   --shadow: rgba(29, 39, 51, 0.14);
   --shadow-lg: rgba(29, 39, 51, 0.2);
@@ -1036,6 +1038,16 @@ body.resizing-agent {
   z-index: 200;
   max-width: 70vw;
   box-shadow: 0 6px 24px var(--shadow);
+}
+
+/* Успешные действия выделяются зелёным в обеих темах. */
+.toast-success {
+  background: var(--toast-success-bg);
+  border-color: var(--ok);
+}
+
+.toast-success > span {
+  color: var(--ok);
 }
 
 /* Selected row highlight in file manager */

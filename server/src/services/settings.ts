@@ -21,14 +21,16 @@ import { config } from '../config.js';
  * или файл + рестарт.
  */
 
-export type AiProvider = 'deepseek' | 'openai' | 'custom';
+export type AiProvider = 'deepseek' | 'openai' | 'opencode-go' | 'custom';
+
+export const OPENCODE_GO_API_BASE = 'https://opencode.ai/zen/go/v1';
+export const OPENCODE_GO_MODEL = 'glm-5.3-flash';
 
 export interface AppSettings {
   /** Опционален: seed при заданном только AI-ключе пишет AI-поля без пароля,
    * и onboarding остаётся доступным (дозаписывает хеш мержем). */
   passwordHash?: string;
-  /** Какой пресет провайдера выбран: статус веб-поиска и UI; на логику ходьбы
-   * в API не влияет. */
+  /** Пресет провайдера: UI, статус веб-поиска и заголовки API. */
   aiProvider?: AiProvider;
   /** Ключ OpenAI-совместимого API (агент); без него агент недоступен. */
   aiApiKey?: string;
@@ -40,7 +42,7 @@ export interface AppSettings {
 
 const settingsSchema = z.object({
   passwordHash: z.string().min(1).optional(),
-  aiProvider: z.enum(['deepseek', 'openai', 'custom']).optional(),
+  aiProvider: z.enum(['deepseek', 'openai', 'opencode-go', 'custom']).optional(),
   aiApiKey: z.string().optional(),
   aiApiBase: z.string().optional(),
   aiModel: z.string().optional(),
@@ -137,8 +139,19 @@ export function verifyPassword(candidate: string): boolean {
   return crypto.timingSafeEqual(hash, parsed.hash);
 }
 
-/** Провайдер по base URL — эвристика только для seed'а и UI-подписи. */
+/** Точный адрес Go: подстрока в чужом домене или пути не включает его заголовки. */
+export function isOpenCodeGoBase(base: string): boolean {
+  try {
+    const url = new URL(base);
+    return `${url.origin}${url.pathname.replace(/\/+$/, '')}` === OPENCODE_GO_API_BASE;
+  } catch {
+    return false;
+  }
+}
+
+/** Провайдер по base URL — для seed'а и совместимости со старым custom-конфигом. */
 export function providerFromBase(base: string): AiProvider {
+  if (isOpenCodeGoBase(base)) return 'opencode-go';
   if (base.includes('api.deepseek.com')) return 'deepseek';
   if (base.includes('api.openai.com')) return 'openai';
   return 'custom';
@@ -191,8 +204,8 @@ export function getAiSettings(): {
   return {
     provider: s?.aiProvider ?? null,
     apiKey: s?.aiApiKey ?? '',
-    apiBase: s?.aiApiBase ?? DEFAULT_API_BASE,
-    model: s?.aiModel ?? DEFAULT_MODEL,
+    apiBase: s?.aiApiBase ?? (s?.aiProvider === 'opencode-go' ? OPENCODE_GO_API_BASE : DEFAULT_API_BASE),
+    model: s?.aiModel ?? (s?.aiProvider === 'opencode-go' ? OPENCODE_GO_MODEL : DEFAULT_MODEL),
   };
 }
 

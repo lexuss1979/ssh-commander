@@ -52,6 +52,8 @@ Do not use `localhost` or `127.0.0.1` as a remote VPS address: with Docker, thos
 
 ## 3. Configure AI
 
+We recommend DeepSeek: in our experience, it responded several times faster than the models we tried through OpenCode Go. Go subscription keys are also supported, but not every model is compatible; see [choosing an AI provider and limitations](ai-providers.en.md). Go support is available in source builds after version 0.1.1.
+
 If you skipped the key, click the gear at the bottom of the sidebar: **Settings → AI agent**. Select your provider, enter its API key and a model available to that key. **Custom URL** also requires the Base URL of an OpenAI-compatible API. Click **Save**; no app restart is needed.
 
 Without a key, the terminal and other manual tools still work, but the agent is unavailable. API usage is billed separately by the provider. Estimated costs appear in the dialogue and **Settings → AI costs**. Change the interface and agent language in **Settings → Interface**.

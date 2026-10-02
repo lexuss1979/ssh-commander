@@ -6,6 +6,7 @@ interface Props {
   settings: AlertsSettings;
   onSave: (s: AlertsSettings) => void;
   showError: (msg: string) => void;
+  showSuccess: (msg: string) => void;
 }
 
 const clampNum = (raw: string, min: number, max: number, fallback: number): number => {
@@ -20,7 +21,7 @@ const clampNum = (raw: string, min: number, max: number, fallback: number): numb
  * пропа settings при монтировании; сохранение уходит через onSave
  * (App делает тихий re-baseline активных алертов).
  */
-export function AlertsSettingsForm({ settings, onSave, showError }: Props) {
+export function AlertsSettingsForm({ settings, onSave, showError, showSuccess }: Props) {
   const { t } = useT();
   const [enabled, setEnabled] = useState(settings.enabled);
   const [disk, setDisk] = useState(String(settings.disk));
@@ -61,7 +62,7 @@ export function AlertsSettingsForm({ settings, onSave, showError }: Props) {
       notify,
     });
     // Форма остаётся открытой (это раздел, а не модалка) — подтверждаем тостом.
-    showError(t('alerts.saved'));
+    showSuccess(t('alerts.saved'));
   };
 
   const resetDefaults = () => {

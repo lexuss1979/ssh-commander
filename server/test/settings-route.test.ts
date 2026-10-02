@@ -193,6 +193,46 @@ describe('PUT /api/settings — смена пароля', () => {
 });
 
 describe('PUT /api/settings — AI-конфиг', () => {
+  it('смена только модели сохраняет ключ, провайдера, адрес и пароль', async () => {
+    const before = onDisk();
+    const res = await put({ aiModel: 'updated-model' });
+    expect(res.status).toBe(200);
+    expect(onDisk()).toEqual({ ...before, aiModel: 'updated-model' });
+    const text = await res.text();
+    expect(JSON.parse(text).ai).toMatchObject({ model: 'updated-model', apiKeySet: true });
+    expect(text).not.toContain(before.aiApiKey);
+    expect(text).not.toContain('aiApiKey');
+  });
+
+  it('смена модели Go через прокси сохраняет его адрес и ключ', async () => {
+    await put({ aiApiKey: 'go-proxy-key', aiProvider: 'opencode-go', aiApiBase: 'https://proxy.example/v1', aiModel: 'glm-5.3-flash' });
+    const before = onDisk();
+    const res = await put({ aiModel: 'gpt-6-luna' });
+    expect(res.status).toBe(200);
+    expect(onDisk()).toEqual({ ...before, aiModel: 'gpt-6-luna' });
+  });
+
+  it.each(['', '   ', 'bad model'])('некорректная модель %s не изменяет сохранённый ключ', async (aiModel) => {
+    const before = onDisk();
+    expect((await put({ aiModel })).status).toBe(400);
+    expect(onDisk()).toEqual(before);
+  });
+
+  it('пресет OpenCode Go сохраняется и читается без раскрытия ключа и автоматического поиска', async () => {
+    const res = await put({
+      aiApiKey: 'go-secret-key', aiProvider: 'opencode-go',
+      aiApiBase: 'https://opencode.ai/zen/go/v1/', aiModel: 'glm-5.3-flash',
+    });
+    expect(res.status).toBe(200);
+    const expected = { ai: {
+      provider: 'opencode-go', apiKeySet: true, apiBase: 'https://opencode.ai/zen/go/v1',
+      model: 'glm-5.3-flash', searchAvailable: false,
+    } };
+    expect(await res.json()).toEqual(expected);
+    expect(await (await get()).json()).toEqual(expected);
+    expect(onDisk()).toMatchObject({ aiProvider: 'opencode-go', aiApiKey: 'go-secret-key' });
+  });
+
   it('замена целиком → все четыре поля на диске, хвостовой / срезан, ключ trim', async () => {
     const res = await put(
       {
@@ -255,6 +295,14 @@ describe('PUT /api/settings — AI-конфиг', () => {
     const res = await put({ aiApiKey: null, aiProvider: 'deepseek' });
     expect(res.status).toBe(400);
     expect(await errorOf(res)).toContain('очистке');
+  });
+
+  it('смена модели без настроенного ключа → 400 и настройки не меняются', async () => {
+    const before = onDisk();
+    const res = await put({ aiModel: 'gpt-6-luna' });
+    expect(res.status).toBe(400);
+    expect(await errorOf(res)).toContain('Сначала задайте ключ');
+    expect(onDisk()).toEqual(before);
   });
 
   it('пустое тело {} → 400', async () => {

@@ -66,7 +66,8 @@ export function fetchSettings(): Promise<SettingsStatus> {
 
 /**
  * PUT /api/settings: смена пароля — парой currentPassword+newPassword;
- * замена AI-конфига — только целиком (ключ write-only); aiApiKey: null —
+ * смена модели — aiModel без ключа; замена прочего AI-конфига — целиком;
+ * ключ write-only, aiApiKey: null —
  * очистка ключа (агент недоступен). Ответ — обновлённый GET-статус.
  */
 export function updateSettings(input: {

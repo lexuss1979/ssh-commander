@@ -255,6 +255,15 @@ describe('isSearchConfigured (эпик 22: провайдер + env-оверра
     seedAi(st, 'custom', 'sk-openai');
     expect(mod.isSearchConfigured()).toBe(false);
   });
+
+  it('OpenCode Go с моделью DeepSeek не включает поиск DeepSeek автоматически', async () => {
+    const { mod, st } = await fresh(null);
+    st.saveSettings({
+      aiProvider: 'opencode-go', aiApiKey: 'go-key',
+      aiApiBase: 'https://opencode.ai/zen/go/v1', aiModel: 'deepseek-v4-flash',
+    });
+    expect(mod.isSearchConfigured()).toBe(false);
+  });
 });
 
 describe('searchWeb: база и ключ по провайдеру', () => {

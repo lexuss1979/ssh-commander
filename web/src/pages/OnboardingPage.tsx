@@ -127,6 +127,7 @@ export function OnboardingPage({ onComplete, showError }: Props) {
         >
           <option value="deepseek">{t('onboarding.providerDeepseek')}</option>
           <option value="openai">{t('onboarding.providerOpenai')}</option>
+          <option value="opencode-go">{t('onboarding.providerOpencodeGo')}</option>
           <option value="custom">{t('onboarding.providerCustom')}</option>
         </select>
 
@@ -148,6 +149,8 @@ export function OnboardingPage({ onComplete, showError }: Props) {
           autoComplete="off"
           spellCheck={false}
         />
+
+        {provider === 'opencode-go' && <p className="muted onboarding-hint">{t('ai.opencodeGoModelHint')}</p>}
 
         {provider === 'custom' && (
           <>

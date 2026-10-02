@@ -114,7 +114,7 @@ export default function App() {
   // Модалка «Настройки» (шестерёнка в футере сайдбара) — без keep-alive:
   // монтируется при открытии, разделы запрашивают свежие данные сами.
   const [showSettings, setShowSettings] = useState(false);
-  const [toast, setToast] = useState('');
+  const [toast, setToast] = useState<{ message: string; kind: 'error' | 'success' } | null>(null);
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
       return localStorage.getItem('sc-theme') === 'light' ? 'light' : 'dark';
@@ -184,10 +184,20 @@ export default function App() {
   }, [agentWidth, agentOpen]);
 
   const showError = useCallback((msg: string) => {
-    setToast(msg);
+    setToast({ message: msg, kind: 'error' });
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(''), 6000);
+    toastTimer.current = window.setTimeout(() => setToast(null), 6000);
   }, []);
+  const showSuccess = useCallback((msg: string) => {
+    setToast({ message: msg, kind: 'success' });
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 6000);
+  }, []);
+  const toastView = toast && (
+    <div className={`toast toast-${toast.kind}`} role={toast.kind === 'error' ? 'alert' : 'status'}>
+      {toast.kind === 'success' && <span aria-hidden>✓ </span>}{toast.message}
+    </div>
+  );
 
   const applyProfiles = useCallback((list: Profile[]) => {
     setProfiles(list);
@@ -489,7 +499,7 @@ export default function App() {
     return (
       <>
         <div className="boot">{t('common.loading')}</div>
-        {toast && <div className="toast">{toast}</div>}
+        {toastView}
       </>
     );
   }
@@ -499,7 +509,7 @@ export default function App() {
     return (
       <>
         <OnboardingPage onComplete={handleOnboardingComplete} showError={showError} />
-        {toast && <div className="toast">{toast}</div>}
+        {toastView}
       </>
     );
   }
@@ -508,7 +518,7 @@ export default function App() {
     return (
       <>
         <LoginPage onLogin={handleLogin} showError={showError} />
-        {toast && <div className="toast">{toast}</div>}
+        {toastView}
       </>
     );
   }
@@ -825,11 +835,12 @@ export default function App() {
           alertsSettings={alertsSettings}
           onSaveAlertsSettings={handleAlertsSettingsSaved}
           showError={showError}
+          showSuccess={showSuccess}
           onClose={() => setShowSettings(false)}
         />
       )}
 
-      {toast && <div className="toast">{toast}</div>}
+      {toastView}
     </div>
   );
 }

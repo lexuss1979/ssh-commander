@@ -4,11 +4,13 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { PROVIDERS } from '../../web/src/ai-providers.js';
 
 // Триггер onboarding — только отсутствие passwordHash в settings.json
 // (docs/settings-model-plan.md): env-пароля в схеме больше нет.
 const dataDirA = mkdtempSync(path.join(tmpdir(), 'sc-setup-a-'));
 const dataDirB = mkdtempSync(path.join(tmpdir(), 'sc-setup-b-'));
+const dataDirC = mkdtempSync(path.join(tmpdir(), 'sc-setup-go-'));
 process.env.DATA_DIR = dataDirA;
 
 type SettingsModule = typeof import('../src/services/settings.js');
@@ -50,6 +52,7 @@ async function freshStack(dir: string): Promise<Stack> {
 afterAll(async () => {
   rmSync(dataDirA, { recursive: true, force: true });
   rmSync(dataDirB, { recursive: true, force: true });
+  rmSync(dataDirC, { recursive: true, force: true });
 });
 
 /** POST /api/setup от «клиента» с отдельным IP (свой rate-limit bucket). */
@@ -64,6 +67,29 @@ function post(base: string, body: unknown, ip: string): Promise<Response> {
 function onDisk(dir: string): Record<string, unknown> {
   return JSON.parse(readFileSync(path.join(dir, 'settings.json'), 'utf8')) as Record<string, unknown>;
 }
+
+describe('setup с OpenCode Go', () => {
+  it('сохраняет пресет, задаёт официальный URL и выполняет авто-вход', async () => {
+    const stack = await freshStack(dataDirC);
+    try {
+      const res = await post(stack.base, {
+        password: 'password123', aiApiKey: 'go-key', aiProvider: 'opencode-go', aiModel: PROVIDERS['opencode-go'].model,
+      }, '10.2.0.1');
+      expect(res.status).toBe(200);
+      expect(res.headers.get('set-cookie')).toContain('sc_session=');
+      expect(onDisk(dataDirC)).toMatchObject({
+        aiProvider: 'opencode-go', aiApiKey: 'go-key',
+        aiApiBase: 'https://opencode.ai/zen/go/v1', aiModel: 'glm-5.3-flash',
+      });
+      expect(stack.settings.getAiSettings().apiBase).toBe('https://opencode.ai/zen/go/v1');
+      expect(stack.settings.getAiSettings()).toMatchObject({
+        apiBase: PROVIDERS['opencode-go'].base, model: PROVIDERS['opencode-go'].model,
+      });
+    } finally {
+      await new Promise<void>((resolve) => stack.server.close(() => resolve()));
+    }
+  });
+});
 
 describe('фаза A: setup без ключа — посеянные AI-поля сохраняются', () => {
   let stack: Stack;

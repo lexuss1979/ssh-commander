@@ -198,6 +198,18 @@ describe('хеш пароля', () => {
 });
 
 describe('getAiSettings: только settings, дефолты — константы кода', () => {
+  it('OpenCode Go читается после перезагрузки настроек с собственными дефолтами', async () => {
+    cleanDir();
+    const settings = await freshSettings();
+    settings.saveSettings({ aiProvider: 'opencode-go', aiApiKey: 'go-key' });
+    const reloaded = await freshSettings();
+    expect(reloaded.getAiSettings()).toEqual({
+      provider: 'opencode-go', apiKey: 'go-key',
+      apiBase: 'https://opencode.ai/zen/go/v1', model: 'glm-5.3-flash',
+    });
+    expect(readdirSync(dataDir).some((name) => name.includes('.corrupt-'))).toBe(false);
+  });
+
   it('настроек нет → дефолты, provider null, ключ пуст (агент недоступен)', async () => {
     cleanDir();
     const settings = await freshSettings();
@@ -246,6 +258,10 @@ describe('providerFromBase', () => {
   it.each([
     ['https://api.deepseek.com/v1', 'deepseek'],
     ['https://api.openai.com/v1', 'openai'],
+    ['https://opencode.ai/zen/go/v1', 'opencode-go'],
+    ['https://opencode.ai/zen/go/v1/', 'opencode-go'],
+    ['https://opencode.ai.evil.example/zen/go/v1', 'custom'],
+    ['https://opencode.ai/zen/v1', 'custom'],
     ['https://llm.example.com/v1', 'custom'],
   ])('%s → %s', async (base, expected) => {
     const settings = await freshSettings();

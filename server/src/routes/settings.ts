@@ -55,8 +55,8 @@ const putBodySchema = z
       .nullable()
       .optional(),
     aiProvider: z
-      .enum(['deepseek', 'openai', 'custom'], {
-        errorMap: () => ({ message: 'Провайдер должен быть deepseek, openai или custom' }),
+      .enum(['deepseek', 'openai', 'opencode-go', 'custom'], {
+        errorMap: () => ({ message: 'Провайдер должен быть deepseek, openai, opencode-go или custom' }),
       })
       .optional(),
     aiApiBase: z
@@ -92,6 +92,11 @@ const putBodySchema = z
       });
     }
     if (!hasAiChange) return;
+    // Смена только модели сохраняет write-only ключ и остальные AI-настройки.
+    if (v.aiApiKey === undefined && v.aiProvider === undefined && v.aiApiBase === undefined && v.aiModel !== undefined) {
+      if (!v.aiModel) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['aiModel'], message: 'Модель обязательна' });
+      return;
+    }
     // Очистка ключа — явный null (или пустая строка после trim) и ничего
     // больше: половинчатый «конфиг без ключа» не имеет смысла.
     if (v.aiApiKey === null || v.aiApiKey === '') {
@@ -104,9 +109,8 @@ const putBodySchema = z
       }
       return;
     }
-    // Замена AI-конфига — только целиком: ключ write-only (наружу не
-    // отдаётся), «частично» заменить нельзя — незаданное поле удалило бы
-    // работающий конфиг.
+    // Смена провайдера, адреса или ключа — целиком, с явным вводом ключа.
+    // Сохранённый секрет не переносится автоматически на другой endpoint.
     if (v.aiApiKey === undefined) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -156,6 +160,11 @@ settingsRouter.put('/', (req, res) => {
     return;
   }
   const { currentPassword, newPassword, aiApiKey, aiProvider, aiApiBase, aiModel } = parsed.data;
+  const modelOnly = aiApiKey === undefined && aiProvider === undefined && aiApiBase === undefined && aiModel !== undefined;
+  if (modelOnly && !getAiSettings().apiKey) {
+    res.status(400).json({ error: 'Сначала задайте ключ API и AI-конфиг' });
+    return;
+  }
   if (currentPassword !== undefined && !verifyPassword(currentPassword)) {
     res.status(400).json({ error: 'Неверный текущий пароль' });
     return;
@@ -164,7 +173,9 @@ settingsRouter.put('/', (req, res) => {
     if (currentPassword !== undefined && newPassword !== undefined) {
       updateSettings({ passwordHash: hashPassword(newPassword) });
     }
-    if (aiApiKey === null) {
+    if (modelOnly) {
+      updateSettings({ aiModel });
+    } else if (aiApiKey === null) {
       // Очистка ключа — агент недоступен: провайдер и модель без ключа не
       // имеют смысла, удаляются вместе (UI показывает дефолтный пресет).
       updateSettings({ aiProvider: null, aiApiKey: null, aiApiBase: null, aiModel: null });

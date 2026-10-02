@@ -5,6 +5,7 @@ import {
   getSettings,
   hashPassword,
   onboardingRequired,
+  OPENCODE_GO_API_BASE,
   saveSettings,
 } from '../services/settings.js';
 
@@ -37,8 +38,8 @@ const setupBodySchema = z
       .refine((v) => !v || !/\s/.test(v), 'Ключ API не может содержать пробелы или переводы строк')
       .optional(),
     aiProvider: z
-      .enum(['deepseek', 'openai', 'custom'], {
-        errorMap: () => ({ message: 'Провайдер должен быть deepseek, openai или custom' }),
+      .enum(['deepseek', 'openai', 'opencode-go', 'custom'], {
+        errorMap: () => ({ message: 'Провайдер должен быть deepseek, openai, opencode-go или custom' }),
       })
       .optional(),
     aiApiBase: z
@@ -84,7 +85,9 @@ const setupBodySchema = z
     aiApiKey: v.aiApiKey || undefined,
     aiProvider: v.aiProvider,
     // Срез хвостового '/' — как в config.ts (config.ai.apiBase).
-    aiApiBase: v.aiApiBase ? v.aiApiBase.replace(/\/+$/, '') : undefined,
+    aiApiBase: v.aiApiBase
+      ? v.aiApiBase.replace(/\/+$/, '')
+      : v.aiProvider === 'opencode-go' ? OPENCODE_GO_API_BASE : undefined,
     aiModel: v.aiModel || undefined,
   }));
 

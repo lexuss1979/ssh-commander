@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 
 const dataDir = mkdtempSync(path.join(tmpdir(), 'sc-dialogues-'));
 process.env.DATA_DIR = dataDir;
@@ -17,6 +17,20 @@ afterAll(() => {
 });
 
 describe('dialogues store', () => {
+  it('сохраняет зашифрованный контекст Responses после перезагрузки хранилища', async () => {
+    const d = store.createDialogue(uniqueProfile());
+    const context = {
+      model: 'gpt-6-luna', apiBase: 'https://opencode.ai/zen/go/v1',
+      items: [{ type: 'reasoning' as const, id: 'rs-test', summary: [] as [], encrypted_content: 'encrypted-test' }],
+    };
+    store.saveDialogueMessages(d.id, [{ role: 'assistant', content: 'OK', responsesContext: context }]);
+    vi.resetModules();
+    const reloaded = await import('../src/ai/dialogues.js');
+    expect(reloaded.getDialogue(d.id)?.messages[0].responsesContext).toEqual(context);
+    // Удаляем через исходный экземпляр, чтобы его кэш не восстановил тестовый диалог.
+    store.deleteDialogue(d.id);
+  });
+
   it('creates and lists dialogues per profile', () => {
     const profileId = uniqueProfile();
     const d = store.createDialogue(profileId);
