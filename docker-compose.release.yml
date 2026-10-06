@@ -1,7 +1,7 @@
 # Готовый образ: версия закреплена, данные сохраняются в соседних data/ и keys/.
 services:
   ssh-commander:
-    image: ghcr.io/lexuss1979/ssh-commander:0.1.1
+    image: ghcr.io/lexuss1979/ssh-commander:0.1.2
     ports:
       - "127.0.0.1:8080:8080"
       # Диапазон портов для SSH-туннелей (локальный конец внутри контейнера).
