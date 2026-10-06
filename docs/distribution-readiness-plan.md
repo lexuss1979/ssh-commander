@@ -180,3 +180,33 @@ GitHub CLI ранее авторизован под `lexuss1979`; доступ �
 - Рабочая установка пользователя и её данные сохранены. Тестовые контейнеры и каталоги удалены. Внешние анонсы и PR в каталоги не отправлялись; это отдельный необязательный этап.
 
 Локальный протокол анонимной проверки — `promo/published-v0.1.1-validation.json`, опубликованный текст релиза — `promo/release-v0.1.1-final.md`. Эти вспомогательные файлы не входят в Git. Полную историю Gitleaks проверяют после финального коммита по команде из `publication-readiness.md`; прежние точечные исключения сохранены.
+
+## Выпуск v0.1.2
+
+Владелец согласовал номер и публикацию 2026-10-06. Опубликован [GitHub Release v0.1.2](https://github.com/lexuss1979/ssh-commander/releases/tag/v0.1.2) с release notes и Compose-файлом. Анонимный доступ к GHCR проверен временным Docker config `{}` (manifest inspect + pull обеих платформ по точному тегу).
+
+| Артефакт | Значение |
+|---|---|
+| Исходный коммит тега и образа | `77035495c6b80f45e434497794acc9655a28c56f` |
+| Теги образа | `ghcr.io/lexuss1979/ssh-commander:0.1.2`, `latest` |
+| Общий digest | `sha256:1057c9fe75162f91410ce01615da5362ca14044f1693cc130405cc1c1727cae1` |
+| linux/amd64 | `sha256:d4a81d0c4d8c12dcbdb582822817c83c35e9e6a80f32f1092ac7d563f5ab3a6c` |
+| linux/arm64 | `sha256:58d7514917845fb316d26b34a8344d9cd4451e8db7b1b44a3542f4a0bdba4c67` |
+| CI релизного коммита | [37447928166](https://github.com/lexuss1979/ssh-commander/actions/runs/37447928166) |
+| Успешный выпуск | [37447932468 — success (re-run)](https://github.com/lexuss1979/ssh-commander/actions/runs/37447932468) |
+| Compose из неизменяемого тега | [docker-compose.release.yml](https://raw.githubusercontent.com/lexuss1979/ssh-commander/v0.1.2/docker-compose.release.yml) |
+| Compose как asset релиза | [скачать](https://github.com/lexuss1979/ssh-commander/releases/download/v0.1.2/docker-compose.release.yml) |
+
+Индекс, кроме двух платформ, содержит attestations `unknown/unknown` — метаданные сборки. Прежние теги не передвигались.
+
+### Инциденты выпуска
+
+- CI на main перед выпуском упал на новых уязвимостях транзитивных зависимостей (`proxy-addr` — critical, GHSA-jqcg-44mw-7w3h; `source-map-js` — high, GHSA-68fv-2mgg-jv7q): обе закрыты `npm audit fix` (`d3a16d0`), после чего оба audit чистые.
+- Первый прогон `publish` собрал и отправил технический тег `sha-7703549…`, затем упал на сетевой ошибке `EPIPE` при чтении manifest из GHCR (`release-image.mjs`). Повтор через **Re-run failed jobs** использовал уже опубликованного кандидата того же SHA; smoke обеих платформ прошли, теги назначены.
+- Gitleaks перед тегом: по `origin/main` (202 коммита, `--full-history -m`) — 0 срабатываний. Пять срабатываний при скане `--all` оказались уже разобранными синтетическими фикстурами тестов (bootstrap/nginx/keys) в русскоязычных коммитах-двойниках, недостижимых на GitHub: на remote существует только `main` (проверено `git ls-remote`), старые ветки остались лишь локально у владельца. В `.gitleaksignore` ничего не добавлялось.
+
+### Итоговые проверки и ограничения
+
+- Локально перед тегом: обе сборки, 1052 теста, lint (те же 5 warnings), оба audit — 0.
+- После публикации: анонимный pull `0.1.2` обеих платформ; чистый запуск опубликованного образа (отдельный контейнер, временный порт) — UI 200, onboarding (`required: true`) на пустых данных, штатное предупреждение об отсутствии AI-ключа. Контейнер smoke удалён.
+- Полная чистая установка release Compose и переход со старой версии отдельно не повторялись — процедура не менялась с `v0.1.1` (см. её проверки выше). Физический ARM и macOS не проверялись (arm64 — QEMU в CI).
