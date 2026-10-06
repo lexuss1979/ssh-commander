@@ -971,6 +971,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
             <div className="empty-state">
               <p>{t('agent.emptyHintTask')}</p>
               <p className="muted">{t('agent.emptyHintRules')}</p>
+              <p className="muted">{t('agent.emptyHintFeatures')}</p>
             </div>
           )}
           {messages.map((m) => (

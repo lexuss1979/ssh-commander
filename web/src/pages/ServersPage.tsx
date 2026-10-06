@@ -12,6 +12,8 @@ interface Props {
   visible: boolean;
   onOpenProfile: (profileId: string) => void;
   onAskAgent: (text: string, mode?: AgentAskMode) => void;
+  /** Opens the "Manage servers" modal (the empty-state link). */
+  onManageServers: () => void;
   /** Profiles from the App state — snippet run targets (the overview may not be loaded). */
   profiles: Profile[];
 }
@@ -103,7 +105,7 @@ function ServerCard({
   );
 }
 
-export function ServersPage({ showError, visible, onOpenProfile, onAskAgent, profiles }: Props) {
+export function ServersPage({ showError, visible, onOpenProfile, onAskAgent, onManageServers, profiles }: Props) {
   const { t, locale } = useT();
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [history, setHistory] = useState<Map<string, HistorySample[]>>(new Map());
@@ -157,6 +159,14 @@ export function ServersPage({ showError, visible, onOpenProfile, onAskAgent, pro
         {data && data.servers.length === 0 && (
           <div className="empty-state">
             <p>{t('servers.empty')}</p>
+            <p className="muted">
+              {/* The link label repeats the real sidebar button
+                  (app.manageServers) so the hint cannot drift from the UI. */}
+              <button className="link-inline" onClick={onManageServers}>
+                {t('app.manageServers')}
+              </button>{' '}
+              {t('servers.emptyHint')}
+            </p>
           </div>
         )}
         <div className="servers-grid">

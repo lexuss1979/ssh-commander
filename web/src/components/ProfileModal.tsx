@@ -346,6 +346,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
 
           <div className="transfer-block">
             <label className="sidebar-label">{t('profileModal.transferTitle')}</label>
+            <p className="field-hint">{t('profileModal.transferHint')}</p>
             <input
               type="password"
               value={transferPassword}

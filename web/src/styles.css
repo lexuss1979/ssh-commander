@@ -1701,6 +1701,22 @@ body.resizing-agent {
   color: var(--accent-hover);
 }
 
+/* Inline link-styled button inside hint text (the servers empty state).
+   Unlike .link-cell it inherits the surrounding font size and is accent-colored
+   so it reads as a link in a muted paragraph. */
+.link-inline {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--accent);
+  font-size: inherit;
+}
+
+.link-inline:hover {
+  color: var(--accent-hover);
+}
+
 /* SVG icons of folders/files (instead of emoji — readable in both themes) */
 .file-kind {
   display: inline-flex;
@@ -2073,6 +2089,42 @@ body.resizing-agent {
   font-size: 11px;
   color: var(--muted);
   line-height: 1.4;
+}
+
+/* One-time contextual tip ("did you know") — the TipBanner component
+   (docs/feature-discovery-plan.md). A muted inline panel: not a toast,
+   it sits in the layout flow and never hides on its own. */
+.tip-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--accent-soft-border);
+  border-radius: 6px;
+  background: var(--accent-soft);
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.tip-banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.tip-banner-dismiss {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.tip-banner-dismiss:hover {
+  color: var(--text);
 }
 
 .transfer-check.disabled {

@@ -84,7 +84,8 @@ export const en: typeof ru = {
   'servers.dockerNoData': 'Docker: no data',
   'servers.unavailable': 'Unavailable',
   'servers.noData': 'no data',
-  'servers.empty': 'No servers added. Add a server via "Server management" in the left panel.',
+  'servers.empty': 'No servers added. Add a server via the button in the left panel:',
+  'servers.emptyHint': "— it also offers new-VPS setup with a root password (key and profile are created automatically) and server import from another machine's backup.",
 
   'aiCosts.period7': '7 days',
   'aiCosts.period30': '30 days',
@@ -326,6 +327,7 @@ export const en: typeof ru = {
   'ports.creating': 'Creating…',
   'ports.create': 'Create',
   'ports.tunnelsTitle': 'Active tunnels',
+  'ports.tunnelsEmpty': 'No tunnels. Port forwarding makes a remote port available locally: 127.0.0.1:<port> on this machine → host and port on the server — handy for databases and internal services.',
   'ports.colLocal': 'Local',
   'ports.colRemote': 'Remote',
   'ports.colStatus': 'Status',
@@ -419,6 +421,7 @@ export const en: typeof ru = {
   'profileModal.bootstrapButton': '🔑 New server (root + password)…',
   'profileModal.bootstrapButtonTitle': 'Generate a dedicated SSH key, install it on the server via password and (optionally) disable password login',
   'profileModal.transferTitle': 'Transfer to another machine',
+  'profileModal.transferHint': 'Export downloads a JSON file with the server list; on another machine the same file is picked via Import. With secrets (passwords, keys) it requires an encryption password.',
   'profileModal.transferPasswordPlaceholder': 'Encryption password (optional)',
   'profileModal.transferNoSecrets': 'Without secrets (do not include passwords and keys)',
   'profileModal.export': 'Export',
@@ -871,6 +874,7 @@ export const en: typeof ru = {
   'agent.noOtherServers': 'No other servers',
   'agent.emptyHintTask': 'Describe a task: for example, "show the server status and running containers", "find out who is using port 8080", "update the nginx config".',
   'agent.emptyHintRules': 'Read-only commands run automatically. Write actions require confirmation — a bar with "Approve" and "Reject" buttons will appear next to the input field. Dialogues are saved automatically.',
+  'agent.emptyHintFeatures': 'The "Plan" switch makes the agent show a step-by-step plan for approval first, without executing anything. When the agent suggests a next step, it appears as gray text in the input — press Tab to insert it.',
   'agent.copyTitle': 'Copy message',
   'agent.suggestionPlaceholder': '{suggestion} · Tab — insert',
   'agent.inputPlaceholder': 'Task for the agent… (Enter — send)',
@@ -932,4 +936,6 @@ export const en: typeof ru = {
   'agent.planHint': 'Click "Run" for the agent to start executing the plan (write actions will still require confirmation), or write corrections — the plan will be redrafted.',
   'agent.planStarted': 'Started…',
   'agent.planExecute': 'Run',
+
+  'tips.dismiss': "Got it, don't show again",
 };

@@ -673,6 +673,7 @@ export default function App() {
                   setTab('overview');
                 }}
                 onAskAgent={handleAskAgent}
+                onManageServers={() => setShowProfiles(true)}
                 profiles={profiles}
               />
             </div>

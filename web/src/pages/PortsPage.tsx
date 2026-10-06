@@ -158,12 +158,26 @@ function TunnelModal({
 function TunnelsSection({
   tunnels,
   onStop,
+  onCreate,
 }: {
   tunnels: Tunnel[];
   onStop: (id: string) => void;
+  onCreate: () => void;
 }) {
   const { t } = useT();
-  if (tunnels.length === 0) return null;
+  if (tunnels.length === 0) {
+    return (
+      <div className="tunnels-section">
+        <h3 className="section-title">{t('ports.tunnelsTitle')}</h3>
+        <div className="empty-state">
+          <p>{t('ports.tunnelsEmpty')}</p>
+          <button className="btn btn-ghost" onClick={onCreate}>
+            {t('ports.tunnelButton')}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="tunnels-section">
@@ -445,7 +459,7 @@ export function PortsPage({ profile, visible, showError }: Props) {
       ) : (
         <>
           {/* Active tunnels */}
-          <TunnelsSection tunnels={tunnels} onStop={handleStopTunnel} />
+          <TunnelsSection tunnels={tunnels} onStop={handleStopTunnel} onCreate={() => setShowTunnelModal(true)} />
 
           {/* Main host ports table */}
           <div className="ports-scroll">
