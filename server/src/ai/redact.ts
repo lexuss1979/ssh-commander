@@ -2,43 +2,44 @@ import { aiStr } from './strings.js';
 import type { PromptLang } from './prompts.js';
 
 /**
- * Редакция секретов на пути «сервер → модель → диск».
+ * Redaction of secrets on the "server → model → disk" path.
  *
- * Вывод любого инструмента агента уходит сразу в три места: в контекст модели
- * (то есть по сети внешнему провайдеру), в UI и в `data/ai-dialogues.json`.
- * До этого модуля фильтра там не было — приватные ключи и пароли из
- * `docker inspect`, `.env` и конфигов попадали во все три разом.
+ * The output of any agent tool immediately goes to three places: the model
+ * context (i.e. over the network to the external provider), the UI and
+ * `data/ai-dialogues.json`. Before this module there was no filter on that
+ * path — private keys and passwords from `docker inspect`, `.env` and configs
+ * landed in all three at once.
  *
- * Точка вызова одна — `AgentSession.truncate()` (`ai/agent.ts`), поэтому
- * редакция идёт ДО обрезки: обрезанный PEM-блок уже не опознать по хвостовому
- * маркеру `-----END`.
+ * The call site is a single one — `AgentSession.truncate()` (`ai/agent.ts`),
+ * so redaction runs BEFORE truncation: a truncated PEM block can no longer
+ * be recognized by its trailing `-----END` marker.
  *
- * Принцип: лучше вырезать лишнее, чем пропустить. Имя переменной/поля
- * сохраняется всегда — модель видит, что секрет есть, и может попросить
- * пользователя показать значение через `exec` (с подтверждением).
+ * The principle: better to redact too much than to miss. The variable/field
+ * name is always kept — the model sees that a secret exists and can ask the
+ * user to reveal the value via `exec` (with confirmation).
  */
 
-/** Кусок имени, по которому значение считается секретом (`DB_PASSWORD`, `apiKey`). */
+/** A name fragment that makes the value a secret (`DB_PASSWORD`, `apiKey`). */
 const SECRETISH_NAME_SRC =
   '[A-Za-z0-9_.\\-]*(?:PASSWORD|PASSWD|PASSPHRASE|SECRET|TOKEN|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|CREDENTIALS?|AUTH)[A-Za-z0-9_.\\-]*';
 
-/** `NAME=значение`, `"NAME": "значение"`, `NAME: значение`. Разделитель — только `=`/`:`:
- * `PasswordAuthentication yes` в sshd_config (пробел) остаётся читаемым. */
+/** `NAME=value`, `"NAME": "value"`, `NAME: value`. The separator is `=`/`:` only:
+ * `PasswordAuthentication yes` in sshd_config (a space) stays readable. */
 const ASSIGNMENT = new RegExp(
   `(${SECRETISH_NAME_SRC})(["']?\\s*[:=]\\s*)(["']?)([^\\s"',;}]+)`,
   'gi',
 );
 
-/** Завершённый PEM-блок приватного ключа. */
+/** A complete private-key PEM block. */
 const PEM_BLOCK = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
 
-/** Оборванный PEM-блок (файл прочитан не до конца): всё после заголовка — ключ. */
+/** A truncated PEM block (the file was read incompletely): everything after the header is the key. */
 const PEM_OPEN = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*/;
 
-/** Пароль в URL: `postgres://user:pass@host` — вырезаем только пароль. */
+/** A password in a URL: `postgres://user:pass@host` — only the password is redacted. */
 const URL_CREDENTIALS = /([a-z][a-z0-9+.\-]*:\/\/[^\s:@/]+:)([^\s:@/]+)(@)/gi;
 
-/** Токены известного вида — ловятся и без говорящего имени рядом. */
+/** Well-known token shapes — caught even without a telling name nearby. */
 const TOKEN_PATTERNS: RegExp[] = [
   /\bsk-[A-Za-z0-9_\-]{16,}/g,
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g,
@@ -55,9 +56,9 @@ function marker(lang: PromptLang, hidden: string): string {
 }
 
 /**
- * Вырезает секреты из произвольного текста (вывод инструмента, содержимое
- * файла, JSON docker inspect). Возвращает текст той же формы — с маркером
- * вместо значений.
+ * Redacts secrets from arbitrary text (tool output, file contents,
+ * docker inspect JSON). Returns text of the same shape — with the marker
+ * in place of the values.
  */
 export function redactSecrets(text: string, lang: PromptLang = 'ru'): string {
   if (!text) return text;
@@ -76,10 +77,10 @@ export function redactSecrets(text: string, lang: PromptLang = 'ru'): string {
 }
 
 /**
- * Переменные окружения, значения которых заведомо не секрет: их видно в любом
- * `docker inspect` и они реально нужны для диагностики. Всё остальное в `Env`
- * скрывается по имени — угадывать по значению ненадёжно
- * (`ADMIN=hunter2` неотличим от `ADMIN=root`).
+ * Environment variables whose values are certainly not secret: they are
+ * visible in any `docker inspect` and are genuinely needed for diagnostics.
+ * Everything else in `Env` is hidden by name — guessing by value is
+ * unreliable (`ADMIN=hunter2` is indistinguishable from `ADMIN=root`).
  */
 const SAFE_ENV_NAMES = new Set([
   'PATH', 'HOME', 'HOSTNAME', 'PWD', 'SHLVL', 'TERM', 'USER', 'LOGNAME', 'SHELL',
@@ -94,10 +95,10 @@ function isSafeEnvName(name: string): boolean {
 }
 
 /**
- * Структурная редакция `Env` в выводе `docker inspect`: самый надёжный
- * источник чужих секретов на сервере (весь `.env` приложения одним куском).
- * Имена переменных остаются — по ним видно, что в контейнере вообще есть.
- * Рекурсивно, потому что `Env` встречается и в `Config`, и в `ContainerConfig`.
+ * Structural redaction of `Env` in `docker inspect` output: the most reliable
+ * source of foreign secrets on the server (the app's entire `.env` in one
+ * piece). Variable names are kept — they show what the container has at all.
+ * Recursive, because `Env` appears in `Config` and in `ContainerConfig` too.
  */
 export function redactDockerEnv<T>(value: T, lang: PromptLang = 'ru'): T {
   if (Array.isArray(value)) {
@@ -124,10 +125,11 @@ export function redactDockerEnv<T>(value: T, lang: PromptLang = 'ru'): T {
 }
 
 /**
- * Файлы, чтение которых осмысленно только ради секрета. Такой `read_file`
- * (и `cat` через `exec_readonly`) перестаёт быть автоматическим и уходит на
- * подтверждение пользователю: редакция ниже по потоку регулярная и полной
- * гарантии не даёт, а прочитанное уже ушло бы провайдеру.
+ * Files whose reading makes sense only for the sake of a secret. Such a
+ * `read_file` (and `cat` via `exec_readonly`) stops being automatic and goes
+ * to user confirmation: the redaction downstream is regex-based and gives no
+ * full guarantee, and what was read would already be on its way to the
+ * provider.
  */
 const SENSITIVE_PATH_PATTERNS: RegExp[] = [
   /(^|\/)\.env(\.|$)/i,
@@ -140,19 +142,19 @@ const SENSITIVE_PATH_PATTERNS: RegExp[] = [
   /(^|\/)(credentials|secrets?)(\.[A-Za-z0-9]+)?$/i,
 ];
 
-/** Похож ли путь на файл секретов. */
+/** Whether the path looks like a secrets file. */
 export function isSensitivePath(path: string): boolean {
   const p = path.trim().replace(/^["']|["']$/g, '');
   if (!p) return false;
-  // `.pub` — публичная половина ключа: не секрет ни в каком каталоге,
-  // включая `.ssh/`, где всё остальное закрыто.
+  // `.pub` — the public half of a key: not a secret in any directory,
+  // including `.ssh/`, where everything else is gated.
   if (/\.pub$/i.test(p)) return false;
   return SENSITIVE_PATH_PATTERNS.some((re) => re.test(p));
 }
 
 /**
- * Аргументы команды, похожие на пути к секретам (`cat /root/.ssh/id_rsa`).
- * Первый токен — сама команда — не проверяется.
+ * Command arguments that look like secret paths (`cat /root/.ssh/id_rsa`).
+ * The first token — the command itself — is not checked.
  */
 export function sensitivePathsIn(command: string): string[] {
   return command

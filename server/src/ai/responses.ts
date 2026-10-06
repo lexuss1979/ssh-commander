@@ -2,7 +2,7 @@ import type { ChatMessage, StreamOptions, ToolCall } from './client.js';
 import type { PromptLang } from './prompts.js';
 import { aiStr } from './strings.js';
 
-/** Модели Go с Responses API: https://opencode.ai/docs/go/#endpoints. */
+/** Go models with the Responses API: https://opencode.ai/docs/go/#endpoints. */
 const GO_RESPONSES_MODELS = new Set([
   'gpt-6-luna', 'gpt-5.6-luna', 'grok-4.7', 'grok-4.6',
   'muse-spark-1.3-contributor', 'muse-spark-1.2-contributor',
@@ -12,7 +12,7 @@ export function usesGoResponses(model: string): boolean {
   return GO_RESPONSES_MODELS.has(model);
 }
 
-/** Только непрозрачный контекст reasoning; текст рассуждений не сохраняется. */
+/** Only opaque reasoning context; the reasoning text is not stored. */
 export interface ResponsesContext {
   model: string;
   apiBase: string;
@@ -24,7 +24,7 @@ export interface ResponsesContext {
   }>;
 }
 
-/** История остаётся локальной: каждый запрос содержит полный контекст. */
+/** The history stays local: every request carries the full context. */
 export function buildResponsesBody(opts: StreamOptions, model: string, apiBase: string): Record<string, unknown> {
   const input: Record<string, unknown>[] = [];
   for (const message of opts.messages) {
@@ -34,7 +34,7 @@ export function buildResponsesBody(opts: StreamOptions, model: string, apiBase: 
     }
     if (message.role === 'assistant') {
       const context = message.responsesContext;
-      // Зашифрованное состояние нельзя переносить в другую модель или API.
+      // The encrypted state cannot be moved to another model or API.
       if (context?.model === model && context.apiBase === apiBase) input.push(...context.items);
       if (message.content) input.push({ role: 'assistant', content: message.content });
       for (const call of message.tool_calls ?? []) {
@@ -52,7 +52,7 @@ export function buildResponsesBody(opts: StreamOptions, model: string, apiBase: 
   };
 }
 
-/** Финальный output — источник текста и завершённых вызовов инструментов. */
+/** The final output is the source of text and completed tool calls. */
 export function parseResponsesMessage(data: Record<string, unknown>, model: string, apiBase: string, lang: PromptLang): ChatMessage {
   const output = Array.isArray(data.output) ? data.output as Record<string, unknown>[] : [];
   const texts: string[] = [];

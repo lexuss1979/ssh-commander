@@ -5,24 +5,25 @@ import { z } from 'zod';
 import { config } from '../config.js';
 
 /**
- * Журнал расходов AI (docs/ai-costs-plan.md, решение 4): отдельный стор
- * `data/ai-usage.json` — удаление диалога не стирает финансовую историю.
- * Канонический паттерн проекта (zod + tmp/rename + corrupt-guard, образец —
- * `db-connections.ts`). Запись — на один вызов API (chat/plan/web_search),
- * стоимость фиксируется в момент вызова: смена цен не переписывает историю,
- * токены в записи позволяют пересчитать потом.
+ * AI costs journal (docs/ai-costs-plan.md, decision 4): a separate store
+ * `data/ai-usage.json` — deleting a dialogue does not erase the financial
+ * history. The project's canonical pattern (zod + tmp/rename + corrupt-guard,
+ * the sample is `db-connections.ts`). A record is per API call
+ * (chat/plan/web_search), the cost is fixed at call time: price changes do
+ * not rewrite history, the tokens in a record allow recalculating later.
  *
- * Объём: десятки тысяч записей ≈ единицы МБ JSON — компакция не нужна.
+ * Volume: tens of thousands of records ≈ a few MB of JSON — no compaction
+ * needed.
  */
 
 export const usageKindSchema = z.enum(['chat', 'plan', 'web_search']);
 
-/** Одна запись журнала — один вызов платного API. */
+/** One journal record — one paid API call. */
 export interface UsageRecord {
   id: string;
-  /** epoch ms вызова (локальное время сервера приложения — см. dateKey). */
+  /** Call epoch ms (the app server's local time — see dateKey). */
   ts: number;
-  /** Домашний профиль диалога — привязка затрат (решение 6). */
+  /** The dialogue's home profile — cost attribution (decision 6). */
   profileId: string;
   dialogueId: string;
   kind: 'chat' | 'plan' | 'web_search';
@@ -30,11 +31,11 @@ export interface UsageRecord {
   promptTokens: number;
   cachedTokens: number;
   completionTokens: number;
-  /** Только информационно: входит в completionTokens (инвариант usage). */
+  /** Informational only: included in completionTokens (the usage invariant). */
   reasoningTokens: number;
-  /** Число поисковых запросов серверного web_search; только kind 'web_search'. */
+  /** Number of server-side web_search requests; kind 'web_search' only. */
   searchRequests?: number;
-  /** Посчитанный в момент вызова costUsd; null — цена модели не задана. */
+  /** costUsd computed at call time; null — the model has no price. */
   costUsd: number | null;
 }
 
@@ -55,30 +56,30 @@ const usageRecordSchema = z.object({
 
 const storeSchema = z.object({ usage: z.array(usageRecordSchema).default([]) });
 
-/** Вход recordUsage: id генерируется внутри. */
+/** The recordUsage input: the id is generated inside. */
 export type UsageRecordInput = Omit<UsageRecord, 'id'>;
 
-/** Агрегат по диалогу/дню/профилю: суммы + честный счётчик вызовов без цены. */
+/** An aggregate per dialogue/day/profile: sums + an honest counter of unpriced calls. */
 export interface UsageAgg {
   calls: number;
   promptTokens: number;
-  /** Кэшированные входные токены — информационно (в tooltip бейджа/ячейки). */
+  /** Cached input tokens — informational (in the badge/cell tooltip). */
   cachedTokens: number;
   completionTokens: number;
-  /** Сумма costUsd протарифицированных вызовов; неполна при unpricedCalls > 0. */
+  /** Sum of costUsd over priced calls; incomplete when unpricedCalls > 0. */
   costUsd: number;
   unpricedCalls: number;
 }
 
 export interface UsageDayReport {
-  /** Локальная дата сервера, YYYY-MM-DD. */
+  /** The server's local date, YYYY-MM-DD. */
   date: string;
   byProfile: Record<string, UsageAgg>;
   total: UsageAgg;
 }
 
 export interface UsageReportData {
-  /** Дни desc, пустые дни не включаются. */
+  /** Days desc, empty days are not included. */
   days: UsageDayReport[];
   totals: UsageAgg;
 }
@@ -128,8 +129,8 @@ function persist(list: UsageRecord[]): void {
   cache = list.map((r) => ({ ...r }));
 }
 
-/** Локальная дата сервера приложения (в Docker обычно UTC — при необходимости
- * задать TZ в compose), YYYY-MM-DD. */
+/** The app server's local date (in Docker usually UTC — set TZ in compose
+ * if needed), YYYY-MM-DD. */
 export function dateKey(ts: number): string {
   const d = new Date(ts);
   const y = d.getFullYear();
@@ -138,7 +139,7 @@ export function dateKey(ts: number): string {
   return `${y}-${m}-${day}`;
 }
 
-/** Дата `days` дней назад от сегодня (включительно) — граница отчёта. */
+/** The date `days` days back from today (inclusive) — the report boundary. */
 function cutoffKey(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() - (days - 1));
@@ -166,8 +167,8 @@ function addAgg(agg: UsageAgg, rec: UsageRecord): void {
   }
 }
 
-/** Запись вызова: append + persist (каждая запись перезаписывает файл целиком
- * через tmp+rename — см. риск «перезапись на вызов» в плане). */
+/** Recording a call: append + persist (each record rewrites the whole file
+ * via tmp+rename — see the "rewrite per call" risk in the plan). */
 export function recordUsage(input: UsageRecordInput): UsageRecord {
   const rec: UsageRecord = { ...input, id: crypto.randomUUID().slice(0, 8) };
   usageRecordSchema.parse(rec);
@@ -177,12 +178,12 @@ export function recordUsage(input: UsageRecordInput): UsageRecord {
   return { ...rec };
 }
 
-/** Все записи журнала (тесты, диагностика). */
+/** All journal records (tests, diagnostics). */
 export function listUsage(): UsageRecord[] {
   return load().map((r) => ({ ...r }));
 }
 
-/** Кумулятивные итоги по диалогам — для enrichment списков и WS-бейджа. */
+/** Cumulative totals per dialogue — for list enrichment and the WS badge. */
 export function usageTotalsByDialogue(): Map<string, UsageAgg> {
   const totals = new Map<string, UsageAgg>();
   for (const rec of load()) {
@@ -194,10 +195,10 @@ export function usageTotalsByDialogue(): Map<string, UsageAgg> {
 }
 
 /**
- * Отчёт по дням и профилям: агрегация in-memory, группы по (дата, profileId)
- * + итоги, счётчик unpricedCalls (costUsd === null). Дни desc, пустые дни
- * не включаются. Имена профилей присоединяет роут (сторы друг о друге
- * не знают).
+ * A report by days and profiles: in-memory aggregation, groups by
+ * (date, profileId) + totals, the unpricedCalls counter (costUsd === null).
+ * Days desc, empty days are not included. Profile names are joined by the
+ * route (the stores know nothing about each other).
  */
 export function usageReport(days: number | 'all'): UsageReportData {
   const from = days === 'all' ? undefined : cutoffKey(days);

@@ -1,59 +1,59 @@
 /**
- * Гейт автоматически выполняемых команд агента (`exec_readonly`).
+ * Gate for the agent's auto-run commands (`exec_readonly`).
  *
- * Разрешающий список, а не запрещающий. Запрещающий здесь принципиально
- * проигрывает: перечислить все способы назвать `rm` нельзя — `/bin/rm`,
- * `\rm`, `busybox rm` и любой ещё не придуманный псевдоним обходили список
- * имён, а `socat`/`nc`/`curl -T` уносили файл наружу, ни разу не совпав со
- * словом из запрета. Всё, чего нет в списке ниже, отправляется в `exec`,
- * то есть к пользователю на подтверждение.
+ * An allow-list, not a deny-list. A deny-list fundamentally loses here:
+ * there is no way to enumerate every way to name `rm` — `/bin/rm`,
+ * `\rm`, `busybox rm` and any yet-uninvented alias slipped past the name
+ * list, while `socat`/`nc`/`curl -T` carried files out without ever
+ * matching a banned word. Anything missing from the list below goes to
+ * `exec`, i.e. to the user for confirmation.
  *
- * В список входят только утилиты, которые читают и печатают. Сетевых
- * клиентов (`curl`, `nc`, `socat`, `ssh`, `dig`, `ping`) здесь нет намеренно:
- * без них команда, выполненная без подтверждения, физически не может
- * отправить данные наружу. Интерпретаторов и обёрток-исполнителей
- * (`sh`, `python`, `awk`, `sed`, `env`, `xargs`, `timeout`, `sudo`) нет по
- * той же причине — они выполняют произвольный код в первом же аргументе.
+ * The list contains only utilities that read and print. Network clients
+ * (`curl`, `nc`, `socat`, `ssh`, `dig`, `ping`) are deliberately absent:
+ * without them a command run without confirmation physically cannot send
+ * data outside. Interpreters and exec wrappers (`sh`, `python`, `awk`,
+ * `sed`, `env`, `xargs`, `timeout`, `sudo`) are absent for the same
+ * reason — they execute arbitrary code given as the first argument.
  */
 
-/** Утилиты, выполняемые без подтверждения: только чтение и печать. */
+/** Utilities run without confirmation: read and print only. */
 export const ALLOWED_COMMANDS = new Set([
-  // файлы и каталоги
+  // files and directories
   'ls', 'cat', 'head', 'tail', 'stat', 'file', 'find', 'du', 'df', 'wc',
   'readlink', 'realpath', 'dirname', 'basename', 'pwd', 'tree', 'lsblk',
   'blkid', 'findmnt', 'mountpoint', 'zcat', 'zgrep',
-  // текст и поиск
+  // text and search
   'grep', 'egrep', 'fgrep', 'sort', 'uniq', 'cut', 'nl', 'tac', 'rev', 'tr',
   'strings', 'od', 'xxd', 'diff', 'cmp',
-  // контрольные суммы
+  // checksums
   'md5sum', 'sha1sum', 'sha256sum', 'sha512sum', 'cksum',
-  // система
+  // system
   'uname', 'hostname', 'uptime', 'date', 'whoami', 'id', 'groups', 'w', 'who',
   'last', 'lastlog', 'arch', 'nproc', 'lscpu', 'lsmem', 'lsusb', 'lspci',
   'lsof', 'free', 'vmstat', 'iostat', 'mpstat', 'dmesg', 'journalctl',
   'getconf', 'locale', 'printenv', 'echo', 'printf',
-  // процессы и сеть (только состояние, без трафика)
+  // processes and network (state only, no traffic)
   'ps', 'pgrep', 'pidof', 'pstree', 'top', 'ss', 'netstat',
 ]);
 
-/** Каталоги, из которых допустим запуск по абсолютному пути. `/tmp/evil/cat`
- * с подходящим basename так не проходит. */
+/** Directories an absolute-path run may come from. `/tmp/evil/cat`
+ * with a suitable basename does not get through this way. */
 const ALLOWED_BIN_DIRS = [
   '/bin/', '/usr/bin/', '/sbin/', '/usr/sbin/', '/usr/local/bin/', '/usr/local/sbin/',
 ];
 
 /**
- * Метасимволы шелла. Перевод строки — тоже разделитель команд, без него
- * вторая строка вообще не проверялась бы (проверяется только первый токен).
- * Скобки закрывают подстановку и подоболочки.
+ * Shell metacharacters. A newline is a command separator too — without it
+ * the second line would not be checked at all (only the first token is).
+ * Parentheses/braces close off substitution and subshells.
  */
 const CONTROL_CHARS = /[><|&;`$(){}\n\r]/;
 const CODE_EXECUTION = /\b(eval|source|system\s*\(|exec\s*\(|popen\s*\()/;
 
 /**
- * Флаги, превращающие разрешённую утилиту в пишущую или исполняющую.
- * Проверяются только у своей команды: `-o` у `sort` пишет файл, а у `grep`
- * это безобидный `--only-matching`.
+ * Flags that turn an allowed utility into a writing or executing one.
+ * Checked only against their own command: `-o` on `sort` writes a file,
+ * while on `grep` it is the harmless `--only-matching`.
  */
 const DANGEROUS_FLAGS: Record<string, RegExp> = {
   find: /^(-delete|-exec|-execdir|-ok|-okdir|-fprint|-fprintf|-fls)$/,
@@ -69,9 +69,9 @@ export interface GuardResult {
 }
 
 /**
- * Имя запускаемой утилиты из первого токена: снимает кавычки и ведущие `\`
- * (`\rm` — обход алиасов, шелл выполнит `rm`), для абсолютного пути отдаёт
- * basename, но только из системных каталогов.
+ * The runnable utility's name from the first token: strips quotes and
+ * leading `\` (`\rm` bypasses aliases — the shell would run `rm`); for an
+ * absolute path returns the basename, but only from system directories.
  */
 function resolveCommandName(token: string): { name: string } | { error: string } {
   const cleaned = token.replace(/^["']+|["']+$/g, '').replace(/^\\+/, '');

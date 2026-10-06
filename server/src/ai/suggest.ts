@@ -1,29 +1,31 @@
-// Подсказка вероятного ответа пользователя (план docs/agent-suggest-plan.md):
-// системный промпт обязывает модель помечать хвостовую строку финального
-// ответа маркером [[SUGGEST]]. Сервер вырезает маркер до this.messages/save()
-// (в персист и контекст модели попадает только чистый контент), а текст
-// подсказки уходит на фронтенд отдельным WS-событием suggestion.
+// Likely-answer suggestion (plan in docs/agent-suggest-plan.md): the system
+// prompt obliges the model to mark the trailing line of the final answer
+// with the [[SUGGEST]] marker. The server cuts the marker before
+// this.messages/save() (only clean content reaches the persist and the model
+// context), and the suggestion text goes to the frontend as a separate WS
+// suggestion event.
 
 export const SUGGEST_MARKER = '[[SUGGEST]]';
 export const MAX_SUGGESTION_LENGTH = 100;
 
 export interface ExtractedSuggestion {
-  /** Контент без хвостовой строки-маркера. */
+  /** The content without the trailing marker line. */
   content: string;
-  /** Валидированная подсказка (одна строка, ≤ 100 символов) или null. */
+  /** The validated suggestion (a single line, ≤ 100 chars) or null. */
   suggestion: string | null;
 }
 
-// Только хвостовой маркер: необязательный \n перед ним, сама строка-маркер и
-// текст подсказки до конца строки (+ хвостовой пробел до конца ответа).
-// Маркер в середине текста — легитимный текст, регулярка его не трогает.
+// The trailing marker only: an optional \n before it, the marker line itself
+// and the suggestion text to the end of the line (+ trailing whitespace to
+// the end of the answer). A marker in the middle of the text is legitimate
+// content — the regex leaves it alone.
 const SUGGESTION_RE = /\n?\[\[SUGGEST\]\][ \t]*([^\n]*)\s*$/;
 
 /**
- * Вырезает хвостовой маркер [[SUGGEST]] и валидирует подсказку: одна строка,
- * пробелы схлопываются, пустая или длиннее MAX_SUGGESTION_LENGTH → null
- * (модель ушла в рассуждения — лучше без подсказки). Маркер вырезается из
- * контента всегда, даже когда подсказка отброшена.
+ * Cuts the trailing [[SUGGEST]] marker and validates the suggestion: a single
+ * line, whitespace collapsed; empty or longer than MAX_SUGGESTION_LENGTH →
+ * null (the model drifted into reasoning — better no suggestion). The marker
+ * is always cut from the content, even when the suggestion is discarded.
  */
 export function extractSuggestion(raw: string): ExtractedSuggestion {
   const match = SUGGESTION_RE.exec(raw);
@@ -37,7 +39,7 @@ export function extractSuggestion(raw: string): ExtractedSuggestion {
   };
 }
 
-/** Длина максимального суффикса строки, являющегося префиксом маркера. */
+/** Length of the longest suffix of the string that is a prefix of the marker. */
 function markerPrefixSuffixLength(s: string): number {
   const max = Math.min(s.length, SUGGEST_MARKER.length);
   for (let k = max; k > 0; k -= 1) {
@@ -49,14 +51,15 @@ function markerPrefixSuffixLength(s: string): number {
 }
 
 /**
- * Holdback-фильтр стрима против вспышки маркера в пузыре ответа (классический
- * приём stop-sequence), два режима:
- * - префиксный (начальный): удерживает суффикс стрима, совпадающий с префиксом
- *   маркера; если следующий чанк маркер не продолжает — удержанное уходит
- *   наружу сразу (максимум один чанк задержки);
- * - подавление: полный маркер (по контракту всегда хвостовой) глушит всё до
- *   конца стрима — за ним идёт только текст подсказки, и он не должен
- *   мелькать в пузыре. flush() в этом режиме ничего не отдаёт наружу.
+ * Stream holdback filter against the marker flashing in the reply bubble
+ * (the classic stop-sequence trick), two modes:
+ * - prefix (initial): holds back the stream suffix that matches a prefix of
+ *   the marker; if the next chunk does not continue the marker, the held
+ *   text is emitted immediately (at most one chunk of delay);
+ * - suppression: the full marker (by contract always trailing) mutes
+ *   everything until the end of the stream — only the suggestion text comes
+ *   after it, and it must not flash in the bubble. flush() in this mode
+ *   emits nothing.
  */
 export function createSuggestionTokenFilter(onToken: (t: string) => void): {
   push(token: string): void;
@@ -69,8 +72,8 @@ export function createSuggestionTokenFilter(onToken: (t: string) => void): {
     push(token: string): void {
       if (suppressed || !token) return;
       held += token;
-      // Полный маркер, завершившийся даже внутри одного чанка, переводит
-      // фильтр в подавление: наружу уходит только текст до маркера.
+      // A full marker, even one completed within a single chunk, switches
+      // the filter to suppression: only the text before the marker is emitted.
       const markerAt = held.indexOf(SUGGEST_MARKER);
       if (markerAt >= 0) {
         const before = held.slice(0, markerAt);

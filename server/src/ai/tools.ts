@@ -3,9 +3,10 @@ import type { PromptLang } from './prompts.js';
 import { isSensitivePath, sensitivePathsIn } from './redact.js';
 import { isSearchConfigured } from './web-search.js';
 
-// Описания инструментов двуязычны (этап 0, docs/en-comments-plan.md):
-// ru-значения — дословно прежние литералы (не редактировать заодно с чем-либо),
-// en добавлены рядом; выбор языка — в buildToolDefs(lang) по языку сессии.
+// Tool descriptions are bilingual (stage 0, docs/en-comments-plan.md):
+// the ru values are the verbatim former literals (do not edit them along
+// with anything else), en added alongside; the language is picked in
+// buildToolDefs(lang) by the session lang.
 const pick = (lang: PromptLang, ru: string, en: string) => (lang === 'en' ? en : ru);
 const str = (lang: PromptLang, ru: string, en: string) => ({ type: 'string', description: pick(lang, ru, en) });
 const required = (lang: PromptLang, name: string, ru: string, en: string) => ({
@@ -14,8 +15,8 @@ const required = (lang: PromptLang, name: string, ru: string, en: string) => ({
   required: [name],
 });
 
-// Адресация сервера в мульти-серверном диалоге: необязательное имя профиля
-// из list_servers; без параметра инструмент выполняется на домашнем сервере.
+// Server addressing in a multi-server dialogue: an optional profile name
+// from list_servers; without the parameter the tool runs on the home server.
 const serverParam = (lang: PromptLang) =>
   str(
     lang,
@@ -24,8 +25,8 @@ const serverParam = (lang: PromptLang) =>
   );
 
 /**
- * Схемы инструментов, объявляемых модели, собранные на языке сессии.
- * Меняются только описания; имена инструментов и параметров не переводятся.
+ * Tool schemas declared to the model, assembled in the session lang.
+ * Only the descriptions change; tool and parameter names are not translated.
  */
 export function buildToolDefs(lang: PromptLang): ToolDef[] {
   return [
@@ -415,13 +416,13 @@ export const READ_ONLY_TOOLS = new Set([
 ]);
 
 /**
- * Выполняется ли вызов автоматически, без подтверждения пользователя.
+ * Whether the call runs automatically, without user confirmation.
  *
- * Read-only мало: чтение файла секретов (`.env`, `id_rsa`, `.pgpass`) — тоже
- * «только чтение», но прочитанное сразу уходит внешнему провайдеру, и вернуть
- * его оттуда уже нельзя. Редакция (`ai/redact.ts`) регулярная и полной
- * гарантии не даёт, поэтому такие чтения проходят через обычный approve —
- * решение остаётся за пользователем.
+ * Read-only is not enough: reading a secrets file (`.env`, `id_rsa`,
+ * `.pgpass`) is also "read-only", but whatever is read immediately goes to
+ * the external provider and cannot be recalled. Redaction (`ai/redact.ts`)
+ * is regex-based and gives no full guarantee, so such reads go through a
+ * regular approve — the decision stays with the user.
  */
 export function isAutoRunnable(name: string, args: Record<string, unknown>): boolean {
   if (!READ_ONLY_TOOLS.has(name)) return false;
@@ -431,9 +432,9 @@ export function isAutoRunnable(name: string, args: Record<string, unknown>): boo
 }
 
 /**
- * Инструменты, объявляемые модели, на языке сессии (lang); web_search
- * включается, только когда поиск настроен (AI_SEARCH_API_BASE + ключ) —
- * иначе модель вообще не видит инструмент и не может его вызвать.
+ * Tools declared to the model, in the session lang; web_search is included
+ * only when search is configured (AI_SEARCH_API_BASE + key) — otherwise the
+ * model does not see the tool at all and cannot call it.
  */
 export function getToolDefs(lang: PromptLang = 'ru', searchEnabled: boolean = isSearchConfigured()): ToolDef[] {
   const defs = buildToolDefs(lang);

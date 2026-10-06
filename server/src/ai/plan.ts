@@ -3,18 +3,19 @@ import { getToolDefs } from './tools.js';
 import { planModeInstruction, type PromptLang } from './prompts.js';
 
 /**
- * Инструменты для запроса к Chat Completions API. В режиме планирования
- * инструменты не передаются вовсе: `undefined` означает, что ключ `tools`
- * отсутствует в теле запроса — защита на уровне API, а не только промпта.
- * В обычном режиме отдаётся набор с учётом гейтинга web_search.
+ * Tools for a Chat Completions API request. In plan mode no tools are
+ * passed at all: `undefined` means the `tools` key is absent from the
+ * request body — protection at the API level, not only in the prompt.
+ * In the regular mode the set is returned with web_search gating applied.
  */
 export function toolsForRequest(planMode: boolean, lang: PromptLang = 'ru'): ToolDef[] | undefined {
   return planMode ? undefined : getToolDefs(lang);
 }
 
 /**
- * Сообщения для запроса в режиме планирования: системный промпт дополняется
- * инструкцией составить план на языке сессии. Исходный массив не мутируется.
+ * Messages for a plan-mode request: the system prompt is extended with the
+ * instruction to draft a plan in the session lang. The source array is not
+ * mutated.
  */
 export function buildPlanRequestMessages(messages: ChatMessage[], lang: PromptLang): ChatMessage[] {
   return messages.map((m, i) =>

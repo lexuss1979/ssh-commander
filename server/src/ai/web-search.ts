@@ -3,30 +3,30 @@ import { getAiSettings } from '../services/settings.js';
 import { aiStr } from './strings.js';
 import type { PromptLang } from './prompts.js';
 
-// Anthropic-совместимый endpoint DeepSeek: серверный web search работает
-// только там (не в OpenAI-совместимом /chat/completions). Ключ общий с
-// aiApiKey из settings.json.
+// The Anthropic-compatible DeepSeek endpoint: the server-side web search
+// works only there (not in the OpenAI-compatible /chat/completions). The key
+// is shared with aiApiKey from settings.json.
 const SEARCH_TIMEOUT_MS = 90_000;
 const MAX_QUERY_LENGTH = 400;
 const MAX_TOKENS = 2048;
 
-// Константа, не настройка: только этот endpoint поддерживает серверный
-// инструмент web_search у DeepSeek. Менять/выносить в UI нельзя.
+// A constant, not a setting: only this endpoint supports the server-side
+// web_search tool at DeepSeek. Must not be changed or surfaced in the UI.
 const DEEPSEEK_SEARCH_BASE = 'https://api.deepseek.com/anthropic';
 
-/** Лимит реальных поисковых запросов внутри одного вызова инструмента. */
+/** Cap on actual search requests inside one tool call. */
 export const MAX_USES_PER_CALL = 3;
 
 export interface WebSearchResult {
   ok: boolean;
   output: string;
-  /** Токены вызова поиска (docs/ai-costs-plan.md, решение 5): заполняется
-   * только при успешном ответе с usage в теле. */
+  /** Search call tokens (docs/ai-costs-plan.md, decision 5): filled only on
+   * a successful response with usage in the body. */
   usage?: WebSearchUsage;
 }
 
-/** Usage Anthropic-совместимого ответа: input/output токены и число реальных
- * поисковых запросов (server_tool_use.web_search_requests). */
+/** Usage of an Anthropic-compatible response: input/output tokens and the number
+ * of actual search requests (server_tool_use.web_search_requests). */
 export interface WebSearchUsage {
   promptTokens?: number;
   completionTokens?: number;
@@ -36,10 +36,10 @@ export interface WebSearchUsage {
 export function isSearchConfigured(): boolean {
   const ai = getAiSettings();
   if (!ai.apiKey) return false;
-  // DeepSeek-пресет: поиск включён автоматически (2 в 1, тот же ключ).
+  // The DeepSeek preset: search is enabled automatically (2-in-1, same key).
   if (ai.provider === 'deepseek') return true;
-  // Остальные: поиск только при явно заданном env AI_SEARCH_API_BASE
-  // (обратная совместимость; позволяет связку «чат OpenAI + поиск DeepSeek»).
+  // Others: search only with the env AI_SEARCH_API_BASE explicitly set
+  // (backward compatibility; enables the "OpenAI chat + DeepSeek search" combo).
   return Boolean(config.ai.searchApiBase);
 }
 
@@ -51,8 +51,8 @@ export function sanitizeQuery(raw: unknown): string {
 }
 
 /**
- * Тело запроса к Anthropic Messages API с серверным инструментом web_search.
- * Чистая функция — зафиксирована в unit-тестах.
+ * Request body for the Anthropic Messages API with the server-side
+ * web_search tool. A pure function — pinned by unit tests.
  */
 export function buildSearchBody(
   query: string,
@@ -65,7 +65,7 @@ export function buildSearchBody(
     messages: [
       {
         role: 'user',
-        // Промпт сводки — на языке сессии агента (см. ai/strings.ts).
+        // The summary prompt is in the agent session lang (see ai/strings.ts).
         content: aiStr(lang, 'searchSummaryPrompt', { query }),
       },
     ],
@@ -82,7 +82,7 @@ export interface ParsedSearchResponse {
   text: string;
   queries: string[];
   sources: SearchSource[];
-  /** Usage из ответа; отсутствует, если провайдер его не вернул. */
+  /** Usage from the response; absent if the provider did not return it. */
   usage?: WebSearchUsage;
 }
 
@@ -91,9 +91,9 @@ function nonnegInt(v: unknown): number | undefined {
 }
 
 /**
- * Разбор ответа Messages API: текстовые блоки — ответ, server_tool_use —
- * выполненные поисковые запросы, web_search_tool_result — источники
- * (encrypted_content не извлекаем — он прозрачен только для модели).
+ * Parsing a Messages API response: text blocks are the answer, server_tool_use
+ * — the executed search queries, web_search_tool_result — the sources
+ * (encrypted_content is not extracted — it is transparent to the model only).
  * Usage: input_tokens → promptTokens, output_tokens → completionTokens,
  * server_tool_use.web_search_requests → searchRequests.
  */
@@ -136,7 +136,7 @@ export function parseSearchResponse(data: Record<string, unknown>): ParsedSearch
   return { text: textParts.join('\n\n'), queries, sources, usage };
 }
 
-/** Форматирование результатов для tool-вывода агенту (язык — язык сессии). */
+/** Formats the results for the agent tool output (the lang is the session lang). */
 export function formatSearchOutput(parsed: ParsedSearchResponse, lang: PromptLang = 'ru'): string {
   const parts: string[] = [];
   if (parsed.text) parts.push(parsed.text);
@@ -158,9 +158,9 @@ function extractErrorMessage(data: Record<string, unknown> | null): string | nul
 }
 
 /**
- * Один вызов инструмента web_search: запрос к поисковому endpoint'у и
- * форматирование ответа. Никогда не бросает — ошибки возвращаются текстом
- * (паттерн runTool).
+ * One web_search tool call: a request to the search endpoint and formatting
+ * of the response. Never throws — errors come back as text (the runTool
+ * pattern).
  */
 export async function searchWeb(rawQuery: string, lang: PromptLang = 'ru'): Promise<WebSearchResult> {
   const query = sanitizeQuery(rawQuery);
@@ -170,8 +170,9 @@ export async function searchWeb(rawQuery: string, lang: PromptLang = 'ru'): Prom
   }
 
   const ai = getAiSettings();
-  // База поиска: у DeepSeek-пресета — константный Anthropic-endpoint (тот же
-  // ключ); у остальных — env AI_SEARCH_API_BASE (env-only, как и модель поиска).
+  // The search base: for the DeepSeek preset — the constant Anthropic endpoint
+  // (same key); for the others — env AI_SEARCH_API_BASE (env-only, like the
+  // search model).
   const searchBase = ai.provider === 'deepseek' ? DEEPSEEK_SEARCH_BASE : config.ai.searchApiBase;
 
   const controller = new AbortController();

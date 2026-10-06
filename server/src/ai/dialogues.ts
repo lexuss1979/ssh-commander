@@ -9,8 +9,8 @@ import { sanitizeMessages } from './messages.js';
 export interface Dialogue {
   id: string;
   profileId: string;
-  // Дополнительные профили, подключённые к мульти-серверному диалогу
-  // (profileId — домашний, он подключён всегда и сюда не входит).
+  // Extra profiles attached to a multi-server dialogue
+  // (profileId is the home one — always attached and never listed here).
   extraProfileIds?: string[];
   title: string;
   messages: ChatMessage[];
@@ -60,7 +60,7 @@ const messageSchema = z.object({
 const dialogueSchema = z.object({
   id: z.string().min(1),
   profileId: z.string().min(1),
-  // Опционально: старые ai-dialogues.json без поля остаются валидными.
+  // Optional: older ai-dialogues.json files without the field stay valid.
   extraProfileIds: z.array(z.string()).optional(),
   title: z.string(),
   messages: z.array(messageSchema).default([]),
@@ -112,7 +112,7 @@ function persist(list: Dialogue[]): void {
   }
   fs.mkdirSync(config.dataDir, { recursive: true });
   const tmp = `${storePath()}.tmp`;
-  // 0600: в диалогах оседает всё, что агент прочитал на серверах.
+  // 0600: everything the agent has read on the servers settles in the dialogues.
   fs.writeFileSync(tmp, JSON.stringify({ dialogues: list }, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, storePath());
   cache = list.map((d) => ({ ...d, messages: [...d.messages] }));

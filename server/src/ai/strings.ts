@@ -1,17 +1,17 @@
-// Пользовательски-видимые строки агента: выводы инструментов и служебные
-// заметки, которые попадают в tool_result/note (видны в карточках UI и
-// уходят модели). Язык — язык сессии агента (this.lang, дефолт ru).
-// ru-значения — дословно те строки, что раньше были литералами в коде
-// (на них завязаны тесты — не перефразировать); en — перевод, в en вместо
-// ёлочек обычные кавычки. Наборы ключей ru/en обязаны совпадать — паритет
-// проверяет server/test/ai-strings.test.ts.
+// User-visible agent strings: tool outputs and service notes that land in
+// tool_result/note (visible in UI cards and sent to the model). The language
+// is the agent session lang (this.lang, default ru).
+// The ru values are verbatim the strings that used to be literals in the code
+// (tests are tied to them — do not rephrase); en is the translation, with
+// regular quotes instead of guillemets. The ru/en key sets must match —
+// server/test/ai-strings.test.ts checks the parity.
 
 import type { PromptLang } from './prompts.js';
 
-/** Сырые словари — экспортированы для теста паритета (test/ai-strings.test.ts). */
+/** Raw dictionaries — exported for the parity test (test/ai-strings.test.ts). */
 export const AI_STRINGS = {
   ru: {
-    // agent.ts — резолв/подключение серверов диалога
+    // agent.ts — resolving/attaching dialogue servers
     serverNotAttached:
       'Сервер «{name}» не подключён к диалогу — вызови connect_server ' +
       'или попроси пользователя подключить его.',
@@ -20,14 +20,14 @@ export const AI_STRINGS = {
       'Полный список профилей — инструмент list_servers.',
     profileNotFound: 'Профиль {id} не найден',
     homeServerDetach: 'Домашний сервер диалога отцепить нельзя',
-    // agent.ts — жизненный цикл цикла
+    // agent.ts — loop lifecycle
     stoppedByUser: 'Агент остановлен пользователем.',
     rejectedByUser: 'Пользователь отклонил выполнение этого действия.',
     stepLimitReached: 'Достигнут лимит шагов ({n}).',
     outputTruncated: '… (вывод обрезан, показано {n} символов)',
-    // redact.ts — маркер вырезанного секрета в выводе инструмента
+    // redact.ts — the redacted-secret marker in tool output
     secretRedacted: '<секрет скрыт приложением, {n} симв.>',
-    // agent.ts — выводы инструментов
+    // agent.ts — tool outputs
     emptyOutput: '(пустой вывод)',
     commandFailed: 'Команда завершилась с ошибкой.',
     serverNameMissing: 'Не указано имя сервера (параметр server).',
@@ -51,7 +51,7 @@ export const AI_STRINGS = {
     unknownTool: 'Неизвестный инструмент: {name}',
     errorPrefix: 'Ошибка',
     diskFilesUnavailable: 'крупнейшие файлы недоступны: {message}',
-    // client.ts — таймаут установления соединения с AI API
+    // client.ts — AI API response timeout
     apiTimeout: 'AI API не ответил за 120 секунд (таймаут ожидания ответа)',
     apiResponseError: 'Ошибка AI API: {message}',
     apiErrorUnknown: 'Провайдер сообщил об ошибке без описания.',
@@ -59,7 +59,7 @@ export const AI_STRINGS = {
     apiIncompleteResponse: 'AI API не завершил ответ. Повторите запрос.',
     apiInterruptedResponse: 'Поток AI API прервался до завершения ответа. Повторите запрос.',
     apiInvalidToolCall: 'AI API вернул некорректный вызов инструмента.',
-    // web-search.ts — промпт поисковой сводки и вывод инструмента
+    // web-search.ts — the search summary prompt and tool output
     searchSummaryPrompt:
       'Найди в интернете ответ на вопрос администратора Linux-сервера и изложи его кратко по-русски. ' +
       'В конце перечисли источники (заголовок и URL). Вопрос: {query}',
@@ -73,7 +73,7 @@ export const AI_STRINGS = {
     searchTimeout: 'Поиск не ответил за 90 секунд (таймаут)',
     searchApiError: 'Ошибка поиска (API): {message}',
     searchError: 'Ошибка поиска: {message}',
-    // disk-usage.ts — текстовый отчёт инструмента disk_usage
+    // disk-usage.ts — the disk_usage tool text report
     duSize: 'Размер {path}: {bytes} Б ({human})',
     duLargestDirs: 'Крупнейшие подкаталоги:',
     duNoSubdirs: '(подкаталогов нет)',
@@ -82,10 +82,10 @@ export const AI_STRINGS = {
     duNoFiles: '(файлов нет)',
     duUnreadable: '(недоступно: {n} каталогов — нужны права доступа)',
     duTruncatedTotal: '(вывод du обрезан — сумма неполная)',
-    // memory.ts — заметки в выводе read_memory/write_memory
+    // memory.ts — notes in the read_memory/write_memory output
     memoryTruncated: '… (MEMORY.md больше {max} байт, показано начало)',
     memoryTooLarge: 'MEMORY.md слишком большой: {bytes} байт, лимит {max} байт. Сократи заметки.',
-    // security-audit.ts — заголовки подсекций отчёта
+    // security-audit.ts — report subsection titles
     auditTitleSshd: 'Настройки sshd',
     auditTitleUid0: 'Пользователи с UID 0',
     auditTitleLoginShell: 'Пользователи с login-shell',
@@ -107,13 +107,13 @@ export const AI_STRINGS = {
     auditTitleWorldWritable: 'World-writable файлы в системных путях',
     auditTitleCron: 'Cron (текущий пользователь и системный)',
     auditTitleCronRoot: 'Cron root',
-    // security-audit.ts — echo-заглушки внутри белого списка команд
+    // security-audit.ts — echo placeholders inside the fixed command list
     auditEchoNoFirewallUtils: '(утилиты фаервола не найдены)',
     auditEchoNoSsNetstat: '(нет ни ss, ни netstat)',
     auditEchoUnknownPkgMgr: 'неизвестный пакетный менеджер — проверка обновлений пропущена',
     auditEchoNotApt: 'не apt-система — проверка пропущена',
     auditEchoNoLastb: '(lastb недоступен)',
-    // security-audit.ts — замечания по контейнерам и строки секции docker
+    // security-audit.ts — container issues and docker section strings
     auditIssuePrivileged: 'privileged-режим',
     auditIssueHostNetwork: 'сеть host',
     auditIssueDockerSock: 'монтирует /var/run/docker.sock',
@@ -121,7 +121,7 @@ export const AI_STRINGS = {
     auditDockerUnavailable: 'docker недоступен: {message}',
     auditNoContainers: 'контейнеров нет',
     auditInspectFailed: 'не удалось выполнить inspect ({message})',
-    // security-audit.ts — служебные строки отчёта
+    // security-audit.ts — report service strings
     auditSudoFailed: '> Привилегированный режим запрошен, но sudo не сработал — root-проверки пропущены.',
     auditSudoNotSet: '> sudo-пароль не задан — root-проверки пропущены (мягкая деградация).',
     auditSkippedNoPerms: 'пропущено: нет прав (нужен sudo)',
@@ -245,8 +245,9 @@ export const AI_STRINGS = {
 export type AiStringKey = keyof typeof AI_STRINGS.ru;
 
 /**
- * Строка агента по ключу и языку сессии с интерполяцией {name}-плейсхолдеров.
- * Неизвестный язык/ключ не должен ронять цикл агента — фолбэк на ru.
+ * An agent string by key and session lang with {name}-placeholder
+ * interpolation. An unknown lang/key must not break the agent loop —
+ * fall back to ru.
  */
 export function aiStr(
   lang: PromptLang,

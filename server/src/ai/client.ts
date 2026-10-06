@@ -30,7 +30,7 @@ export interface ChatMessage {
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;
-  /** Зашифрованный контекст Responses для следующих шагов и восстановления. */
+  /** Encrypted Responses context for the following steps and for recovery. */
   responsesContext?: ResponsesContext;
 }
 
@@ -40,24 +40,24 @@ export interface StreamOptions {
   signal?: AbortSignal;
   onToken?: (token: string) => void;
   onToolCalls?: (calls: ToolCall[]) => void;
-  /** Язык сессии агента — для пользовательски-видимых ошибок API. */
+  /** The agent session lang — for user-visible API errors. */
   lang?: PromptLang;
   /**
-   * Стабильный id диалога для sticky-routing у провайдеров вроде OpenCode Go
-   * (`x-opencode-session`). Без него Go отвечает 400 MissingSessionID.
-   * Переиспользуется на всех шагах одного диалога (чат и plan).
+   * Stable dialogue id for sticky routing at providers like OpenCode Go
+   * (`x-opencode-session`). Without it Go replies 400 MissingSessionID.
+   * Reused across all steps of one dialogue (chat and plan).
    */
   sessionId?: string;
 }
 
-/** Собственное имя клиента без жёстко заданной версии, устаревающей при релизе. */
+/** The client's own name, without a hard-coded version that would go stale on releases. */
 const USER_AGENT = 'ssh-commander';
 
 /**
- * Токены вызова из `usage` ответа API (docs/ai-costs-plan.md, решение 1).
- * Числа — только конечные ≥ 0: мусор от провайдера (строка, NaN,
- * отрицательное) опускает поле. Инварианты: cached ⊂ prompt,
- * reasoning ⊂ completion (поддерживаются на захвате — клампом).
+ * Call tokens from the API response's `usage` (docs/ai-costs-plan.md,
+ * decision 1). Numbers are finite ≥ 0 only: provider garbage (a string,
+ * NaN, a negative) drops the field. Invariants: cached ⊂ prompt,
+ * reasoning ⊂ completion (enforced at capture — by clamping).
  */
 export interface TokenUsage {
   promptTokens?: number;
@@ -66,8 +66,8 @@ export interface TokenUsage {
   reasoningTokens?: number;
 }
 
-/** Составной возврат: usage не кладётся в ChatMessage, чтобы не попасть
- * в this.messages и в persisted-диалог (agent.ts). */
+/** A composite return: usage is not put into ChatMessage, so it cannot end up
+ * in this.messages and in the persisted dialogue (agent.ts). */
 export interface ChatCompletionResult {
   message: ChatMessage;
   usage?: TokenUsage;
@@ -78,11 +78,11 @@ function nonnegInt(v: unknown): number | undefined {
 }
 
 /**
- * Разбор верхнеуровневого `usage` OpenAI-совместимого ответа.
- * Маппинг: prompt_tokens / prompt_tokens_details.cached_tokens /
+ * Parsing the top-level `usage` of an OpenAI-compatible response.
+ * Mapping: prompt_tokens / prompt_tokens_details.cached_tokens /
  * completion_tokens / completion_tokens_details.reasoning_tokens.
- * Кэш-хиты DeepSeek приходят как `prompt_cache_hit_tokens` (без
- * prompt_tokens_details) — читаем как fallback для cachedTokens.
+ * DeepSeek cache hits arrive as `prompt_cache_hit_tokens` (without
+ * prompt_tokens_details) — read as a fallback for cachedTokens.
  */
 export function parseTokenUsage(data: Record<string, unknown>): TokenUsage | undefined {
   const usage = data.usage;
@@ -97,8 +97,8 @@ export function parseTokenUsage(data: Record<string, unknown>): TokenUsage | und
   let cachedTokens =
     nonnegInt(details?.cached_tokens) ?? nonnegInt(u.prompt_cache_hit_tokens);
   let reasoningTokens = nonnegInt(completionDetails?.reasoning_tokens);
-  // Инварианты usage: cached ⊂ prompt, reasoning ⊂ completion — держим их
-  // клампом, чтобы формула цен (вычитание) не уходила в минус.
+  // Usage invariants: cached ⊂ prompt, reasoning ⊂ completion — keep them
+  // by clamping, so the price formula (subtraction) cannot go negative.
   if (cachedTokens !== undefined && promptTokens !== undefined) {
     cachedTokens = Math.min(cachedTokens, promptTokens);
   }
@@ -126,7 +126,7 @@ function responseError(detail: unknown, lang: PromptLang, apiKey: string): Error
   } else {
     message = '';
   }
-  // Провайдер не должен возвращать ключ, но даже отражённый ключ не попадёт в UI.
+  // The provider must not echo the key, but even a reflected key never reaches the UI.
   if (apiKey) message = message.replaceAll(apiKey, '[redacted]');
   return new Error(aiStr(lang, 'apiResponseError', {
     message: message.trim().slice(0, 500) || aiStr(lang, 'apiErrorUnknown'),
@@ -164,38 +164,39 @@ function normalizeResponse(
 }
 
 /**
- * Потоковый клиент: Chat Completions, а для соответствующих моделей Go —
- * Responses. При обычном JSON-ответе использует разбор без стриминга.
+ * Streaming client: Chat Completions, and Responses for the matching Go
+ * models. On a plain JSON response it parses without streaming.
  */
 export async function streamChatCompletion(opts: StreamOptions): Promise<ChatCompletionResult> {
-  // base/ключ/модель — только из settings.json (docs/settings-model-plan.md):
-  // мержа с env больше нет, env сеется в settings при первом старте.
+  // base/key/model — from settings.json only (docs/settings-model-plan.md):
+  // there is no env merge anymore; env is seeded into settings at first start.
   const { provider, apiBase, apiKey, model } = getAiSettings();
   const lang = opts.lang ?? 'ru';
-  // Пресет Go поддерживает и прокси; старый custom — официальный адрес Go.
+  // The Go preset also supports proxies; the legacy custom — the official Go address.
   const usesOpenCodeGo = provider === 'opencode-go' || (provider === 'custom' && isOpenCodeGoBase(apiBase));
   const usesResponses = usesOpenCodeGo && usesGoResponses(model);
   const url = `${apiBase}/${usesResponses ? 'responses' : 'chat/completions'}`;
   const body = JSON.stringify(usesResponses ? buildResponsesBody(opts, model, apiBase) : {
     model,
-    // Go отклоняет верхнеуровневое name у сообщений. Результат инструмента
-    // связан с вызовом через tool_call_id; имена самих функций сохраняются.
-    // Историю не меняем — адаптируем только исходящий запрос, включая старые диалоги.
+    // Go rejects a top-level name on messages. A tool result is tied to the
+    // call via tool_call_id; the function names themselves are kept.
+    // The history is not modified — only the outgoing request is adapted,
+    // including old dialogues.
     messages: opts.messages.map(({ responsesContext: _context, ...message }) =>
       usesOpenCodeGo ? { ...message, name: undefined } : message),
     tools: opts.tools,
     tool_choice: opts.tools?.length ? 'auto' : undefined,
     temperature: config.ai.temperature,
     stream: true,
-    // Финальный usage-чанк (choices: [], usage: {...}) — единственный источник
-    // токенов при стриминге; без include_usage его нет.
+    // The final usage chunk (choices: [], usage: {...}) is the only source of
+    // tokens when streaming; without include_usage it is not sent.
     stream_options: { include_usage: true },
   });
 
-  // Таймаут только на установление соединения и получение заголовков
-  // (первый байт ответа): после начала SSE-стрима он снимается, так как
-  // сам стриминг ответа может идти долго. Остановка пользователем
-  // (opts.signal) продолжает работать на всём протяжении запроса.
+  // The timeout covers only establishing the connection and receiving the
+  // headers (the first response byte): once the SSE stream starts it is
+  // lifted, because streaming the answer itself may take long. A user stop
+  // (opts.signal) keeps working for the whole duration of the request.
   const connectTimeout = new AbortController();
   const timer = setTimeout(
     () => connectTimeout.abort(new Error(aiStr(opts.lang ?? 'ru', 'apiTimeout'))),
@@ -210,7 +211,7 @@ export async function streamChatCompletion(opts: StreamOptions): Promise<ChatCom
     authorization: `Bearer ${apiKey}`,
     'user-agent': USER_AGENT,
   };
-  // Другим провайдерам ID диалога не отправляется.
+  // The dialogue id is not sent to other providers.
   if (opts.sessionId && usesOpenCodeGo) {
     headers['x-opencode-session'] = opts.sessionId;
   }
@@ -263,7 +264,7 @@ export async function streamChatCompletion(opts: StreamOptions): Promise<ChatCom
     try {
       data = JSON.parse(payload);
     } catch {
-      // Пропускаем только битый JSON; ошибки провайдера и обработчиков не глушим.
+      // Only broken JSON is skipped; provider and handler errors are never muted.
       if (name === 'error') throw responseError(payload, lang, apiKey);
       return;
     }
@@ -285,7 +286,7 @@ export async function streamChatCompletion(opts: StreamOptions): Promise<ChatCom
       }
       return;
     }
-    // Финальный usage-чанк может приходить с пустым choices.
+    // The final usage chunk may arrive with empty choices.
     const chunkUsage = parseTokenUsage(json);
     if (chunkUsage) usage = chunkUsage;
     const delta = (json.choices as Array<{ delta: Record<string, unknown> }> | undefined)?.[0]?.delta;
@@ -333,7 +334,7 @@ export async function streamChatCompletion(opts: StreamOptions): Promise<ChatCom
         buffer = buffer.slice(nl + 1);
       }
       if (done) {
-        // Некоторые совместимые API закрывают поток без последнего перевода строки.
+        // Some compatible APIs close the stream without the final newline.
         if (!finished) {
           if (buffer) consumeLine(buffer.replace(/\r$/, ''));
           dispatchEvent();
@@ -342,7 +343,7 @@ export async function streamChatCompletion(opts: StreamOptions): Promise<ChatCom
       }
     }
   } finally {
-    // Закрываем HTTP-стрим и при ошибке, и при [DONE] без закрытия соединения.
+    // Close the HTTP stream both on error and on [DONE] without connection close.
     await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }

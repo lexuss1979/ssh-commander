@@ -45,9 +45,9 @@
 |---|---|---|
 | S1 ✅ | `ssh/manager.ts`, `ssh/sftp.ts`, `util/origin.ts`, `util/async.ts`, `util/path.ts` | ~2k |
 | S2 ✅ | `config.ts`, `index.ts`, `types.ts`, `profiles.ts`, `auth.ts` | ~3.1k |
-| S3 | `ai/agent.ts`, `ai/responses.ts`, `ai/dialogues.ts` (кроме сентинела), `ai/memory.ts`, `ai/plan.ts` | ~6k |
-| S4 | `ai/prompts.ts` (только комментарии), `ai/tools.ts` (только комментарии), `ai/guard.ts` | ~9k |
-| S5 | `ai/strings.ts` (только комментарии), `ai/redact.ts`, `ai/suggest.ts`, `ai/client.ts`, `ai/web-search.ts`, `ai/usage.ts`, `ai/pricing.ts` | ~9.5k |
+| S3 ✅ | `ai/agent.ts`, `ai/responses.ts`, `ai/dialogues.ts` (кроме сентинела), `ai/memory.ts`, `ai/plan.ts` | ~6k |
+| S4 ✅ | `ai/prompts.ts` (только комментарии), `ai/tools.ts` (только комментарии), `ai/guard.ts` | ~9k |
+| S5 ✅ | `ai/strings.ts` (только комментарии), `ai/redact.ts`, `ai/suggest.ts`, `ai/client.ts`, `ai/web-search.ts`, `ai/usage.ts`, `ai/pricing.ts` | ~9.5k |
 | S6 ✅ | `routes/db.ts`, `routes/files.ts`, `routes/profiles.ts`, `routes/nginx.ts`, `routes/services.ts` | ~6.1k |
 | S7 ✅ | `routes/settings.ts`, `routes/setup.ts`, `routes/packages.ts`, `routes/snippets.ts`, `routes/docker.ts`, `routes/processes.ts`, `routes/ports.ts`, `routes/terminal.ts`, `routes/disk-usage.ts`, `routes/cron.ts`, `routes/metrics-history.ts`, `routes/ai.ts`, `routes/alerts.ts`, `routes/tunnels.ts`, `routes/metrics.ts`, `routes/auth.ts`, `routes/overview.ts` | ~7.1k |
 | S8 ✅ | `services/bootstrap.ts`, `services/systemd.ts` | ~8.9k |

@@ -11,7 +11,7 @@ const history: ChatMessage[] = [
 
 describe('toolsForRequest', () => {
   it('in planning mode the tools are not passed to the API at all', () => {
-    // undefined → JSON.stringify опускает ключ tools из тела запроса.
+    // undefined → JSON.stringify drops the tools key from the request body.
     expect(toolsForRequest(true)).toBeUndefined();
     expect(JSON.stringify({ tools: toolsForRequest(true) })).toBe('{}');
   });

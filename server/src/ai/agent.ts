@@ -67,10 +67,10 @@ import {
 
 const MAX_TOOL_OUTPUT = 12000;
 
-// Лимит вызовов web_search на один запуск цикла (каждый вызов — до
-// MAX_USES_PER_CALL реальных поисков на стороне API). Общий шаг агента
-// (AI_MAX_STEPS) ограничивает и это, но поиск — платный сетевой вызов,
-// держим отдельный потолок.
+// Cap on web_search calls per loop run (each call is up to
+// MAX_USES_PER_CALL actual searches on the API side). The overall agent
+// step limit (AI_MAX_STEPS) also bounds this, but search is a paid
+// network call — keep a separate ceiling.
 const MAX_SEARCH_CALLS_PER_RUN = 10;
 
 type WsMessage = Record<string, unknown>;
@@ -89,29 +89,30 @@ export class AgentSession {
   private running = false;
   private wsClosed = false;
   private loopAbort: AbortController | null = null;
-  // План составлен и ждёт approve_plan (или правок обычным message с planMode=true).
+  // A plan has been drafted and awaits approve_plan (or edits via a regular message with planMode=true).
   private planPending = false;
-  // sudo-пароли для привилегированного security_audit по серверам диалога
-  // (profileId → пароль). Только в памяти сессии: не логируются, не попадают
-  // в сообщения диалога/на диск, не передаются модели.
-  // Очищаются в stop()/onWsClose() и при detach сервера.
+  // sudo passwords for privileged security_audit on the dialogue servers
+  // (profileId → password). Session memory only: never logged, never
+  // stored in dialogue messages/on disk, never passed to the model.
+  // Cleared in stop()/onWsClose() and on server detach.
   private sudoPasswords = new Map<string, string>();
-  // Серверы, подключённые к диалогу: домашний всегда, остальные — через
-  // connect_server (approve) или attach_server (действие пользователя).
+  // Servers attached to the dialogue: the home one always, the rest via
+  // connect_server (approve) or attach_server (a user action).
   private attached = new Map<string, Profile>();
 
   constructor(
     private homeProfile: Profile,
     private ws: WebSocket,
     dialogue?: Dialogue,
-    // Язык системного промпта и ответов — параметр сессии, приходит от
-    // клиента по WS-подключению (query `lang`): язык агента = язык интерфейса.
+    // The session lang — the language of the system prompt and responses —
+    // comes from the client over the WS connection (query `lang`):
+    // agent lang = UI lang.
     private readonly lang: PromptLang = 'ru',
   ) {
     this.dialogueId = dialogue?.id ?? createDialogue(homeProfile.id).id;
     this.attached.set(homeProfile.id, homeProfile);
-    // Подгружаем серверы, сохранённые в диалоге прошлой сессией;
-    // несуществующие профили пропускаем, диалог от этого не ломается.
+    // Load servers saved into the dialogue by the previous session;
+    // missing profiles are skipped — the dialogue keeps working.
     for (const extraId of dialogue?.extraProfileIds ?? []) {
       const extra = getProfile(extraId);
       if (extra) {
@@ -120,11 +121,11 @@ export class AgentSession {
         console.warn(`dialogue ${this.dialogueId}: attached profile ${extraId} not found, skipped`);
       }
     }
-    // Статические тексты промпта — в ai/prompts.ts (ru/en, выбор по языку
-    // сессии this.lang); здесь только склейка динамических частей.
+    // Static prompt texts live in ai/prompts.ts (ru/en, chosen by the
+    // session lang this.lang); only the dynamic parts are assembled here.
     const promptLang = this.lang;
     let systemPrompt = systemPromptBase(promptLang, `${homeProfile.username}@${homeProfile.host}`);
-    // Мульти-серверность: домашний сервер диалога + подключённые к нему.
+    // Multi-server: the dialogue home server + servers attached to it.
     systemPrompt += multiServerNote(promptLang);
     const attachedNames = [...this.attached.values()].map((p) => p.name);
     if (attachedNames.length > 1) {
@@ -133,12 +134,12 @@ export class AgentSession {
     if (isSearchConfigured()) {
       systemPrompt += webSearchNote(promptLang);
     }
-    // Подсказка вероятного ответа (agent-suggest): маркер вырезается из ответа
-    // до персиста и контекста (ai/suggest.ts), текст подсказки уходит на
-    // фронтенд отдельным WS-событием suggestion. Инструкция консервативна
-    // (асимметрия в пользу молчания): подсказка — только при заведомо
-    // вероятном ответе; на открытые вопросы, равнозначные варианты и
-    // необратимые/рискованные действия модель молчит.
+    // Likely-answer suggestion (agent-suggest): the marker is cut from the
+    // reply before persist and context (ai/suggest.ts), the suggestion text
+    // goes to the frontend as a separate WS suggestion event. The
+    // instruction is conservative (asymmetric in favor of silence): suggest
+    // only when one answer is clearly likely; on open questions, equivalent
+    // options and irreversible/risky actions the model stays silent.
     systemPrompt += suggestInstruction(promptLang);
     const memoryBlock = memoryPromptBlock(homeProfile.id, promptLang);
     if (memoryBlock) {
@@ -169,16 +170,16 @@ export class AgentSession {
     this.send({ type: 'dialogue', id: this.dialogueId });
   }
 
-  /** Событие `servers` — шапка панели агента синхронизируется по нему. */
+  /** The `servers` event — the agent panel header is synced from it. */
   notifyServers(): void {
     this.send(this.serversEvent());
   }
 
   /**
-   * Резолвит параметр `server` инструмента в подключённый профиль.
-   * Без имени — домашний сервер; имя матчится точно, затем без учёта регистра.
-   * Ошибка — не исключение: возвращается текст для обычного tool_result,
-   * чтобы цикл агента не падал на опечатке модели.
+   * Resolves the tool's `server` parameter to an attached profile.
+   * No name — the home server; the name is matched exactly, then
+   * case-insensitively. An error is not an exception: the text comes back
+   * as a regular tool_result, so the agent loop survives a model typo.
    */
   resolveServer(name?: string): { profile: Profile } | { error: string } {
     const trimmed = (name ?? '').trim();
@@ -205,7 +206,7 @@ export class AgentSession {
     };
   }
 
-  /** Ручное подключение сервера к диалогу (WS attach_server) — без approve. */
+  /** Manual attach of a server to the dialogue (WS attach_server) — no approve. */
   attachServerById(profileId: string): { ok: true } | { ok: false; error: string } {
     const profile = getProfile(profileId);
     if (!profile) {
@@ -223,7 +224,7 @@ export class AgentSession {
     return { ok: true };
   }
 
-  /** Отключение сервера от диалога (WS detach_server). Домашний — нельзя. */
+  /** Detach a server from the dialogue (WS detach_server). The home one cannot be detached. */
   detachServerById(profileId: string): { ok: true } | { ok: false; error: string } {
     if (profileId === this.homeProfile.id) {
       return { ok: false, error: aiStr(this.lang, 'homeServerDetach') };
@@ -253,7 +254,7 @@ export class AgentSession {
     };
   }
 
-  /** Профиль по имени среди всех профилей приложения (точно, затем без регистра). */
+  /** Profile by name among all app profiles (exact, then case-insensitive). */
   private findProfileByName(name: string): Profile | undefined {
     const all = listProfiles();
     const exact = all.find((p) => p.name === name);
@@ -265,9 +266,10 @@ export class AgentSession {
   }
 
   /**
-   * Имя сервера для событий tool_start/tool_pending/tool_result (бейдж в UI).
-   * Для connect_server — имя целевого сервера (он ещё не подключён);
-   * для list_servers/web_search сервер не имеет смысла — поле опускается.
+   * Server name for the tool_start/tool_pending/tool_result events (a badge
+   * in the UI). For connect_server — the target server name (not attached
+   * yet); for list_servers/web_search a server makes no sense — the field
+   * is omitted.
    */
   private serverLabelFor(name: string, args: Record<string, unknown>): string | undefined {
     const raw = typeof args.server === 'string' ? args.server.trim() : '';
@@ -290,10 +292,10 @@ export class AgentSession {
         const content = String(data.content ?? '').trim();
         if (content && !this.running) {
           if (data.planMode === true) {
-            // Режим планирования (или правки к ожидающему плану): составляем план заново.
+            // Plan mode (or edits to a pending plan): draft the plan again.
             void this.runPlan(content);
           } else {
-            // planMode=false/отсутствует — выход из режима планирования.
+            // planMode=false/absent — leaving plan mode.
             this.planPending = false;
             void this.runLoop(content);
           }
@@ -301,8 +303,8 @@ export class AgentSession {
         break;
       }
       case 'approve_plan': {
-        // План подтверждён: продолжаем тот же диалог обычным циклом с инструментами
-        // (per-tool approve для мутирующих инструментов сохраняется).
+        // Plan approved: continue the same dialogue with the regular tool loop
+        // (per-tool approve for mutating tools still applies).
         if (this.planPending && !this.running) {
           this.planPending = false;
           void this.runLoop(planApprovedMessage(this.lang));
@@ -328,9 +330,9 @@ export class AgentSession {
         break;
       }
       case 'sudo_credentials': {
-        // sudo-пароль для привилегированного security_audit: только поле сессии
-        // в памяти. НЕ логировать, НЕ сохранять в диалог, НЕ передавать модели.
-        // profileId выбирает сервер диалога (по умолчанию — домашний).
+        // sudo password for privileged security_audit: an in-memory session
+        // field only. Do NOT log, do NOT store in the dialogue, do NOT pass
+        // to the model. profileId selects the dialogue server (home by default).
         const password = typeof data.password === 'string' ? data.password : '';
         const profileId =
           typeof data.profileId === 'string' && data.profileId ? data.profileId : this.homeProfile.id;
@@ -342,8 +344,8 @@ export class AgentSession {
         break;
       }
       case 'attach_server': {
-        // Ручное подключение сервера чипом «+» — действие самого пользователя,
-        // approve не требуется.
+        // Manual attach via the "+" chip — the user's own action,
+        // no approve required.
         const result = this.attachServerById(String(data.profileId ?? ''));
         if (!result.ok) {
           this.send({ type: 'error', message: result.error });
@@ -367,7 +369,7 @@ export class AgentSession {
   stop(): void {
     this.stopRequested = true;
     this.planPending = false;
-    // Пароли sudo не должны жить дольше текущего запуска.
+    // sudo passwords must not outlive the current run.
     this.sudoPasswords.clear();
     this.loopAbort?.abort();
     for (const pending of this.pending.values()) {
@@ -396,11 +398,11 @@ export class AgentSession {
   }
 
   /**
-   * Запись usage вызова чата/плана (решения 3, 5, 6, 8): стоимость считается
-   * и фиксируется в момент вызова; после записи сессия шлёт WS-событие
-   * `{type:'usage', totals}` с кумулятивными итогами диалога — бейдж в тулбаре
-   * двигается во время длинных прогонов. Ошибки журнала не роняют цикл агента
-   * (try/catch + warn, как у save()).
+   * Usage record for a chat/plan call (decisions 3, 5, 6, 8): the cost is
+   * computed and fixed at call time; after the record the session sends a
+   * `{type:'usage', totals}` WS event with the dialogue's cumulative totals —
+   * the toolbar badge moves during long runs. Journal errors never break
+   * the agent loop (try/catch + warn, same as save()).
    */
   private recordChatUsage(kind: 'chat' | 'plan', model: string, usage: TokenUsage): void {
     try {
@@ -426,7 +428,7 @@ export class AgentSession {
     }
   }
 
-  /** Запись usage вызова web_search (решение 5) — отдельный kind. */
+  /** Usage record for a web_search call (decision 5) — a separate kind. */
   private recordSearchUsage(model: string, usage: WebSearchUsage): void {
     try {
       recordUsage({
@@ -452,7 +454,7 @@ export class AgentSession {
     }
   }
 
-  /** WS-событие `usage`: кумулятивные итоги диалога для живого бейджа. */
+  /** The `usage` WS event: the dialogue's cumulative totals for the live badge. */
   private sendUsageTotals(): void {
     const totals = usageTotalsByDialogue().get(this.dialogueId);
     if (totals) {
@@ -467,12 +469,12 @@ export class AgentSession {
   }
 
   /**
-   * Шаг планирования: один запрос к API БЕЗ инструментов (ключ `tools`
-   * отсутствует в теле запроса) с дополненным системным промптом. Ответ
-   * модели — план — стримится как обычное assistant-сообщение (token/message),
-   * затем отправляется `plan_ready`, и сессия ждёт `approve_plan` или правок.
-   * Шаг планирования НЕ расходует лимит AI_MAX_STEPS: счётчик шагов ведётся
-   * только в runLoop (исполнение с инструментами).
+   * Planning step: a single API request WITHOUT tools (the `tools` key is
+   * absent from the request body) with an extended system prompt. The model's
+   * reply — the plan — streams as a regular assistant message (token/message),
+   * then `plan_ready` is sent and the session waits for `approve_plan` or
+   * edits. The planning step does NOT consume the AI_MAX_STEPS budget: the
+   * step counter is kept only in runLoop (execution with tools).
    */
   private async runPlan(userContent: string): Promise<void> {
     if (this.running) return;
@@ -488,8 +490,9 @@ export class AgentSession {
       this.loopAbort = new AbortController();
       let assistant: ChatMessage;
       try {
-        // Holdback-фильтр: маркер [[SUGGEST]] и текст подсказки не мелькают
-        // в стрим-пузыре. flush — только на успешном стриме (решение 5 плана).
+        // Holdback filter: the [[SUGGEST]] marker and the suggestion text
+        // never flash in the stream bubble. flush — on a successful stream
+        // only (decision 5 of the plan).
         const tokenFilter = createSuggestionTokenFilter((t) => this.send({ type: 'token', content: t }));
         const result = await streamChatCompletion({
           messages: buildPlanRequestMessages(sanitizeMessages(this.messages), this.lang),
@@ -501,9 +504,9 @@ export class AgentSession {
         });
         tokenFilter.flush();
         assistant = result.message;
-        // Шаг планирования — тоже платный вызов: учитываем в журнале.
-        // Модель — из settings (getAiSettings), не из env: env сеется в
-        // settings при первом старте, дальше не читается.
+        // The planning step is a paid call too: record it in the journal.
+        // The model comes from settings (getAiSettings), not env: env is
+        // seeded into settings at first start and never read afterwards.
         if (result.usage) {
           this.recordChatUsage('plan', getAiSettings().model, result.usage);
         }
@@ -516,10 +519,10 @@ export class AgentSession {
         return;
       }
 
-      // Инструменты в запросе не передавались; если модель всё же вернула
-      // tool_calls — игнорируем их и сохраняем только текст плана. Подсказка
-      // в режиме планирования не нужна (точка решения — кнопка «Выполнить»),
-      // но маркер на всякий случай вырезаем и здесь.
+      // No tools were passed in the request; if the model still returned
+      // tool_calls — ignore them and keep only the plan text. A suggestion
+      // is not needed in plan mode (the decision point is the Run button),
+      // but the marker is cut here as well, just in case.
       const { content: planContent } = extractSuggestion(assistant.content ?? '');
       this.send({ type: 'message', role: 'assistant', content: planContent });
       this.messages.push({ role: 'assistant', content: planContent });
@@ -542,8 +545,8 @@ export class AgentSession {
     this.stopRequested = false;
     this.steps = 0;
     this.searchCalls = 0;
-    // Не отправляем в API и не сохраняем оборванный обмен tool_calls (например,
-    // после остановки агента или перезагрузки вкладки в середине вызова).
+    // Do not send to the API or persist a truncated tool_calls exchange (e.g.
+    // after stopping the agent or reloading the tab mid-call).
     this.messages = sanitizeMessages(this.messages);
     this.messages.push({ role: 'user', content: userContent });
     this.save();
@@ -556,10 +559,10 @@ export class AgentSession {
 
         let assistant: ChatMessage;
         try {
-          // Holdback-фильтр: маркер [[SUGGEST]] и текст подсказки не мелькают
-          // в стрим-пузыре. flush — только на успешном стриме: на пути
-          // ошибки/останова удержанный хвост не важен (финального message
-          // там всё равно нет, потеря косметическая).
+          // Holdback filter: the [[SUGGEST]] marker and the suggestion text
+          // never flash in the stream bubble. flush — on a successful stream
+          // only: on the error/stop path the held-back tail does not matter
+          // (there is no final message there anyway, the loss is cosmetic).
           const tokenFilter = createSuggestionTokenFilter((t) => this.send({ type: 'token', content: t }));
           const result = await streamChatCompletion({
             messages: sanitizeMessages(this.messages),
@@ -571,7 +574,7 @@ export class AgentSession {
           });
           tokenFilter.flush();
           assistant = result.message;
-          // Каждый вызов чата — платная запись в журнале (решения 5, 6).
+          // Every chat call is a paid journal record (decisions 5, 6).
           if (result.usage) {
             this.recordChatUsage('chat', getAiSettings().model, result.usage);
           }
@@ -584,10 +587,11 @@ export class AgentSession {
           return;
         }
 
-        // Маркер [[SUGGEST]] вырезается до this.messages/save(): в персист и
-        // контекст модели попадает только чистый контент. На финальном ходе
-        // (без tool_calls — агент ждёт пользователя) подсказка уходит отдельным
-        // WS-событием suggestion после message, до done.
+        // The [[SUGGEST]] marker is cut before this.messages/save(): only the
+        // clean content reaches the persist and the model context. On the
+        // final turn (no tool_calls — the agent waits for the user) the
+        // suggestion goes as a separate WS suggestion event after message,
+        // before done.
         const { content, suggestion } = extractSuggestion(assistant.content ?? '');
         this.send({ type: 'message', role: 'assistant', content });
         this.messages.push(assistant.content === null ? assistant : { ...assistant, content });
@@ -606,14 +610,14 @@ export class AgentSession {
         for (const call of calls) {
           if (this.stopRequested) break;
           const { name, args } = this.parseCall(call);
-          // Автоматически — только read-only вызов без признаков чтения
-          // секретов (ai/tools.ts): `read_file .env` уходит на approve.
+          // Auto-run — only a read-only call with no signs of reading
+          // secrets (ai/tools.ts): `read_file .env` goes to approve.
           const readOnly = isAutoRunnable(name, args);
           const server = this.serverLabelFor(name, args);
 
           if (readOnly) {
-            // Живая видимость read-only вызова: карточка «выполняется…» до
-            // результата (без кнопок подтверждения — в отличие от tool_pending).
+            // Live visibility of a read-only call: a "running…" card until
+            // the result (no approval buttons — unlike tool_pending).
             this.send({ type: 'tool_start', callId: call.id, name, args, server });
             const result = await this.runTool(name, args);
             this.send({
@@ -704,11 +708,11 @@ export class AgentSession {
   }
 
   /**
-   * Единая точка выхода данных сервера: вывод инструмента идёт отсюда сразу
-   * в контекст модели (то есть внешнему провайдеру), в UI и в персист диалога.
-   * Поэтому здесь же — редакция секретов (ai/redact.ts), и обязательно ДО
-   * обрезки: у обрезанного PEM-блока не остаётся хвостового `-----END`,
-   * по которому его можно опознать.
+   * The single egress point for server data: tool output goes from here
+   * straight into the model context (i.e. to the external provider), the UI
+   * and the dialogue persist. That is why secret redaction (ai/redact.ts)
+   * happens here too, and strictly BEFORE truncation: a truncated PEM block
+   * loses its trailing `-----END`, the marker it is recognized by.
    */
   private truncate(text: string): { output: string; truncated: boolean } {
     const safe = redactSecrets(text, this.lang);
@@ -733,7 +737,7 @@ export class AgentSession {
     return { status: 'ok', ...this.truncate(output) };
   }
 
-  /** Вывод list_servers: все профили без секретов + признак подключения к диалогу. */
+  /** list_servers output: all profiles without secrets + whether attached to the dialogue. */
   private listServersOutput(): string {
     const rows = listProfiles().map((p) => ({
       name: p.name,
@@ -747,9 +751,10 @@ export class AgentSession {
   }
 
   /**
-   * Подключение сервера к диалогу по approve: запись в extraProfileIds диалога
-   * и в attached сессии. tool_result включает блок памяти подключаемого
-   * сервера — так память попадает в контекст лениво, не раздувая промпт.
+   * Attaching a server to the dialogue via approve: writes to the dialogue's
+   * extraProfileIds and to the session's attached. The tool_result includes
+   * the attached server's memory block — memory reaches the context lazily,
+   * without bloating the prompt.
    */
   private connectServer(name: string): { status: 'ok' | 'error'; output: string; truncated: boolean } {
     const trimmed = name.trim();
@@ -790,8 +795,8 @@ export class AgentSession {
     args: Record<string, unknown>,
   ): Promise<{ status: 'ok' | 'error'; output: string; truncated: boolean }> {
     try {
-      // Инструменты без привязки к подключённому серверу: список профилей,
-      // подключение сервера к диалогу и сетевой веб-поиск.
+      // Tools not bound to an attached server: the profile list, attaching a
+      // server to the dialogue, and the networked web search.
       if (name === 'list_servers') {
         return { status: 'ok', ...this.truncate(this.listServersOutput()) };
       }
@@ -799,8 +804,9 @@ export class AgentSession {
         return this.connectServer(String(args.server ?? ''));
       }
       if (name === 'web_search') {
-        // Двойной гейтинг: без конфигурации инструмент модели не объявляется,
-        // но вызов может прийти из старого диалога — отвечаем понятной ошибкой.
+        // Double gating: without configuration the tool is not declared to
+        // the model, but a call may still arrive from an old dialogue —
+        // reply with a clear error.
         if (!isSearchConfigured()) {
           return {
             status: 'error',
@@ -822,9 +828,9 @@ export class AgentSession {
         }
         return { status: result.ok ? 'ok' : 'error', ...this.truncate(result.output) };
       }
-      // Остальные инструменты адресуются серверу: параметр `server` (имя
-      // профиля), по умолчанию — домашний сервер диалога. Ошибка резолва —
-      // обычный tool_result с текстом, цикл не падает.
+      // The remaining tools are addressed to a server: the `server` parameter
+      // (a profile name), the dialogue home server by default. A resolve
+      // error is a regular tool_result with text — the loop keeps going.
       const resolved = this.resolveServer(typeof args.server === 'string' ? args.server : undefined);
       if ('error' in resolved) {
         return { status: 'error', output: resolved.error, truncated: false };
@@ -862,9 +868,10 @@ export class AgentSession {
           };
         }
         case 'write_memory': {
-          // Промпт запрещает писать в память секреты, но это лишь инструкция:
-          // MEMORY.md переживает сессию и грузится в контекст при каждом старте,
-          // поэтому содержимое прогоняется через ту же редакцию.
+          // The prompt forbids writing secrets to memory, but that is only an
+          // instruction: MEMORY.md outlives the session and is loaded into the
+          // context on every start, so the content goes through the same
+          // redaction.
           const content = redactSecrets(String(args.content ?? ''), this.lang);
           if (!content.trim()) {
             return { status: 'error', output: aiStr(this.lang, 'memoryEmptyContent'), truncated: false };
@@ -906,9 +913,10 @@ export class AgentSession {
         case 'docker_inspect': {
           const target = String(args.target ?? '');
           const data = await inspect(profile, target);
-          // Значения Env вырезаются структурно, до текста: `docker inspect` —
-          // самый ёмкий источник чужих секретов (весь .env приложения одним
-          // куском), и на имена переменных полагаться надёжнее, чем на regex.
+          // Env values are redacted structurally, before any text matching:
+          // `docker inspect` is the densest source of foreign secrets (the
+          // app's entire .env in one piece), and variable names are more
+          // reliable than regex.
           const safe = redactDockerEnv(data, this.lang);
           return { status: 'ok', ...this.truncate(JSON.stringify(safe, null, 2)) };
         }
@@ -916,9 +924,10 @@ export class AgentSession {
           const sections = Array.isArray(args.sections)
             ? args.sections.map(String)
             : undefined;
-          // privileged подставляется сервером, а не доверяется модели: root-проверки
-          // выполняются, только когда пользователь ввёл sudo-пароль в UI (он хранится
-          // в сессии и модели недоступен). Пароль берётся для целевого сервера.
+          // privileged is set by the server, not trusted from the model: root
+          // checks run only when the user entered a sudo password in the UI
+          // (it lives in the session and is unavailable to the model). The
+          // password is taken for the target server.
           const sudoPassword = this.sudoPasswords.get(profile.id);
           const output = await runSecurityAudit(profile, {
             sections,
@@ -929,10 +938,11 @@ export class AgentSession {
           return { status: 'ok', ...this.truncate(output) };
         }
         case 'disk_usage': {
-          // Команды du/find собирает сервис из провалидированного пути (shq) —
-          // произвольный shell в инструмент не попадает, deny-лист exec_readonly
-          // не участвует (как у security_audit). Путь вне навигационных правил —
-          // обычный tool_result с текстом, цикл не падает.
+          // The du/find commands are assembled by the service from a
+          // validated path (shq) — no arbitrary shell reaches the tool, the
+          // exec_readonly allow-list is not involved (same as security_audit).
+          // A path outside the navigation rules is a regular tool_result with
+          // text — the loop keeps going.
           let path: string;
           try {
             path = assertNavigablePath(normalizeDiskPath(String(args.path ?? '/')));
@@ -940,17 +950,17 @@ export class AgentSession {
             return { status: 'error', output: String((err as Error).message), truncated: false };
           }
           const limit = clampAgentLimit(args.limit);
-          // Одна предпроверка на оба вызова (иначе две независимые SFTP-stat
-          // на каждый вызов инструмента); транспорт/права — обычный tool_result,
-          // цикл не падает.
+          // One precheck for both calls (otherwise two independent SFTP-stats
+          // per tool call); transport/permissions are a regular tool_result,
+          // the loop keeps going.
           try {
             await precheckNavigableDir(profile, path);
           } catch (err) {
             return { status: 'error', output: String((err as Error).message), truncated: false };
           }
           const skipPrecheck = { skipPrecheck: true };
-          // Каталоги — основной результат; файлы при отказе (нет find/stat)
-          // деградируют в строку-пояснение, не роняя инструмент целиком.
+          // Directories are the main result; files on failure (no find/stat)
+          // degrade to an explanatory line, without failing the whole tool.
           const [snap, files] = await Promise.allSettled([
             diskUsageSnapshot(profile, path, skipPrecheck),
             topFiles(profile, path, limit, skipPrecheck),
@@ -1021,8 +1031,8 @@ export class AgentSession {
   }
 }
 
-// Реестр активных сессий: ключ — домашний профиль диалога (модель
-// «одна сессия на профиль» сохраняется и в мульти-серверном режиме).
+// Registry of active sessions: the key is the dialogue's home profile (the
+// "one session per profile" model holds in the multi-server mode too).
 const sessions = new Map<string, AgentSession>();
 
 export function attachAgent(
@@ -1043,8 +1053,8 @@ export function attachAgent(
   let dialogue: Dialogue | undefined;
   if (dialogueId) {
     const found = getDialogue(dialogueId);
-    // Домашний профиль диалога обязан совпасть; extraProfileIds подгружаются
-    // в конструкторе сессии (несуществующие пропускаются с warning).
+    // The dialogue's home profile must match; extraProfileIds are loaded in
+    // the session constructor (missing ones are skipped with a warning).
     if (found?.profileId === profile.id) {
       dialogue = found;
     }

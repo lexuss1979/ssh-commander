@@ -57,7 +57,7 @@ export function writeMemory(profileId: string, content: string, lang: PromptLang
   const file = memoryPath(profileId);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.tmp`;
-  // 0600: как и стор диалогов — это выдержки с серверов пользователя.
+  // 0600: same as the dialogues store — these are excerpts from the user's servers.
   fs.writeFileSync(tmp, content, { encoding: 'utf8', mode: 0o600 });
   fs.renameSync(tmp, file);
   return { path: file, bytes };
