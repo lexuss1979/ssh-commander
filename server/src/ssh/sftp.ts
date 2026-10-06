@@ -38,8 +38,8 @@ export function readFile(sftp: SFTPWrapper, path: string, encoding: 'utf8'): Pro
 }
 
 /**
- * Читает диапазон байт [start, end] (включительно) через read stream —
- * сниф заголовка файла без вытаскивания всего содержимого.
+ * Reads the byte range [start, end] (inclusive) via a read stream —
+ * file-header sniffing without pulling the whole content.
  */
 export function readRange(sftp: SFTPWrapper, path: string, start: number, end: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {

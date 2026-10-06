@@ -10,7 +10,7 @@ export interface Profile {
   password?: string;
   dockerCommand?: string;
   note?: string;
-  /** Закреплённые пути логов для быстрого доступа в FilesPage (эпик 14). */
+  /** Pinned log paths for quick access in FilesPage (epic 14). */
   logPaths?: string[];
 }
 
@@ -31,73 +31,74 @@ export interface ExecResult {
 }
 
 // ---------------------------------------------------------------------------
-// Вкладка «Nginx» (эпик docs/nginx-plan.md) — контракты API
+// Nginx tab (epic docs/nginx-plan.md) — API contracts
 // ---------------------------------------------------------------------------
 
-/** Один параметр `listen` server-блока. */
+/** A single `listen` directive of a server block. */
 export interface NginxListen {
-  /** Адрес без порта: '' (все интерфейсы), конкретный IP, '[::]' для IPv6. */
+  /** Address without port: '' (all interfaces), a specific IP, '[::]' for IPv6. */
   addr: string;
-  /** Порт; null — unix-сокет (`listen unix:...`). */
+  /** Port; null means a unix socket (`listen unix:...`). */
   port: number | null;
-  /** Флаг `listen ... ssl`. */
+  /** The `listen ... ssl` flag. */
   ssl: boolean;
-  /** Флаг `listen ... default_server`. */
+  /** The `listen ... default_server` flag. */
   defaultServer: boolean;
 }
 
-/** Куда «смотрит» сайт: proxy_pass, root или не распознано. */
+/** What the site points at: proxy_pass, root, or unrecognized. */
 export interface NginxTarget {
   kind: 'proxy' | 'static' | 'unknown';
   value: string;
 }
 
 /**
- * Сертификат сайта. Распарсен локально (`crypto.X509Certificate`, решение 5
- * плана) — `notAfter` ISO, `daysLeft` — целых дней до конца срока (может
- * быть отрицательным). `error` — файл не прочитан или PEM не разобран.
+ * Site certificate. Parsed locally (`crypto.X509Certificate`, decision 5 of
+ * the plan) — `notAfter` is ISO, `daysLeft` is whole days until expiry (may
+ * be negative). `error` means the file could not be read or the PEM not
+ * parsed.
  */
 export type NginxCert =
   | { path: string; notAfter: string; daysLeft: number }
   | { path: string; error: string };
 
-/** Сайт (server-блок) в снапшоте. */
+/** A site (server block) in the snapshot. */
 export interface NginxSite {
-  /** Файл из маркера `# configuration file <путь>:`; '' — не определён. */
+  /** File from the `# configuration file <path>:` marker; '' — undetermined. */
   file: string;
-  /** Все имена server_name (wildcard как есть); пусто — server_name нет. */
+  /** All server_name values (wildcards as-is); empty — no server_name. */
   serverNames: string[];
-  /** Любой из listen имеет флаг default_server. */
+  /** Any of the listen directives carries the default_server flag. */
   isDefault: boolean;
   listens: NginxListen[];
   target: NginxTarget;
-  /** Число верхнеуровневых location-блоков. */
+  /** Number of top-level location blocks. */
   locationsCount: number;
-  /** null — ssl_certificate в конфиге не задан (ни на server, ни на http-уровне). */
+  /** null — no ssl_certificate in the config (neither at server nor http level). */
   cert: NginxCert | null;
 }
 
-/** Результат `nginx -t`: вывод читается из stderr (nginx пишет туда). */
+/** Result of `nginx -t`: output is read from stderr (nginx writes there). */
 export interface NginxConfigTest {
   ok: boolean;
   output: string;
 }
 
-/** Источник конфигурации nginx: бинарь хоста или контейнер. */
+/** Source of the nginx configuration: the host binary or a container. */
 export type NginxSourceRef =
   | { type: 'native'; bin: string }
   | { type: 'container'; containerId: string; containerName: string };
 
-/** Один источник в снапшоте `GET /api/nginx`. */
+/** One source in the `GET /api/nginx` snapshot. */
 export interface NginxSourceSnapshot {
   type: 'native' | 'container';
   containerId?: string;
   containerName?: string;
-  /** Версия из `nginx -v` (пишет в stderr); null — не определилась. */
+  /** Version from `nginx -v` (writes to stderr); null — not determined. */
   version: string | null;
   configTest: NginxConfigTest;
   sites: NginxSite[];
-  /** Источник целиком не прочитался (`nginx -T` упал) — причина; sites пуст. */
+  /** The source could not be read at all (`nginx -T` failed) — the reason; sites is empty. */
   error?: string;
 }
 

@@ -36,9 +36,10 @@ import { handleAgentWs, parseAgentLang } from './ws/agent.js';
 import { isAllowedOrigin, isLoopbackHostname } from './util/origin.js';
 
 ensureDirs();
-// Seed из env при первом старте (docs/settings-model-plan.md): settings.json
-// ещё нет, env задан → значения копируются в settings (пароль хешем). После
-// этого env не читается никогда — источник правды data/settings.json.
+// Seed from env on first start (docs/settings-model-plan.md): settings.json
+// doesn't exist yet and env is set → values are copied into settings (the
+// password as a hash). After that env is never read — data/settings.json is
+// the source of truth.
 seedSettingsFromEnv();
 
 const app = express();
@@ -46,9 +47,9 @@ app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
 
 /**
- * Кросс-сайтовые запросы отсекаются по `Origin` (util/origin.ts) до любого
- * роутера: до этого единственной защитой был `sameSite: 'lax'` на cookie.
- * Health намеренно остаётся открытым — им пользуются healthcheck'и.
+ * Cross-site requests are cut off by `Origin` (util/origin.ts) before any
+ * router: before this the only protection was `sameSite: 'lax'` on the
+ * cookie. /api/health deliberately stays open — healthchecks use it.
  */
 app.use('/api', (req, res, next) => {
   if (isAllowedOrigin(req.headers.origin)) {
@@ -63,8 +64,8 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.use('/api/auth', authRouter);
-// Первичная настройка (onboarding, docs/onboarding-plan.md) — без requireAuth:
-// публичный статус и одноразовый POST, доступный только до первого setup.
+// First-run setup (onboarding, docs/onboarding-plan.md) — no requireAuth:
+// a public status and a one-shot POST, available only until the first setup.
 app.use('/api/setup', setupRouter);
 app.use('/api/profiles', requireAuth, profilesRouter);
 app.use('/api/keys', requireAuth, keysRouter);
@@ -86,7 +87,7 @@ app.use('/api/snippets', requireAuth, snippetsRouter);
 app.use('/api/packages', requireAuth, packagesRouter);
 app.use('/api/alerts', requireAuth, alertsRouter);
 app.use('/api/nginx', requireAuth, nginxRouter);
-// Страница «Настройки» (эпик 23): смена пароля и AI-конфига — за авторизацией.
+// Settings page (epic 23): password and AI config changes are behind auth.
 app.use('/api/settings', requireAuth, settingsRouter);
 
 // SPA static files (built web app).
@@ -120,9 +121,10 @@ if (fs.existsSync(config.webDist)) {
   });
 }
 
-// Необработанная ошибка: полный текст — в лог, наружу общий ответ. Сообщения
-// Node содержат пути внутри контейнера и детали реализации; роуты со своими
-// осмысленными текстами сюда не доходят — они отвечают сами.
+// Unhandled error: the full text goes to the log, a generic message goes
+// outside. Node messages contain container-internal paths and implementation
+// details; routes with their own meaningful texts never reach here — they
+// answer for themselves.
 app.use(
   (
     err: Error,
@@ -140,8 +142,8 @@ const wss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-  // Тот же гейт, что у /api: WS-рукопожатие с чужой страницы — это готовый
-  // терминал на серверах пользователя.
+  // Same gate as /api: a WS handshake from someone else's page is a ready
+  // terminal on the user's servers.
   if (!isAllowedOrigin(req.headers.origin)) {
     socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
     socket.destroy();
@@ -170,15 +172,15 @@ server.on('upgrade', (req, socket, head) => {
       const cols = Number(url.searchParams.get('cols')) || 80;
       const rows = Number(url.searchParams.get('rows')) || 24;
       const container = url.searchParams.get('container') || undefined;
-      // tabId вкладки терминала (эпик 15): отсутствие или пустое значение —
-      // дефолт 0 внутри attachTerminal (как у container/cols/rows), мусорное
-      // непустое — close(1008).
+      // Terminal tab tabId (epic 15): missing or empty value → default 0
+      // inside attachTerminal (same as container/cols/rows); garbage
+      // non-empty → close(1008).
       const tabId = url.searchParams.get('tabId') || null;
       const containerName = url.searchParams.get('containerName') || undefined;
       attachTerminal(ws, profile, cols, rows, container, tabId, containerName);
     } else {
       const dialogueId = url.searchParams.get('dialogueId') ?? undefined;
-      // Язык агента = язык интерфейса: параметр WS-подключения, мусор → ru.
+      // Agent language = UI language: a WS connection parameter, garbage → ru.
       handleAgentWs(ws, profile, dialogueId, parseAgentLang(url.searchParams.get('lang')));
     }
   });

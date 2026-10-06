@@ -1,8 +1,9 @@
 /**
- * Guard-таймаут вокруг промиса: медленный или зависший вызов отвергается
- * понятным текстом вместо вечного ожидания. Вынесен из `services/overview.ts`
- * (там оставался приватным) для переиспользования подсистемами, которым нужен
- * тот же guard на профиль — например, параллельный запуск сниппетов.
+ * Guard timeout around a promise: a slow or hung call gets rejected with a
+ * readable message instead of waiting forever. Extracted from
+ * `services/overview.ts` (where it lived as a private helper) for reuse by
+ * subsystems that need the same per-profile guard — e.g. parallel snippet
+ * runs.
  */
 export function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {

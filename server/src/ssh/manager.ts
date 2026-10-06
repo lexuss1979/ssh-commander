@@ -21,9 +21,10 @@ function connKey(profileId: string): string {
 }
 
 /**
- * Причина отказа, выставленная `hostVerifier`. Колбэк умеет только вернуть
- * `false` — ssh2 после этого сообщает лишь общий «handshake failed», поэтому
- * человеческий текст кладём в этот holder и подменяем им ошибку промиса.
+ * Rejection reason set by the `hostVerifier` callback. The callback can only
+ * return `false` — after that ssh2 reports a generic "handshake failed", so
+ * the human-readable text is stored in this holder and swapped in for the
+ * promise error.
  */
 interface HostKeyRejection {
   message?: string;
@@ -38,9 +39,9 @@ function connectOptions(profile: Profile, rejection: HostKeyRejection = {}) {
     readyTimeout: 15000,
     keepaliveInterval: 30000,
     keepaliveCountMax: 3,
-    // Без этого колбэка ssh2 принимает любой ключ хоста: подмена DNS или
-    // маршрута отдаёт пароль профиля чужому серверу молча (TOFU — известные
-    // отпечатки в data/known-hosts.json).
+    // Without this callback ssh2 accepts any host key: DNS or route spoofing
+    // would silently hand the profile password to a foreign server (TOFU —
+    // known fingerprints live in data/known-hosts.json).
     hostVerifier: (key: Buffer) => {
       const check = checkHostKey(profile.host, profile.port, key);
       rejection.check = check;
@@ -52,8 +53,9 @@ function connectOptions(profile: Profile, rejection: HostKeyRejection = {}) {
     },
   };
   if (profile.authType === 'key' && profile.keyPath) {
-    // Путь к ключу — только внутри KEYS_DIR: иначе профиль превращается в
-    // чтение произвольного файла на хосте приложения (экспорт это уже требует).
+    // Key paths must stay inside KEYS_DIR: otherwise a profile becomes a way
+    // to read an arbitrary file on the application host (export already
+    // enforces the same restriction).
     opts.privateKey = fs.readFileSync(assertKeyPathAllowed(profile.keyPath));
     if (profile.keyPassphrase) {
       opts.passphrase = profile.keyPassphrase;
@@ -132,8 +134,9 @@ export async function exec(
         reject(new Error(`SSH exec error: ${err.message}`));
         return;
       }
-      // stdin (например пароль для `sudo -S`): пишем в канал и шлём EOF.
-      // Пароль в строку команды не попадает — не виден в ps и логах.
+      // stdin (e.g. a password for `sudo -S`): write to the channel and send
+      // EOF. The password never lands in the command line — invisible to ps
+      // and logs.
       if (opts.stdin !== undefined) {
         channel.write(opts.stdin);
         channel.end();
@@ -186,11 +189,11 @@ export interface ExecStreamHandle {
 /**
  * Run a command and stream stdout chunks. Useful for `docker logs -f`.
  *
- * Транспорт исправлен (эпик 13, по плану эпика 14): `handle.code` — настоящий
- * промис с первого момента существования handle (не `Promise.resolve(null)`),
- * резолвится кодом выхода при закрытии канала. Роут может подписаться на него
- * до открытия канала — иначе `res.end()` срабатывал бы до первого чанка и
- * стрим отдавал пустоту.
+ * Transport fixed (epic 13, per the epic 14 plan): `handle.code` is a real
+ * promise from the moment the handle exists (not `Promise.resolve(null)`),
+ * resolved with the exit code when the channel closes. A route can subscribe
+ * before the channel opens — otherwise `res.end()` would fire before the
+ * first chunk and the stream would come out empty.
  */
 export function execStream(
   profile: Profile,
@@ -200,10 +203,10 @@ export function execStream(
 ): ExecStreamHandle {
   let channel: ClientChannel | null = null;
   let closed = false;
-  // Промис создаётся сразу и resolve-функция зовётся на всех терминальных
-  // путях: потребитель читает handle.code синхронно после вызова, и присвоение
-  // свойства позже (внутри асинхронного колбэка exec) он бы уже не увидел —
-  // оставался бы навсегда зарезолвленный заглушкой промис.
+  // The promise is created up front and the resolve function is called on
+  // every terminal path: the consumer reads handle.code synchronously right
+  // after the call, so assigning the property later (inside the async exec
+  // callback) would go unseen — it would stay a forever-resolved stub.
   let resolveCode!: (code: number | null) => void;
   const handle: ExecStreamHandle = {
     code: new Promise<number | null>((resolve) => {
@@ -241,22 +244,24 @@ export function execStream(
           return;
         }
         channel = ch;
-        // StringDecoder, не toString() по буферу: многобайтовый UTF-8 символ,
-        // разрезанный границей чанков, иначе превращается в � (замена).
+        // StringDecoder, not buffer.toString(): a multi-byte UTF-8 character
+        // split across a chunk boundary would otherwise turn into a
+        // replacement char (�).
         const outDecoder = new StringDecoder('utf8');
         const errDecoder = new StringDecoder('utf8');
         channel.on('data', (d: Buffer) => onChunk(outDecoder.write(d), false));
         channel.stderr.on('data', (d: Buffer) => onChunk(errDecoder.write(d), true));
-        // Опциональный stdin (пароль для `sudo -S`): пишем в канал и шлём EOF.
-        // Пароль в командную строку не попадает — не виден в ps и логах.
-        // apt-get -y / dnf -y / apk stdin не читают — EOF безопасен.
+        // Optional stdin (a password for `sudo -S`): write to the channel and
+        // send EOF. The password never lands in the command line — invisible
+        // to ps and logs. apt-get -y / dnf -y / apk don't read stdin, so EOF
+        // is safe.
         if (opts.stdin !== undefined) {
           ch.write(opts.stdin);
           ch.end();
         }
         ch.on('close', (exitCode: number | null) => resolveCode(exitCode));
         channel.on('error', () => {
-          // close обычно следует за error, но не полагаемся на это.
+          // close usually follows error, but don't rely on that.
           resolveCode(null);
         });
       });
@@ -376,10 +381,10 @@ export function closeProfileConnection(profileId: string): void {
  */
 export interface TestConnectionResult {
   banner: string;
-  /** Отпечаток ключа хоста (`SHA256:…`) — пользователю есть что сверить. */
+  /** Host key fingerprint (`SHA256:…`) — the user has something to verify against. */
   fingerprint?: string;
   algo?: string;
-  /** `new` — хост увиден впервые и только что запомнен. */
+  /** `new` — first time this host was seen, just remembered. */
   hostKeyStatus?: HostKeyCheck['status'];
 }
 

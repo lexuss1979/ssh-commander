@@ -17,7 +17,7 @@ export const profileInputSchema = z.object({
   password: z.string().optional(),
   dockerCommand: z.string().min(1).default('docker'),
   note: z.string().optional(),
-  // Закреплённые пути логов (эпик 14): чипы быстрого доступа в FilesPage.
+  // Pinned log paths (epic 14): quick-access chips in FilesPage.
   logPaths: z.array(z.string().min(1)).max(50).optional(),
 });
 
@@ -64,7 +64,7 @@ function persist(list: Profile[]): void {
   }
   fs.mkdirSync(config.dataDir, { recursive: true });
   const tmp = `${storePath()}.tmp`;
-  // 0600: файл хранит SSH-пароли и passphrase открытым текстом.
+  // 0600: the file stores SSH passwords and passphrases in plain text.
   fs.writeFileSync(tmp, JSON.stringify({ profiles: list }, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, storePath());
   cache = list.map((p) => ({ ...p }));
@@ -77,18 +77,19 @@ function assertSecret(data: Pick<Profile, 'authType'> & Partial<Pick<Profile, 'k
   if (data.authType === 'password' && !data.password) {
     throw new Error('password is required for password auth');
   }
-  // Ключ — только из KEYS_DIR (services/keys.ts): профиль не должен уметь
-  // читать произвольный файл на хосте приложения.
+  // Key paths from KEYS_DIR only (services/keys.ts): a profile must not be
+  // able to read an arbitrary file on the application host.
   if (data.keyPath) {
     assertKeyPathAllowed(data.keyPath);
   }
 }
 
 /**
- * Профиль без секретов — форма ответа API. Пароль и passphrase наружу не
- * отдаются: клиенту достаточно знать, что секрет задан (пустое поле формы =
- * «не менять», сервер и так сохраняет прежнее значение). Паттерн — как у
- * `toSafeDbConnection` в services/db-connections.ts.
+ * Profile without secrets — the API response shape. The password and
+ * passphrase never leave the server: the client only needs to know that a
+ * secret is set (an empty form field means "keep unchanged", the server
+ * preserves the stored value anyway). Same pattern as `toSafeDbConnection`
+ * in services/db-connections.ts.
  */
 export type SafeProfile = Omit<Profile, 'password' | 'keyPassphrase'> & {
   hasPassword: boolean;
@@ -101,9 +102,9 @@ export function toSafeProfile(profile: Profile): SafeProfile {
 }
 
 /**
- * Нормализация закреплённых путей логов: trim, пустые отбрасываются,
- * дедуп с сохранением порядка. Не-абсолютный путь или сегмент `..` —
- * исключение с перечнем плохих строк.
+ * Normalization of pinned log paths: trim, drop empty entries, dedup keeping
+ * order. A non-absolute path or a `..` segment throws with the list of bad
+ * strings.
  */
 export function normalizeLogPaths(input: string[]): string[] {
   const bad: string[] = [];
@@ -128,10 +129,10 @@ export function normalizeLogPaths(input: string[]): string[] {
 }
 
 /**
- * Прогоняет logPaths через normalizeLogPaths после zod: схема допускает любые
- * непустые строки, а абсолютность/`..`/дедуп нужны на каждом входе (create,
- * update, импорт бэкапа), иначе относительный путь с импортом станет чипом,
- * который упадёт на assertSafePath.
+ * Runs logPaths through normalizeLogPaths after zod: the schema accepts any
+ * non-empty strings, while absoluteness/`..`/dedup are needed on every entry
+ * point (create, update, backup import) — otherwise an imported relative
+ * path would become a chip that fails on assertSafePath.
  */
 function withNormalizedLogPaths<T extends { logPaths?: string[] }>(data: T): T {
   if (!data.logPaths) return data;
@@ -191,7 +192,7 @@ export function updateProfile(id: string, input: unknown): Profile {
     keyPath: data.keyPath ?? existing.keyPath,
     keyPassphrase: data.keyPassphrase ?? existing.keyPassphrase,
     password: data.password ?? existing.password,
-    // ProfileModal про поле не знает — непереданное не затирает пины.
+    // ProfileModal knows nothing about this field — omitting it keeps the pins.
     logPaths: data.logPaths ?? existing.logPaths,
   };
   assertSecret(updated);
@@ -215,9 +216,9 @@ export function importProfile(input: unknown): Profile {
 }
 
 /**
- * Заменяет список закреплённых путей логов (эпик 14). Отдельная функция, а не
- * полный updateProfile: полный апдейт рвёт SSH-подключение профиля и оборвал
- * бы тот самый tail-стрим, из которого пользователь жмёт «Закрепить».
+ * Replaces the pinned log paths list (epic 14). A separate function rather
+ * than a full updateProfile: a full update tears down the profile's SSH
+ * connection and would break the very tail stream the user is pinning from.
  */
 export function updateProfileLogPaths(id: string, paths: string[]): Profile {
   const list = listProfiles();
