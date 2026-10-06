@@ -3,43 +3,43 @@ import { shq } from '../util/shell.js';
 import type { Profile } from '../types.js';
 
 export interface CronEntry {
-  /** Номер строки в файле (0-based) — ключ для мутаций пользовательского crontab. */
+  /** Line number in the file (0-based) — the key for user crontab mutations. */
   index: number;
-  /** Исходная строка файла как есть. */
+  /** The original file line as is. */
   raw: string;
-  /** false для закомментированных строк, парсящихся как cron-запись. */
+  /** false for commented-out lines that still parse as a cron entry. */
   enabled: boolean;
-  /** '@daily' или пять полей 'm h dom mon dow'. */
+  /** '@daily' or the five fields 'm h dom mon dow'. */
   schedule: string;
   command: string;
-  /** Пользователь из колонки системного формата (/etc/crontab, /etc/cron.d). */
+  /** User from the system-format column (/etc/crontab, /etc/cron.d). */
   user?: string;
-  /** Человекочитаемое описание расписания (describeSchedule). */
+  /** Human-readable schedule description (describeSchedule). */
   human: string;
 }
 
 export interface ParsedCrontab {
   entries: CronEntry[];
-  /** Строки вида NAME=value (MAILTO, PATH, ...) — как есть. */
+  /** NAME=value lines (MAILTO, PATH, ...) — as is. */
   env: string[];
-  /** Комментарии, не являющиеся выключенными задачами. */
+  /** Comments that are not disabled jobs. */
   comments: string[];
 }
 
 export interface CronSnapshot {
-  /** Момент снимка (мс, серверное время ssh-commander). */
+  /** Snapshot time (ms, ssh-commander server clock). */
   timestamp: number;
-  /** Владелец показанного в `userCrontab` (текущий SSH-юзер или выбранный другой). */
+  /** Owner of what is shown in `userCrontab` (the current SSH user or another selected one). */
   username: string;
-  /** SSH-пользователь, чей crontab можно мутировать (владелец сессии). */
+  /** The SSH user whose crontab can be mutated (the session owner). */
   currentUser: string;
-  /** true, когда `username === currentUser` — crontab редактируемый; иначе read-only. */
+  /** true when `username === currentUser` — the crontab is editable; otherwise read-only. */
   editable: boolean;
-  /** null — crontab пользователя отсутствует. */
+  /** null — the user has no crontab. */
   userCrontab: (ParsedCrontab & { raw: string }) | null;
-  /** /etc/crontab, null — файла нет или не читается. */
+  /** /etc/crontab, null — the file is missing or unreadable. */
   systemCrontab: ParsedCrontab | null;
-  /** Файлы /etc/cron.d/* (только записи задач). */
+  /** /etc/cron.d/* files (job entries only). */
   cronD: { file: string; entries: CronEntry[] }[];
 }
 
@@ -49,7 +49,7 @@ export type CronOp =
   | { type: 'delete'; index: number; expectedRaw: string }
   | { type: 'toggle'; index: number; expectedRaw: string };
 
-/** Crontab изменился между чтением и записью (или строка не найдена). */
+/** The crontab changed between read and write (or the line was not found). */
 export class CronConflictError extends Error {
   readonly code = 'CONFLICT';
 }
@@ -67,7 +67,7 @@ const KEYWORDS = [
 
 const NAMES_RE = /(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|sun|mon|tue|wed|thu|fri|sat)/gi;
 
-/** Поле cron: цифры, звёздочка, слэш, запятая, дефис, либо имена месяцев/дней недели (mon-fri, jan и т.п.). */
+/** A cron field: digits, asterisk, slash, comma, dash, or month/weekday names (mon-fri, jan etc.). */
 function looksLikeField(f: string): boolean {
   if (!f) return false;
   const stripped = f.replace(NAMES_RE, '');
@@ -76,9 +76,9 @@ function looksLikeField(f: string): boolean {
 }
 
 /**
- * Разбор одной строки как cron-записи. system=true — формат /etc/crontab и
- * /etc/cron.d с колонкой пользователя. Возвращает null, если строка не похожа
- * на задачу (комментарий, env, мусор).
+ * Parse a single line as a cron entry. system=true — the /etc/crontab and
+ * /etc/cron.d format with a user column. Returns null when the line does not
+ * look like a job (comment, env, garbage).
  */
 function parseCronLine(
   line: string,
@@ -110,9 +110,9 @@ function parseCronLine(
 const ENV_RE = /^[A-Za-z_][A-Za-z0-9_]*\s*=/;
 
 /**
- * Парсинг crontab-файла. Закомментированные строки, парсящиеся как задача,
- * попадают в entries с enabled=false; env-строки и прочие комментарии —
- * отдельно, чтобы UI мог показать их и не потерять при записи.
+ * Parsing a crontab file. Commented-out lines that still parse as a job go
+ * into entries with enabled=false; env lines and other comments are kept
+ * separately so the UI can show them and nothing gets lost on write.
  */
 export function parseCrontab(text: string, opts: { system: boolean }): ParsedCrontab {
   const entries: CronEntry[] = [];
@@ -139,7 +139,7 @@ export function parseCrontab(text: string, opts: { system: boolean }): ParsedCro
     if (parsed) {
       entries.push({ index, raw: line, enabled: true, human: describeSchedule(parsed.schedule), ...parsed });
     }
-    // Нераспознанные строки игнорируем (не теряем: raw crontab хранится в snapshot).
+    // Unrecognized lines are ignored (not lost: the raw crontab is kept in the snapshot).
   });
   return { entries, env, comments };
 }
@@ -157,7 +157,7 @@ const KEYWORD_HUMAN: Record<string, string> = {
 
 const DOW_NAMES = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
 
-/** Краткое описание частых расписаний на русском; нераспознанное — само выражение. */
+/** Brief descriptions of common schedules in Russian; unrecognized — the expression itself. */
 export function describeSchedule(expr: string): string {
   const kw = KEYWORD_HUMAN[expr];
   if (kw) return kw;
@@ -189,8 +189,8 @@ export function describeSchedule(expr: string): string {
 }
 
 /**
- * Валидация расписания из формы: @keyword или ровно 5 полей, значения
- * в диапазонах. null — валидно, иначе текст ошибки на русском.
+ * Validation of a schedule from the form: an @keyword or exactly 5 fields,
+ * values within ranges. null — valid, otherwise a Russian error text.
  */
 export function validateCronFields(schedule: string): string | null {
   const s = schedule.trim();
@@ -234,10 +234,10 @@ function entryLine(schedule: string, command: string): string {
 }
 
 /**
- * Применение операции к тексту пользовательского crontab. Комментарии,
- * env-строки и порядок строк сохраняются. expectedRaw — защита от гонки:
- * строка по index обязана совпасть, иначе CronConflictError.
- * Возвращает текст с завершающим переводом строки.
+ * Applying an operation to the user crontab text. Comments, env lines and
+ * line order are preserved. expectedRaw is the race guard: the line at the
+ * given index must match exactly, otherwise CronConflictError.
+ * Returns the text with a trailing newline.
  */
 export function applyCrontabOp(text: string, op: CronOp): string {
   const lines = text.replace(/\r\n/g, '\n').split('\n');
@@ -274,7 +274,7 @@ export function applyCrontabOp(text: string, op: CronOp): string {
 const CACHE_TTL_MS = 2000;
 const cache = new Map<string, { at: number; promise: Promise<CronSnapshot> }>();
 
-/** crontab -l; отсутствие crontab (exit 1, пустой вывод) — null, не ошибка. */
+/** crontab -l; no crontab (exit 1, empty output) — null, not an error. */
 async function fetchUserCrontab(profile: Profile): Promise<string | null> {
   const r = await exec(profile, 'crontab -l 2>/dev/null');
   if (r.code !== 0) {
@@ -284,25 +284,25 @@ async function fetchUserCrontab(profile: Profile): Promise<string | null> {
   return r.stdout;
 }
 
-/** Спал-каталоги персональных crontab разных дистрибутивов (Debian/cronie/BusyBox). */
+/** Spool directories of personal crontabs across distros (Debian/cronie/BusyBox). */
 const CRON_SPOOL_DIRS = ['/var/spool/cron/crontabs', '/var/spool/cron', '/etc/crontabs'];
 
-/** Безопасное имя Linux-пользователя: латиница/цифры/точка/дефис/подчёркивание, без слэшей и пробелов. */
+/** A safe Linux user name: Latin letters/digits/dot/dash/underscore, no slashes or spaces. */
 const SAFE_USER_RE = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,31}$/;
 
-/** Разрешено ли подставлять `user` в кроновские команды (защита от инъекции в `crontab -u`). */
+/** Whether `user` may be substituted into cron commands (injection guard for `crontab -u`). */
 export function isValidCronUser(user: string): boolean {
   return SAFE_USER_RE.test(user);
 }
 
-/** Текущий SSH-пользователь и его uid (uid 0 = root). */
+/** The current SSH user and their uid (uid 0 = root). */
 async function whoami(profile: Profile): Promise<{ name: string; uid: string }> {
   const r = await exec(profile, 'echo "$(id -u) $(id -un)"');
   const [uid, name] = r.stdout.trim().split(/\s+/);
   return { uid: uid || '', name: name || profile.username };
 }
 
-/** Пользователи, у которых есть персональный crontab (имя файла в spool-каталоге). */
+/** Users who have a personal crontab (a file name in the spool directory). */
 async function listCronUsers(profile: Profile): Promise<string[]> {
   const dirs = CRON_SPOOL_DIRS.map(shq).join(' ');
   const cmd = `for d in ${dirs}; do [ -d "$d" ] && ls -1 "$d"; done 2>/dev/null | sort -u`;
@@ -312,9 +312,9 @@ async function listCronUsers(profile: Profile): Promise<string[]> {
 }
 
 /**
- * Список пользователей для селектора. Возвращается пустым, когда чтение чужих
- * crontab невозможно (SSH-пользователь не root). Иначе — текущий пользователь +
- * все, у кого есть персональный crontab (файл в spool-каталоге).
+ * User list for the selector. Empty when other users' crontabs cannot be
+ * read (the SSH user is not root). Otherwise — the current user plus
+ * everyone with a personal crontab (a file in the spool directory).
  */
 export async function fetchCronUsers(profile: Profile): Promise<string[]> {
   const who = await whoami(profile);
@@ -323,7 +323,7 @@ export async function fetchCronUsers(profile: Profile): Promise<string[]> {
   return Array.from(set);
 }
 
-/** Чтение персонального crontab конкретного пользователя (root): `crontab -u <user> -l`, фолбэк — spool-файл. */
+/** Read a specific user's personal crontab (root): `crontab -u <user> -l`, fallback — the spool file. */
 async function fetchUserCrontabFor(profile: Profile, user: string): Promise<string | null> {
   const r = await exec(profile, `crontab -u ${shq(user)} -l 2>/dev/null`);
   if (r.code === 0) return r.stdout;
@@ -333,7 +333,7 @@ async function fetchUserCrontabFor(profile: Profile, user: string): Promise<stri
   return null;
 }
 
-/** /etc/crontab и /etc/cron.d/* одной командой; недоступные файлы — пусто. */
+/** /etc/crontab and /etc/cron.d/* in one command; unreadable files yield nothing. */
 async function fetchSystemCron(profile: Profile): Promise<{ crontab: string | null; cronD: { file: string; text: string }[] }> {
   const cmd =
     'if [ -r /etc/crontab ]; then echo "=== /etc/crontab"; cat /etc/crontab; fi; ' +
@@ -370,7 +370,7 @@ async function collectCronUncached(profile: Profile, user?: string): Promise<Cro
       editable = false;
       userRaw = await fetchUserCrontabFor(profile, user);
     } else {
-      // Не root или неизвестный пользователь — безопасно показываем свой crontab.
+      // Not root or an unknown user — safely fall back to our own crontab.
       targetUser = currentName;
       userRaw = await fetchUserCrontab(profile);
     }
@@ -390,10 +390,10 @@ async function collectCronUncached(profile: Profile, user?: string): Promise<Cro
 }
 
 /**
- * Снимок cron-задач сервера. Кэш 2 с на профиль (параллельные вызовы делят
- * одни exec'и) — как у портов/метрик, чтобы polling не плодил SSH-команды.
- * `user` — опционально: снимок персонального crontab конкретного пользователя
- * (read-only, если это не текущий SSH-пользователь).
+ * Snapshot of the server's cron jobs. A 2 s cache per profile (parallel
+ * calls share the same execs) — like ports/metrics, so polling does not
+ * spawn extra SSH commands. `user` is optional: a snapshot of a specific
+ * user's personal crontab (read-only when it is not the current SSH user).
  */
 export function collectCron(profile: Profile, user?: string): Promise<CronSnapshot> {
   const now = Date.now();
@@ -413,8 +413,8 @@ export function collectCron(profile: Profile, user?: string): Promise<CronSnapsh
 }
 
 /**
- * Мутация пользовательского crontab: читаем заново (без кэша), применяем
- * операцию, пишем целиком через `crontab -` (stdin канала).
+ * User crontab mutation: read fresh (no cache), apply the operation, write
+ * the whole file back via `crontab -` (channel stdin).
  */
 export async function mutateUserCrontab(profile: Profile, op: CronOp): Promise<void> {
   const current = await fetchUserCrontab(profile);

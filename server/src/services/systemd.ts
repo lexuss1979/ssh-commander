@@ -4,23 +4,23 @@ import { classifySudoProbe, sudoProbeCommand } from './sudo.js';
 import type { ExecResult, Profile } from '../types.js';
 
 /**
- * Службы systemd (вкладка «Службы», эпик 13).
+ * systemd services (the "Services" tab, epic 13).
  *
- * Снимок собирается одним exec с маркерами; детект systemd — по тексту, а не
- * по коду возврата (на не-systemd системах последняя команда падает). Все
- * парсеры/билдеры/валидаторы — чистые экспортируемые функции под unit-тесты.
+ * The snapshot is a single exec with markers; systemd is detected by text,
+ * not by exit code (on non-systemd systems the last command fails). All
+ * parsers/builders/validators are pure exported functions for unit tests.
  *
- * Sudo-механика (инвариант, как в security-audit): пароль — первой строкой
- * stdin канала (`sudo -S -p ''`), в командную строку не попадает, живёт
- * только в памяти запроса. Для systemctl используется прямая форма
- * `sudo -S -p '' -- systemctl <action> -- <unit>` без `sh -c`.
+ * Sudo mechanics (invariant, same as security-audit): the password is the
+ * first line of the channel stdin (`sudo -S -p ''`), never lands in the
+ * command line, lives only in request memory. For systemctl the direct form
+ * `sudo -S -p '' -- systemctl <action> -- <unit>` is used, without `sh -c`.
  */
 
 export interface UnitInfo {
-  /** Имя unit'а с суффиксом: 'nginx.service'. */
+  /** Unit name with the suffix: 'nginx.service'. */
   name: string;
   description: string | null;
-  /** loaded / not-found / error / null (не загружен). */
+  /** loaded / not-found / error / null (not loaded). */
   load: string | null;
   /** active / inactive / activating / failed / null. */
   active: string | null;
@@ -31,20 +31,20 @@ export interface UnitInfo {
 }
 
 export interface ServicesSnapshot {
-  /** Момент снимка (мс, серверное время ssh-commander). */
+  /** Snapshot time (ms, ssh-commander server clock). */
   timestamp: number;
-  /** systemd обнаружен. */
+  /** systemd detected. */
   available: boolean;
-  /** Причина недоступности — для заглушки UI. */
+  /** Unavailability reason — for the UI placeholder. */
   reason?: string;
   units: UnitInfo[];
 }
 
 export interface ServiceDetail {
   name: string;
-  /** Raw-вывод `systemctl status` — для человека, не парсим. */
+  /** Raw `systemctl status` output — for humans, not parsed. */
   status: string;
-  /** Значения выбранных полей `systemctl show`; отсутствующие — null. */
+  /** Values of the selected `systemctl show` fields; missing ones are null. */
   show: Record<string, string | null>;
 }
 
@@ -67,7 +67,7 @@ export interface ParsedSnapshot {
   units: UnitInfo[];
 }
 
-/** Действия `systemctl`. reset-failed сверх роадмапа — осознанно (см. план). */
+/** `systemctl` actions. reset-failed goes beyond the roadmap — deliberate (see the plan). */
 export const SERVICE_ACTIONS = [
   'start',
   'stop',
@@ -80,12 +80,12 @@ export const SERVICE_ACTIONS = [
 
 export type ServiceAction = (typeof SERVICE_ACTIONS)[number];
 
-/** Whitelist-проверка действия (в т.ч. против rm/exec/daemon-reload/пустого). */
+/** Allow-list check of the action (also against rm/exec/daemon-reload/empty). */
 export function isServiceAction(value: unknown): value is ServiceAction {
   return typeof value === 'string' && (SERVICE_ACTIONS as readonly string[]).includes(value);
 }
 
-/** Ошибка действия службы с HTTP-статусом (400 — пользовательские причины, 502 — транспорт). */
+/** Service action error carrying an HTTP status (400 — user-caused reasons, 502 — transport). */
 export class ServiceActionError extends Error {
   readonly status: number;
 
@@ -119,19 +119,19 @@ export const SHOW_FIELDS = [
   'ActiveEnterTimestamp',
 ];
 
-/** Границы tail журнала: 1..5000, дефолт 500 (те же, что заложит эпик 14). */
+/** Journal tail bounds: 1..5000, default 500 (the same ones epic 14 will use). */
 export const DEFAULT_TAIL = 500;
 export const MAX_TAIL = 5000;
 
-/** Лимит вывода exec (manager.ts) — для честной пометки обрезки журнала. */
+/** exec output limit (manager.ts) — for an honest journal truncation marker. */
 const EXEC_OUTPUT_LIMIT = 2 * 1024 * 1024;
 
 const CACHE_TTL_MS = 2000;
 
 /**
- * Один exec со снимком: версия, list-units, list-unit-files. `2>&1` — ошибки
- * детекта попадают в stdout; `LC_ALL=C` — стабильные заголовки/статусы.
- * Код возврата игнорируем — решение принимает парсер по тексту.
+ * A single snapshot exec: version, list-units, list-unit-files. `2>&1` puts
+ * detection errors into stdout; `LC_ALL=C` gives stable headers/statuses.
+ * The exit code is ignored — the parser decides from the text.
  */
 const SNAPSHOT_CMD =
   `LC_ALL=C systemctl --version 2>&1 | head -1\n` +
@@ -141,10 +141,10 @@ const SNAPSHOT_CMD =
   `LC_ALL=C systemctl list-unit-files --type=service --no-pager --plain --no-legend 2>&1`;
 
 // ---------------------------------------------------------------------------
-// Чистые парсеры/валидаторы/билдеры
+// Pure parsers/validators/builders
 // ---------------------------------------------------------------------------
 
-/** Валидация имени unit'а: безопасные символы + запрет «.» и «..». */
+/** Unit name validation: safe characters plus a ban on «.» and «..». */
 const UNIT_NAME_RE = /^[A-Za-z0-9@._:\-]+$/;
 
 export function unitNameValid(name: string): boolean {
@@ -161,8 +161,8 @@ export function assertValidUnitName(name: string): string {
 }
 
 /**
- * Первая строка `systemctl --version`: `systemd 252 (252.26-1~deb12u2)` →
- * версия; `not found` / `command not found` → systemctl отсутствует (null).
+ * First line of `systemctl --version`: `systemd 252 (252.26-1~deb12u2)` →
+ * the version; `not found` / `command not found` → systemctl missing (null).
  */
 export function parseVersionLine(line: string): string | null {
   const t = line.trim();
@@ -173,10 +173,10 @@ export function parseVersionLine(line: string): string | null {
 }
 
 /**
- * Поиск строки systemd-версии во всём выводе снимка, а не только в первой
- * строке: ssh-exec может сорсить ~/.bashrc/rc и печатать шум перед
- * `systemctl --version` (кастомные rc, conda и т.п.) — тогда первая строка
- * дала бы ложную заглушку «systemctl не найден».
+ * Search for the systemd version line across the whole snapshot output, not
+ * just the first line: ssh-exec may source ~/.bashrc/rc and print noise
+ * before `systemctl --version` (custom rc, conda etc.) — then the first line
+ * would give a false "systemctl not found" placeholder.
  */
 function findVersionLine(raw: string): string | null {
   for (const line of raw.split('\n')) {
@@ -187,14 +187,15 @@ function findVersionLine(raw: string): string | null {
 }
 
 /**
- * `systemctl list-units --type=service --all --plain --no-legend`: колонки
- * `UNIT LOAD ACTIVE SUB DESCRIPTION`; `--plain` снимает bullet `●` у
- * failed-юнитов (иначе сдвинул бы колонки); `-` в LOAD/ACTIVE/SUB → null;
- * описание с пробелами — всё после 4-й колонки; мусорные строки отбрасываются.
+ * `systemctl list-units --type=service --all --plain --no-legend`: columns
+ * `UNIT LOAD ACTIVE SUB DESCRIPTION`; `--plain` removes the `●` bullet of
+ * failed units (otherwise it would shift the columns); `-` in LOAD/ACTIVE/SUB
+ * → null; a description with spaces is everything after the 4th column;
+ * garbage lines are dropped.
  *
- * Старые сборки systemd могут не снимать bullet (● появился раньше, чем
- * --plain стал убирать его для list-units) — снимаем ведущий токен сами,
- * иначе колонки сдвигаются и строка failed-юнита молча пропадает.
+ * Old systemd builds may not remove the bullet (● predates --plain hiding it
+ * for list-units) — we strip the leading token ourselves, otherwise columns
+ * shift and a failed unit's line silently disappears.
  */
 export function parseListUnits(raw: string): ParsedUnit[] {
   const out: ParsedUnit[] = [];
@@ -215,11 +216,11 @@ export function parseListUnits(raw: string): ParsedUnit[] {
 }
 
 /**
- * `systemctl list-unit-files --type=service --plain --no-legend`. Формат
- * зависит от версии: с systemd ≥ 245 колонок три (`UNIT FILE / STATE /
- * PRESET`), до этого — две (`UNIT FILE / STATE`). STATE — **всегда второе
- * поле (`fields[1]`)**: в трёхколоночном формате чтение последнего поля
- * записало бы в `enabled` значение preset'а. PRESET игнорируем.
+ * `systemctl list-unit-files --type=service --plain --no-legend`. The format
+ * is version-dependent: systemd ≥ 245 has three columns (`UNIT FILE / STATE /
+ * PRESET`), before that — two (`UNIT FILE / STATE`). STATE is **always the
+ * second field (`fields[1]`)**: in the three-column format, reading the last
+ * field would store the preset value in `enabled`. PRESET is ignored.
  */
 export function parseListUnitFiles(raw: string): ParsedUnitFile[] {
   const out: ParsedUnitFile[] = [];
@@ -233,9 +234,9 @@ export function parseListUnitFiles(raw: string): ParsedUnitFile[] {
 }
 
 /**
- * Слияние list-units и list-unit-files: имя — из любого списка; `enabled` —
- * из unit-files (отсутствует → null, напр. transient-юниты); load/active/sub —
- * из list-units (не загружен → null). Сортировка по имени.
+ * Merge of list-units and list-unit-files: the name comes from either list;
+ * `enabled` from unit-files (missing → null, e.g. transient units);
+ * load/active/sub from list-units (not loaded → null). Sorted by name.
  */
 export function mergeUnits(units: ParsedUnit[], unitFiles: ParsedUnitFile[]): UnitInfo[] {
   const enabledByFile = new Map(unitFiles.map((u) => [u.name, u.enabled]));
@@ -293,12 +294,13 @@ function splitByMarker(text: string, marker: string): [string, string] {
 }
 
 /**
- * Разбор полного вывода снимка. Решения по тексту, не по коду:
- * - версия не похожа на systemd → недоступно;
- * - `has not been booted with systemd` → недоступно (контейнер);
- * - ошибка флага в начале секции (`Unknown option` / `Invalid option` /
- *   `Failed to`) → недоступно с текстом ошибки (иначе парсер молча отбросил
- *   бы строку ошибки как мусор и UI показал бы половинчатую таблицу).
+ * Parse the full snapshot output. Decisions are made from text, not code:
+ * - the version does not look like systemd → unavailable;
+ * - `has not been booted with systemd` → unavailable (container);
+ * - a flag error at the start of a section (`Unknown option` /
+ *   `Invalid option` / `Failed to`) → unavailable with the error text
+ *   (otherwise the parser would silently drop the error line as garbage and
+ *   the UI would show a half-filled table).
  */
 export function parseSnapshot(raw: string): ParsedSnapshot {
   const version = findVersionLine(raw);
@@ -330,7 +332,7 @@ export function parseSnapshot(raw: string): ParsedSnapshot {
   };
 }
 
-/** Разбор вывода `systemctl show`: строки `KEY=VALUE`, первое вхождение выигрывает. */
+/** Parse `systemctl show` output: `KEY=VALUE` lines, first occurrence wins. */
 export function parseShowOutput(raw: string, fields: string[]): Record<string, string | null> {
   const out: Record<string, string | null> = {};
   for (const f of fields) out[f] = null;
@@ -346,24 +348,24 @@ export function parseShowOutput(raw: string, fields: string[]): Record<string, s
   return out;
 }
 
-/** Команда `systemctl <action> -- <unit>` (unit через shq; `--` — защита от опций). */
+/** The `systemctl <action> -- <unit>` command (unit via shq; `--` guards against options). */
 export function systemctlCommand(action: string, unit: string): string {
   return `systemctl ${action} -- ${shq(unit)}`;
 }
 
-/** Прямая sudo-форма без `sh -c`: `sudo -S -p '' -- systemctl <action> -- <unit>`. */
+/** Direct sudo form without `sh -c`: `sudo -S -p '' -- systemctl <action> -- <unit>`. */
 export function sudoSystemctlCommand(action: string, unit: string): string {
   return `sudo -S -p '' -- systemctl ${action} -- ${shq(unit)}`;
 }
 
-/** Команда журнала unit'а; `-f` только для follow-стрима. Имя unit'а — аргумент
- * `-u` (getopt потребляет следующий argv как значение опции), поэтому ведущий
- * `-` в имени не может быть распознан как опция; `--` тут не нужен. */
+/** The unit's journal command; `-f` only for a follow stream. The unit name is the
+ * `-u` argument (getopt consumes the next argv as the option value), so a leading
+ * `-` in the name cannot be parsed as an option; `--` is not needed here. */
 export function journalctlCommand(unit: string, tail: number, follow: boolean): string {
   return `journalctl -u ${shq(unit)} --no-pager -n ${tail}${follow ? ' -f' : ''}`;
 }
 
-/** tail 1..5000, дефолт 500; нечисловое/NaN → дефолт. */
+/** tail 1..5000, default 500; non-numeric/NaN → the default. */
 export function clampTail(raw: unknown): number {
   const n = Number(raw);
   if (!Number.isFinite(n)) return DEFAULT_TAIL;
@@ -371,7 +373,7 @@ export function clampTail(raw: unknown): number {
 }
 
 // ---------------------------------------------------------------------------
-// Классификация ошибок действий
+// Action failure classification
 // ---------------------------------------------------------------------------
 
 export type ActionFailureCategory =
@@ -383,11 +385,11 @@ export type ActionFailureCategory =
   | 'transport';
 
 /**
- * Классификация результата `systemctl <action>`: polkit-формулировка
- * `Interactive authentication required` — типовая для Debian/Ubuntu/RHEL/
- * Fedora (это systemctl отдаёт без TTY); `Access denied` — системы без
- * polkit. masked/not-found/job-failed — состояние сервиса, не транспорт;
- * ретрай с sudo для них бесполезен.
+ * Classification of a `systemctl <action>` result: the polkit wording
+ * `Interactive authentication required` is typical for Debian/Ubuntu/RHEL/
+ * Fedora (that is systemctl talking without a TTY); `Access denied` — systems
+ * without polkit. masked/not-found/job-failed is service state, not
+ * transport; a sudo retry is useless for them.
  */
 export function classifyActionFailure(result: ExecResult): ActionFailureCategory {
   if (result.code === 0) return 'ok';
@@ -406,13 +408,13 @@ export function classifyActionFailure(result: ExecResult): ActionFailureCategory
 }
 
 // ---------------------------------------------------------------------------
-// Исполнители (exec-обёртки с инъекцией deps для тестов)
+// Executors (exec wrappers with deps injection for tests)
 // ---------------------------------------------------------------------------
 
 /**
- * Снимок служб. Кэш 2 с на профиль (паттерн ports.ts): параллельные вызовы
- * делят один exec; ошибочный промис из кэша удаляется. `available: false` —
- * не ошибка, а штатный результат детекта.
+ * Services snapshot. A 2 s cache per profile (the ports.ts pattern): parallel
+ * calls share one exec; a failed promise is evicted from the cache.
+ * `available: false` is not an error but a normal detection result.
  */
 export function collectServices(
   profile: Profile,
@@ -439,13 +441,13 @@ export function collectServices(
 
 const cache = new Map<string, { at: number; promise: Promise<ServicesSnapshot> }>();
 
-/** Сброс кэша снимка после мутации действия — refetch вернёт свежие данные. */
+/** Invalidate the snapshot cache after an action mutation — refetch gets fresh data. */
 export function invalidateServicesCache(profileId: string): void {
   cache.delete(profileId);
 }
 
-/** Команда детали unit'а: raw-статус + выбранные поля show (маркер-разделитель).
- * `--` перед именем — защита от опций (regex имени допускает ведущий `-`). */
+/** The unit detail command: raw status + selected show fields (marker-separated).
+ * `--` before the name guards against options (the name regex allows a leading `-`). */
 export function serviceDetailCommand(unit: string): string {
   const fields = SHOW_FIELDS.map((f) => `-p ${f}`).join(' ');
   return (
@@ -456,9 +458,9 @@ export function serviceDetailCommand(unit: string): string {
 }
 
 /**
- * Деталь unit'а. Код возврата игнорируем: для `systemctl status` он не
- * признак ошибки (3 = inactive, 4 = not-found — нормальные состояния).
- * `-n 0` — без дампа журнала, `--no-pager` — без пагинации.
+ * Unit detail. The exit code is ignored: for `systemctl status` it is not
+ * an error signal (3 = inactive, 4 = not-found — normal states).
+ * `-n 0` — no journal dump, `--no-pager` — no pagination.
  */
 export async function getServiceDetail(
   profile: Profile,
@@ -478,10 +480,11 @@ export interface ServiceActionResult {
 }
 
 /**
- * Явный таймаут action-экзеков: у systemd дефолтные TimeoutStartSec/StopSec
- * бывают больше 60 с из manager.ts (а процесс, не реагирующий на SIGTERM,
- * гарантированно их превысит). Без явного таймаута такая мутация превращалась
- * бы в общий 502 «Сервер недоступен», хотя могла успеть примениться.
+ * Explicit timeout for action execs: systemd's default TimeoutStartSec/StopSec
+ * can exceed the 60 s of manager.ts (and a process not reacting to SIGTERM
+ * will certainly exceed them). Without an explicit timeout such a mutation
+ * would turn into a generic 502 "Server unavailable" — although it may have
+ * been applied in time.
  */
 const ACTION_TIMEOUT_MS = 120000;
 
@@ -489,8 +492,8 @@ function isExecTimeout(err: unknown): boolean {
   return err instanceof Error && /timed out after \d+ms/.test(err.message);
 }
 
-/** exec действия с явным таймаутом: таймаут — не транспорт, а признак
- * «проверьте статус» (мутация могла дойти до конца). */
+/** Action exec with an explicit timeout: a timeout is not transport but a sign
+ * to "check the status" (the mutation may have gone all the way). */
 async function execAction(
   execFn: ExecFn,
   profile: Profile,
@@ -514,18 +517,18 @@ async function execAction(
 }
 
 /**
- * Действие над unit'ом с sudo-ретраем по access-denied:
- * 1. пробуем без sudo;
- * 2. sudo-needed + передан пароль → зонд `sudo -S -p '' -- true` (stdin),
- *    явные ошибки зонда (неверный пароль / не в sudoers / sudo не установлен)
- *    → 400, иное → 502; зонд прошёл → повтор через sudo;
- * 3. sudo-needed без пароля → 400 «укажите sudo-пароль»;
- * 4. masked/not-found/job-failed → 400 с текстом systemd как есть;
- * 5. таймаут exec действия → 400 «проверьте статус» (не 502);
- * 6. транспорт/неизвестное → 502.
+ * Unit action with a sudo retry on access-denied:
+ * 1. try without sudo;
+ * 2. sudo-needed + a password supplied → probe `sudo -S -p '' -- true` (stdin);
+ *    explicit probe failures (wrong password / not in sudoers / sudo not
+ *    installed) → 400, anything else → 502; probe passed → retry via sudo;
+ * 3. sudo-needed without a password → 400 "provide the sudo password";
+ * 4. masked/not-found/job-failed → 400 with the systemd text as is;
+ * 5. action exec timeout → 400 "check the status" (not 502);
+ * 6. transport/unknown → 502.
  *
- * Ретрай безопасен: access-denied/interactive-auth означает, что мутация не
- * началась. Пароль живёт только в stdin одного запроса.
+ * The retry is safe: access-denied/interactive-auth means the mutation has
+ * not started. The password lives only in the stdin of a single request.
  */
 export async function runServiceAction(
   profile: Profile,
@@ -580,7 +583,7 @@ export async function runServiceAction(
       (retry.stderr || retry.stdout).trim() || `Команда не выполнена (код ${retry.code ?? 'unknown'})`,
     );
   }
-  // transport / неизвестное
+  // transport / unknown
   throw new ServiceActionError(
     502,
     (first.stderr || first.stdout).trim() || `Команда не выполнена (код ${first.code ?? 'unknown'})`,
@@ -588,9 +591,9 @@ export async function runServiceAction(
 }
 
 /**
- * Разовый журнал unit'а (без follow), таймаут 30 с. Лимит exec — 2 МБ:
- * болтливый unit может упереться в него — при достижении лимита дописываем
- * честную хвостовую пометку (молчаливая обрезка хуже).
+ * One-shot unit journal (no follow), 30 s timeout. The exec limit is 2 MB:
+ * a chatty unit can hit it — when the limit is reached an honest tail
+ * marker is appended (silent truncation is worse).
  */
 export async function readServiceLogs(
   profile: Profile,

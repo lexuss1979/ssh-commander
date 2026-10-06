@@ -9,20 +9,21 @@ import type { ExecResult, Profile } from '../types.js';
 import { shq } from '../util/shell.js';
 import { saveKey } from './keys.js';
 
-// Именованный ESM-импорт `{ utils }` из CJS-пакета ssh2 не резолвится в
-// чистом Node: cjs-module-lexer видит только часть имён, полный
-// module.exports (с utils) доступен через default. Витестовский interop,
-// наоборот, кладёт всё в namespace — поэтому fallback.
+// A named ESM import `{ utils }` from the CJS ssh2 package does not resolve
+// in plain Node: cjs-module-lexer only sees some of the names, while the
+// full module.exports (with utils) is available via default. Vitest's
+// interop, on the contrary, puts everything into the namespace — hence the
+// fallback.
 const ssh2Pkg = ((ssh2 as unknown as { default?: typeof ssh2 }).default ?? ssh2) as typeof ssh2;
 const { Client: Ssh2Client, utils } = ssh2Pkg;
 
-// Эпик «Новый сервер (root + пароль)» — план docs/bootstrap-plan.md.
-// Сценарий: генерация отдельного ed25519-ключа → подключение по паролю →
-// идемпотентная установка pubkey → верификация входа ключом отдельным
-// подключением → (опционально) hardening sshd с reload только после зелёного
-// `sshd -t` и контрольными проверками → создание профиля с authType=key.
-// Пароль живёт только в памяти запроса: не persist'ится, не логируется и
-// не попадает в сообщения об ошибках.
+// The "New server (root + password)" epic — plan in docs/bootstrap-plan.md.
+// Scenario: generate a dedicated ed25519 key → connect with the password →
+// idempotent pubkey installation → verify key login with a separate
+// connection → (optionally) sshd hardening with reload only after a green
+// `sshd -t` plus verification checks → create a profile with authType=key.
+// The password lives only in request memory: never persisted, never logged,
+// never included in error messages.
 
 export interface BootstrapStep {
   name: string;
@@ -62,7 +63,7 @@ export interface BootstrapConnectOptions {
   privateKey?: string;
 }
 
-/** Одно прямое SSH-подключение (профиля ещё нет, менеджер не нужен). */
+/** A single direct SSH connection (no profile yet, the manager is not needed). */
 export interface BootstrapSshSession {
   exec(command: string, opts?: { timeoutMs?: number }): Promise<ExecResult>;
   close(): void;
@@ -76,7 +77,7 @@ export interface BootstrapDeps {
 }
 
 // ---------------------------------------------------------------------------
-// Генерация ключа: node:crypto ed25519 → OpenSSH-формат (ssh2 не читает PKCS#8)
+// Key generation: node:crypto ed25519 → OpenSSH format (ssh2 cannot read PKCS#8)
 // ---------------------------------------------------------------------------
 
 function sshString(buf: Buffer): Buffer {
@@ -86,25 +87,26 @@ function sshString(buf: Buffer): Buffer {
 }
 
 export function pubkeyBody(line: string): string {
-  // `ssh-ed25519 <base64> <комментарий>` → `ssh-ed25519 <base64>`: комментарий
-  // содержит имя профиля (пробелы, меняется при переименовании) — в сравнениях
-  // идемпотентности не участвует.
+  // `ssh-ed25519 <base64> <comment>` → `ssh-ed25519 <base64>`: the comment
+  // carries the profile name (spaces, changes on rename) — excluded from
+  // idempotency comparisons.
   const parts = line.split(/\s+/);
   return parts.slice(0, 2).join(' ');
 }
 
 /**
- * Минимальный энкодер unencrypted OpenSSH private key (cipher/kdf = none,
- * паддинг 1..n до 8 байт — как ssh-keygen). Совместим и с ssh2, и с
- * `ssh-keygen -y`. Публичная часть — строка authorized_keys с комментарием
- * `ssh-commander@<имя профиля>` (видно, откуда ключ; точечный отзыв).
+ * Minimal encoder of an unencrypted OpenSSH private key (cipher/kdf = none,
+ * padding 1..n up to 8 bytes — like ssh-keygen). Compatible with both ssh2
+ * and `ssh-keygen -y`. The public part is an authorized_keys line with the
+ * `ssh-commander@<profile name>` comment (shows where the key came from;
+ * targeted revocation).
  */
 export function generateKeyPair(profileName: string): {
   privateKeyPem: string;
   publicKeyLine: string;
 } {
   const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
-  // SPKI/PKCS#8 DER для ed25519 — фиксированные заголовки + 32 байта payload.
+  // SPKI/PKCS#8 DER for ed25519 — fixed headers + a 32-byte payload.
   const pubRaw = publicKey.export({ type: 'spki', format: 'der' }).subarray(-32);
   const seed = privateKey.export({ type: 'pkcs8', format: 'der' }).subarray(-32);
   if (pubRaw.length !== 32 || seed.length !== 32) {
@@ -114,10 +116,10 @@ export function generateKeyPair(profileName: string): {
   const type = Buffer.from('ssh-ed25519', 'utf8');
   const comment = `ssh-commander@${profileName}`;
   const pubBlob = Buffer.concat([sshString(type), sshString(pubRaw)]);
-  // Приватная секция — поля ключа напрямую, без внешней ssh-строки-обёртки
-  // (см. комментарий в ssh2 keyParser: «the entirety of the private key
-  // content is not contained within a string field»).
-  const seedWithPub = Buffer.concat([seed, pubRaw]); // OpenSSH хранит seed || public
+  // The private section carries the key fields directly, without the outer
+  // ssh-string wrapper (see the comment in ssh2 keyParser: "the entirety of
+  // the private key content is not contained within a string field").
+  const seedWithPub = Buffer.concat([seed, pubRaw]); // OpenSSH stores seed || public
   const check = crypto.randomBytes(4);
   let privSection = Buffer.concat([
     check,
@@ -146,8 +148,8 @@ export function generateKeyPair(profileName: string): {
   const privateKeyPem = `-----BEGIN OPENSSH PRIVATE KEY-----\n${b64}\n-----END OPENSSH PRIVATE KEY-----\n`;
   const publicKeyLine = `ssh-ed25519 ${pubBlob.toString('base64')} ${comment}`;
 
-  // Сгенерированный ключ обязан читаться самим ssh2 — иначе профиль станет
-  // unusable; проверяем на месте, а не первым подключением к серверу.
+  // The generated key must be parseable by ssh2 itself — otherwise the
+  // profile would be unusable; verify here, not on the first server connect.
   const parsed = utils.parseKey(privateKeyPem);
   if (parsed instanceof Error) {
     throw new Error(`Сгенерированный ключ не парсится ssh2: ${parsed.message}`);
@@ -155,7 +157,7 @@ export function generateKeyPair(profileName: string): {
   return { privateKeyPem, publicKeyLine };
 }
 
-/** Имя файла ключа: санитизация как у memory/, коллизия — числовой суффикс. */
+/** Key file name: sanitization like memory/, collisions get a numeric suffix. */
 export function buildKeyFileName(existing: string[], profileName: string): string {
   const slug = profileName.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
   const base = slug || 'server';
@@ -167,37 +169,38 @@ export function buildKeyFileName(existing: string[], profileName: string): strin
 }
 
 // ---------------------------------------------------------------------------
-// Чистые билдеры команд и парсеры (unit-тесты)
+// Pure command builders and parsers (unit tests)
 // ---------------------------------------------------------------------------
 
 export const SSHD_MAIN_CONFIG = '/etc/ssh/sshd_config';
 export const SSHD_DROPIN_PATH = '/etc/ssh/sshd_config.d/00-ssh-commander.conf';
-// Раннее имя drop-in: OpenSSH — «первое вхождение побеждает», Include стоит
-// наверху sshd_config, поэтому 00- перекрывает cloud-init 50/60-*.conf с
-// PasswordAuthentication yes (правка основного конфига в конце молча не
-// перебьёт).
+// Early drop-in name: OpenSSH is "first occurrence wins" and Include sits at
+// the top of sshd_config, so 00- overrides cloud-init 50/60-*.conf with
+// PasswordAuthentication yes (an edit at the end of the main config would
+// silently lose).
 export const SSHD_RESOLVE = 'SSHD=$(command -v sshd || echo /usr/sbin/sshd)';
-// reload не рвёт установленные сессии. Хвост цепочки — про sshd без
-// systemd/service (docker-контейнер из ручного теста): SIGHUP старейшему sshd,
-// это master (слушает с самой загрузки); на VPS сработает systemctl/service.
+// reload does not drop established sessions. The tail of the chain covers
+// sshd without systemd/service (the docker container from the manual test):
+// SIGHUP the oldest sshd, which is the master (listening since boot); on a
+// VPS systemctl/service will handle it.
 export const SSHD_RELOAD_CMD =
   'systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || ' +
   'service ssh reload >/dev/null 2>&1 || service sshd reload >/dev/null 2>&1 || ' +
   'kill -HUP "$(pgrep -x sshd | sort -n | head -1)"';
 
-/** Установка ключа идемпотентна: grep -F по телу ключа без комментария. */
+/** Key installation is idempotent: grep -F over the key body without the comment. */
 export function buildInstallKeyCommand(pubkeyBodyWithoutComment: string, pubkeyLine: string): string {
   return [
     'umask 077',
     'mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys',
     `if grep -F -- ${shq(pubkeyBodyWithoutComment)} ~/.ssh/authorized_keys >/dev/null 2>&1; then echo present; ` +
       `else printf '%s\\n' ${shq(pubkeyLine)} >> ~/.ssh/authorized_keys && echo added; fi`,
-    // SELinux-страховка (RHEL): контекст authorized_keys после правки папки.
+    // SELinux safety net (RHEL): restore the authorized_keys context after touching the directory.
     'command -v restorecon >/dev/null 2>&1 && restorecon -R ~/.ssh; true',
   ].join('; ');
 }
 
-/** Best-effort удаление строки ключа (чистка после провала до создания профиля). */
+/** Best-effort removal of the key line (cleanup after a failure before the profile is created). */
 export function buildRemoveKeyCommand(pubkeyBodyWithoutComment: string): string {
   return [
     `grep -Fv -- ${shq(pubkeyBodyWithoutComment)} ~/.ssh/authorized_keys > ~/.ssh/authorized_keys.sc-tmp`,
@@ -212,8 +215,9 @@ export function buildMatchDetectCommand(): string {
 }
 
 /**
- * Эффективный конфиг. При наличии Match-блоков — с -C (иначе -T показывает
- * только глобальную секцию, а Match может перекрывать директивы для юзера).
+ * Effective config. With Match blocks present, run with -C (otherwise -T
+ * only shows the global section, while Match may override directives for
+ * the user).
  */
 export function buildSshdTCommand(withConnectionSpec: boolean, username: string): string {
   const spec = withConnectionSpec ? ` -C user=${shq(username)},host=localhost,addr=127.0.0.1` : '';
@@ -249,7 +253,7 @@ export function buildReadConfigCommand(): string {
   return `cat ${shq(SSHD_MAIN_CONFIG)}`;
 }
 
-/** Точная побайтовая запись (printf %s — без добавления переводов строк). */
+/** Exact byte-for-byte write (printf %s — no line feeds added). */
 export function buildWriteConfigCommand(content: string): string {
   return `printf '%s' ${shq(content)} > ${shq(SSHD_MAIN_CONFIG)}`;
 }
@@ -262,7 +266,7 @@ export function buildRollbackRestoreCommand(backupPath: string): string {
   return `cp ${shq(backupPath)} ${shq(SSHD_MAIN_CONFIG)}; ${SSHD_RELOAD_CMD}`;
 }
 
-/** Разбор вывода `sshd -T`: строки `directive value` → карта в нижнем регистре. */
+/** Parse `sshd -T` output: `directive value` lines → a lowercase map. */
 export function parseSshdT(output: string): Record<string, string> {
   const map: Record<string, string> = {};
   for (const raw of output.split('\n')) {
@@ -273,10 +277,11 @@ export function parseSshdT(output: string): Record<string, string> {
 }
 
 /**
- * Какие директивы отключения пароля понимает этот sshd — по выводу sshd -T
- * на НЕмодифицированном конфиге (заодно baseline: конфиг валиден до правок).
- * До OpenSSH 8.7 нет KbdInteractiveAuthentication (там
- * ChallengeResponseAuthentication), а неизвестная директива валит sshd -t.
+ * Which password-disabling directives this sshd understands — from the sshd -T
+ * output of the UNMODIFIED config (doubles as a baseline: the config is valid
+ * before our edits). Before OpenSSH 8.7 there is no KbdInteractiveAuthentication
+ * (it is ChallengeResponseAuthentication there), and an unknown directive
+ * breaks sshd -t.
  */
 export function detectSupportedDirectives(parsed: Record<string, string>): string[] {
   const out: string[] = [];
@@ -289,23 +294,24 @@ export function detectSupportedDirectives(parsed: Record<string, string>): strin
   return out;
 }
 
-/** Директивы, чьё эффективное значение не стало `no` (проверка по факту). */
+/** Directives whose effective value did not become `no` (verified for real). */
 export function failedEffectiveDirectives(parsed: Record<string, string>, directives: string[]): string[] {
   return directives.filter((d) => parsed[d.toLowerCase()] !== 'no');
 }
 
 /**
- * Fallback без sshd_config.d/Include: активные директивы заменяются на месте
- * («первое вхождение побеждает» — замена в конце могла бы проиграть активной
- * строке выше), отсутствующие вставляются до первого Match (директивы
- * глобального контекста внутри Match невалидны) либо в конец файла.
+ * Fallback without sshd_config.d/Include: active directives are replaced in
+ * place ("first occurrence wins" — appending at the end could lose to an
+ * active line above), missing ones are inserted before the first Match
+ * (global-context directives are invalid inside Match) or at the end of the
+ * file.
  */
 export function rewriteSshdConfig(content: string, directives: string[]): string {
   const lines = content.replace(/\r\n/g, '\n').split('\n');
   const seen = new Map(directives.map((d) => [d.toLowerCase(), false]));
   for (let i = 0; i < lines.length; i++) {
-    // только top-level директивы (без отступа): строка с отступом внутри
-    // Match-блока — другой контекст, глобальную директиву не заменяет
+    // only top-level directives (no indentation): an indented line inside a
+    // Match block is a different context and does not replace the global directive
     const m = /^([A-Za-z]+)(\s+)(.*?)\s*$/.exec(lines[i]);
     if (m && seen.has(m[1].toLowerCase())) {
       lines[i] = `${m[1]} no`;
@@ -328,7 +334,7 @@ export function rewriteSshdConfig(content: string, directives: string[]): string
 }
 
 // ---------------------------------------------------------------------------
-// Маппинг ошибок подключения (пароль в сообщения не подставляется)
+// Connect error mapping (the password is never substituted into messages)
 // ---------------------------------------------------------------------------
 
 export function mapConnectError(
@@ -355,7 +361,7 @@ export function mapConnectError(
 }
 
 // ---------------------------------------------------------------------------
-// Продакшн-подключения: прямые ssh2-клиенты, timeout 30 c, close в finally
+// Production connections: direct ssh2 clients, 30 s timeout, close in finally
 // ---------------------------------------------------------------------------
 
 function execOnClient(client: Client, command: string, timeoutMs = 60000): Promise<ExecResult> {
@@ -418,9 +424,9 @@ export function connectSsh(options: BootstrapConnectOptions): Promise<BootstrapS
       state.alive = false;
     });
     client.once('ready', () => resolve(session));
-    // on, а не once: слушатель живёт и после ready — поздняя ошибка сети
-    // помечает сессию мёртвой (reject на resolved-промисе — no-op), а второй
-    // error-эвент без слушателя ронял бы процесс.
+    // on, not once: the listener lives past ready — a late network error marks
+    // the session dead (reject on an already-resolved promise is a no-op),
+    // while a second error event without a listener would crash the process.
     client.on('error', (err) => {
       state.alive = false;
       try {
@@ -468,7 +474,7 @@ function defaultDeps(): BootstrapDeps {
 }
 
 // ---------------------------------------------------------------------------
-// Оркестрация
+// Orchestration
 // ---------------------------------------------------------------------------
 
 function formatOutput(r: ExecResult, limit = 2000): string {
@@ -498,9 +504,9 @@ export async function bootstrapServer(
   ok('Генерация ключа ed25519', `отдельная пара для этого сервера, комментарий ssh-commander@${input.name}`);
 
   let passwordSession: BootstrapSshSession | null = null;
-  let keySession: BootstrapSshSession | null = null; // живёт до конца — откат через key-сессию
+  let keySession: BootstrapSshSession | null = null; // lives to the end — rollback via the key session
   let keyFilePath: string | null = null;
-  let keepKeyFile = false; // кейс «hardening ок, а профиль не создался» — ключ сохраняем
+  let keepKeyFile = false; // the "hardening ok, profile not created" case — keep the key
 
   const connectOrThrow = async (
     phase: 'password' | 'key',
@@ -521,21 +527,22 @@ export async function bootstrapServer(
     }
   };
 
-  // Живая password-сессия переживает reload; если оборвалась — откат через
-  // key-сессию (вход ключом верифицирован до hardening, hardening его не закрывает).
+  // A live password session survives reload; if it drops, roll back via the
+  // key session (key login was verified before hardening, and hardening does
+  // not invalidate it).
   const execViaExistingSessions = async (command: string): Promise<ExecResult | null> => {
     if (passwordSession?.alive) {
       try {
         return await passwordSession.exec(command);
       } catch {
-        /* сессия умерла — следующий кандидат */
+        /* session died — try the next candidate */
       }
     }
     if (keySession?.alive) {
       try {
         return await keySession.exec(command);
       } catch {
-        /* живых сессий нет */
+        /* no live sessions left */
       }
     }
     return null;
@@ -544,8 +551,8 @@ export async function bootstrapServer(
   const execViaAliveSession = async (command: string, connectStepName: string): Promise<ExecResult> => {
     const existing = await execViaExistingSessions(command);
     if (existing) return existing;
-    // Для отката оправдано свежее подключение ключом; для best-effort чистки —
-    // нет (шумный error-шаг, когда ключ и не устанавливался).
+    // A fresh key connection is justified for rollback; for best-effort
+    // cleanup it is not (a noisy error step when the key was never installed).
     const fresh = await connectOrThrow('key', connectStepName);
     try {
       return await fresh.exec(command);
@@ -606,7 +613,7 @@ export async function bootstrapServer(
     ok('Проверка входа по ключу', 'отдельное новое подключение с новым ключом прошло');
 
     if (input.disablePasswordAuth) {
-      // --- анализ на немодифицированном конфиге ----------------------------
+      // --- analysis on the unmodified config ------------------------------
       const matchDetect = await passwordSession.exec(buildMatchDetectCommand());
       const hasMatch = matchDetect.stdout.trim() === 'yes';
       const sshdT = buildSshdTCommand(hasMatch, input.username);
@@ -633,7 +640,7 @@ export async function bootstrapServer(
         `отключаем: ${directives.join(', ')}; Match-блоки: ${hasMatch ? 'есть (sshd -T с -C)' : 'нет'}`,
       );
 
-      // --- применение: drop-in приоритетно, fallback — правка основного ----
+      // --- apply: drop-in preferred, fallback — editing the main config ----
       const dropinSupport = await passwordSession.exec(buildDropinSupportCommand());
       const useDropin = dropinSupport.stdout.trim() === 'yes';
       const applyFailure = (detail: string, message: string): BootstrapError => {
@@ -684,9 +691,9 @@ export async function bootstrapServer(
         );
       }
 
-      // --- всё после первой правки конфига: любой провал (красный sshd -t,
-      // отказ reload, оборвавшаяся сессия, не применившийся эффективный
-      // конфиг, отвалившийся контрольный вход ключом) → откат и ошибка наверх.
+      // --- everything after the first config edit: any failure (a red sshd -t,
+      // a failed reload, a dropped session, the effective config not applied,
+      // the verification key login rejected) → rollback and an error upward.
       try {
         const test = await passwordSession.exec(buildSshdTestCommand());
         if (test.code !== 0) {
@@ -710,7 +717,7 @@ export async function bootstrapServer(
         }
         ok('Перезагрузка sshd', 'reload выполнен; установленные сессии не рвутся');
 
-        // --- контрольные проверки по факту, не на слово --------------------
+        // --- verification checks on the actual state, not on trust ---------
         const effective = await passwordSession.exec(sshdT);
         if (effective.code !== 0) {
           fail('Контрольная проверка конфигурации', `sshd -T упал после правок:\n${formatOutput(effective)}`);
@@ -780,8 +787,9 @@ export async function bootstrapServer(
         dockerCommand: 'docker',
       });
     } catch (err) {
-      // Состояние консистентно: сервер захарден, ключ на диске. Откат hardening
-      // в этой точке не делаем — восстановимо руками (профиль с этим ключом).
+      // The state is consistent: the server is hardened, the key is on disk.
+      // No hardening rollback here — it is recoverable by hand (a profile
+      // with this key).
       keepKeyFile = true;
       fail('Создание профиля', (err as Error).message);
       throw new BootstrapError(
@@ -794,18 +802,19 @@ export async function bootstrapServer(
     ok('Создание профиля', `профиль «${input.name}»: вход по ключу ${keyFilePath}`);
     return { profile, steps };
   } catch (err) {
-    // Провал до создания профиля: удалить локальный файл ключа; строку pubkey
-    // убрать из authorized_keys best-effort через живую сессию. Исключение —
-    // кейс createProfile (keepKeyFile): ключ и строку оставляем.
+    // Failure before profile creation: delete the local key file; remove the
+    // pubkey line from authorized_keys best-effort via a live session.
+    // Exception — the createProfile case (keepKeyFile): keep both the key and
+    // the line.
     if (!keepKeyFile) {
-      // best-effort и только через живые сессии: чистка не должна шуметь
-      // ошибками подключения, когда ключ и не устанавливался
+      // best-effort and only via live sessions: cleanup must not spam
+      // connection errors when the key was never installed
       await execViaExistingSessions(buildRemoveKeyCommand(body));
       if (keyFilePath) {
         try {
           fs.unlinkSync(keyFilePath);
         } catch {
-          /* мог не создаться */
+          /* may not have been created */
         }
       }
     }

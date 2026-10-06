@@ -7,45 +7,46 @@ import type { PromptLang } from '../ai/prompts.js';
 import type { ExecResult, Profile } from '../types.js';
 
 /**
- * «Что съело диск» — навигатор по du (эпик 16).
+ * "What eats the disk" — a du navigator (epic 16).
  *
- * Один уровень дерева за запрос: `du -x -d 1 -k` (сам каталог — последней
- * строкой в post-order, плюс прямые подкаталоги) и топ крупнейших файлов
- * через `find`. Всё read-only, команды собирает сервис (guard их не видит —
- * прецедент security_audit). stderr не глушится, а ловится: отказы доступа
- * дают честную пометку `incomplete`, чтобы цифры не выглядели враньём.
+ * One level of the tree per request: `du -x -d 1 -k` (the directory itself is
+ * the last line in post-order, plus direct subdirectories) and the top largest
+ * files via `find`. Everything is read-only, commands are assembled by the
+ * service (the guard does not see them — the security_audit precedent). stderr
+ * is not silenced but caught: access denials produce an honest `incomplete`
+ * marker so the numbers do not look like lies.
  *
- * Отклонения от roadmap: `-k` вместо `-B1` (BusyBox не знает `-B`, как
- * `df -P -k` в metrics.ts; парсер умножает на 1024), `2>/dev/null` не
- * используется (см. выше).
+ * Deviations from the roadmap: `-k` instead of `-B1` (BusyBox does not know
+ * `-B`, same as `df -P -k` in metrics.ts; the parser multiplies by 1024),
+ * `2>/dev/null` is not used (see above).
  */
 
 export const DU_TIMEOUT_MS = 60000;
-/** Максимум файлов в ответе режима «Файлы». */
+/** Max files in the "Files" mode response. */
 export const DU_MAX_LIMIT = 500;
 export const DU_DEFAULT_LIMIT = 100;
 export const AGENT_DEFAULT_LIMIT = 10;
 export const AGENT_MAX_LIMIT = 50;
-/** Кэш только для тяжёлого du-снимка; find дешевле — не кэшируется. */
+/** Cache for the heavy du snapshot only; find is cheaper — not cached. */
 const DISK_USAGE_CACHE_TTL_MS = 2000;
 
 export interface DiskUsageChild {
   name: string;
   path: string;
   bytes: number;
-  /** Доля от суммы поддерева каталога (1 знак после запятой). */
+  /** Share of the directory's subtree total (one decimal place). */
   pctOfParent: number;
 }
 
 export interface DiskUsageSnapshot {
   path: string;
   totalBytes: number;
-  /** Размер файлов прямо в каталоге (du в -d 1 их не печатает). */
+  /** Size of files directly inside the directory (du -d 1 does not print them). */
   directBytes: number;
   children: DiskUsageChild[];
-  /** Отказы доступа при обходе (строки stderr du/find). */
+  /** Access denials during traversal (du/find stderr lines). */
   incomplete: { unreadable: number } | null;
-  /** Вывод du обрезан по лимиту exec — суммарная строка потерялась. */
+  /** du output truncated by the exec limit — the total line was lost. */
   truncated: boolean;
 }
 
@@ -61,13 +62,13 @@ export interface TopFilesResult {
 }
 
 /**
- * Пользовательская ошибка (путь, права, утилиты) — маршрут отвечает 400.
- * Транспортные ошибки (exec reject, отказ SSH-соединения) не оборачиваются —
- * маршрут отвечает 502.
+ * A user-facing error (path, permissions, utilities) — the route answers 400.
+ * Transport errors (exec reject, SSH connection failure) are not wrapped —
+ * the route answers 502.
  */
 export class DiskUsageError extends Error {}
 
-/** exec-обёртка с инъекцией для тестов (паттерн systemd.ts: `deps.execFn`). */
+/** exec wrapper with injection for tests (the systemd.ts pattern: `deps.execFn`). */
 export type ExecFn = (
   profile: Profile,
   command: string,
@@ -76,26 +77,26 @@ export type ExecFn = (
 
 export interface DiskUsageDeps {
   execFn?: ExecFn;
-  /** Предпроверка директории. Инъекция нужна тестам (без реального SFTP) и
-   * агенту: он проверяет путь один раз на оба вызова (см. skipPrecheck). */
+  /** Directory precheck. Injection is needed by tests (no real SFTP) and by
+   * the agent: it checks the path once for both calls (see skipPrecheck). */
   precheckFn?: (profile: Profile, path: string) => Promise<void>;
-  /** Пропустить предпроверку — вызывающий уже убедился, что путь — директория. */
+  /** Skip the precheck — the caller has already made sure the path is a directory. */
   skipPrecheck?: boolean;
 }
 
 // ---------------------------------------------------------------------------
-// Валидация пути. assertSafePath не годится: он запрещает `/`, а точка
-// монтирования может быть корнем навигации.
+// Path validation. assertSafePath does not fit: it forbids `/`, while a mount
+// point may be the navigation root.
 // ---------------------------------------------------------------------------
 
-/** Нормализация: trim, схлопывание `//`, снятие хвостового `/` (кроме корня). */
+/** Normalization: trim, collapse `//`, strip the trailing `/` (except the root). */
 export function normalizeDiskPath(p: string): string {
   const trimmed = p.trim();
   if (!trimmed.startsWith('/')) return trimmed;
   return trimmed.replace(/\/+/g, '/').replace(/\/+$/, '') || '/';
 }
 
-/** Абсолютный путь (`/` — можно), без сегментов `..`; иначе ошибка. */
+/** An absolute path (`/` is fine) without `..` segments; otherwise an error. */
 export function assertNavigablePath(p: string): string {
   if (!p.startsWith('/')) {
     throw new DiskUsageError('Путь должен быть абсолютным (начинаться с /)');
@@ -107,34 +108,35 @@ export function assertNavigablePath(p: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Сборка команд (чистые билдеры). Конвейеры и редиректы здесь допустимы —
-// команды собирает сервис, deny-лист guard.ts их не видит.
+// Command assembly (pure builders). Pipelines and redirects are fine here —
+// commands are assembled by the service, the guard.ts allow-list never sees them.
 // ---------------------------------------------------------------------------
 
-/** `du -x -d 1 -k`: одна ФС, уровень глубины 1, кибибайты (портируемо). */
+/** `du -x -d 1 -k`: one filesystem, depth level 1, kibibytes (portable). */
 export function buildDuCommand(path: string): string {
   return `du -x -d 1 -k -- ${shq(path)}`;
 }
 
-/** Топ файлов: GNU find с `-printf` (escape `\t` разворачивает сам find). */
+/** Top files: GNU find with `-printf` (find expands the `\t` escape itself). */
 export function buildTopFilesCommand(path: string, limit: number): string {
   return `find ${shq(path)} -xdev -type f -printf '%s\\t%p\\n' | sort -rn | head -n ${limit}`;
 }
 
 /**
- * Фолбэк без `-printf` (BusyBox): `stat -c '%s\t%n'`, где `\t` — литеральный
- * символ табуляции (0x09) внутри одинарных кавычек, а не escape-последова-
- * тельность: GNU stat разворачивает `\t` сам, BusyBox — нет, и парсер
- * получил бы строки без разделителя. С литеральным табом оба ведут себя
- * одинаково (shell передаёт байт через одинарные кавычки как есть).
+ * Fallback without `-printf` (BusyBox): `stat -c '%s\t%n'`, where `\t` is a
+ * literal tab character (0x09) inside single quotes, not an escape
+ * sequence: GNU stat expands `\t` itself, BusyBox does not, and the parser
+ * would get lines without a separator. With a literal tab both behave
+ * identically (the shell passes the byte inside single quotes as is).
  */
 export function buildTopFilesStatCommand(path: string, limit: number): string {
   return `find ${shq(path)} -xdev -type f -exec stat -c '%s${'\t'}%n' {} + | sort -rn | head -n ${limit}`;
 }
 
 /**
- * Признак того, что find не понял опцию (у `-printf` и `-exec … +` — общий
- * класс). Формулировки расходятся сильнее, чем кажется: BusyBox —
+ * A sign that find did not understand an option (`-printf` and `-exec … +`
+ * share the same class). The wordings differ more than one would expect:
+ * BusyBox —
  * `find: unrecognized: -printf`, GNU — `find: unknown predicate `-printf'`,
  * BSD — `find: -printf: unknown primary or operator`.
  */
@@ -143,17 +145,18 @@ export function needsStatFallback(stderr: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Парсеры (чистые, терпимые к обрезанному выводу 2 МБ).
+// Parsers (pure, tolerant to 2 MB-truncated output).
 // ---------------------------------------------------------------------------
 
 const DU_LINE_RE = /^\s*(\d+)\t(.+)$/;
 
 /**
- * Вывод `du -x -d 1 -k` (строки `размер\tпуть`, разделитель — первый таб;
- * путь с пробелами/табами — хвост строки). Суммарная запись каталога ищется
- * по совпадению пути, а не по позиции: и GNU, и BusyBox печатают сам каталог
- * последней строкой (post-order), но надёжнее не полагаться на порядок.
- * Записи нет → `totalKb: null` — признак обрезанного вывода, не ошибка.
+ * Output of `du -x -d 1 -k` (`size\tpath` lines, the separator is the first
+ * tab; a path with spaces/tabs is the line tail). The directory's total entry
+ * is found by path match, not by position: both GNU and BusyBox print the
+ * directory itself on the last line (post-order), but relying on the order
+ * is fragile. No entry → `totalKb: null` — a sign of truncated output, not
+ * an error.
  */
 export function parseDuKb(
   text: string,
@@ -183,11 +186,11 @@ function pctOf(part: number, total: number): number {
 }
 
 /**
- * Сборка ответа: дети отсортированы по убыванию, `directBytes` — размер
- * файлов прямо в каталоге (clamp ≥ 0: du и df расходятся на незакрытых
- * удалённых файлах и т.п.). При `totalKb === null` и непустых детях —
- * деградация: сумма по детям, `truncated: true`; без детей — ошибка
- * (парсить действительно нечего).
+ * Response assembly: children sorted descending, `directBytes` — the size of
+ * files directly in the directory (clamped ≥ 0: du and df disagree on open
+ * deleted files etc.). With `totalKb === null` and non-empty children —
+ * degradation: the sum over children, `truncated: true`; with no children —
+ * an error (there is truly nothing to parse).
  */
 export function toDuSnapshot(
   path: string,
@@ -227,7 +230,7 @@ export function toDuSnapshot(
   };
 }
 
-/** Вывод `find … | sort -rn | head`: путь и размер, по убыванию. */
+/** Output of `find … | sort -rn | head`: path and size, descending. */
 export function parseFindOutput(text: string): DiskUsageFile[] {
   const out: DiskUsageFile[] = [];
   for (const line of text.split('\n')) {
@@ -241,7 +244,7 @@ export function parseFindOutput(text: string): DiskUsageFile[] {
   return out;
 }
 
-/** Число строк отказа доступа в stderr — для пометки «доступно не всё». */
+/** Number of access-denial lines in stderr — for the "not everything was readable" marker. */
 export function countUnreadable(stderr: string): number {
   let n = 0;
   for (const line of stderr.split('\n')) {
@@ -252,7 +255,7 @@ export function countUnreadable(stderr: string): number {
   return n;
 }
 
-/** Целое 1..50 для инструмента агента; мусор/отсутствие — дефолт 10. */
+/** An integer 1..50 for the agent tool; garbage/missing — the default of 10. */
 export function clampAgentLimit(value: unknown): number {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 1) return AGENT_DEFAULT_LIMIT;
@@ -272,7 +275,7 @@ function humanSize(bytes: number, lang: PromptLang = 'ru'): string {
   return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
-/** Текстовый отчёт для инструмента агента disk_usage (язык — язык сессии агента). */
+/** Text report for the disk_usage agent tool (the language is the agent session's language). */
 export function formatAgentDiskUsage(
   path: string,
   snapshot: DiskUsageSnapshot,
@@ -309,19 +312,20 @@ export function formatAgentDiskUsage(
 }
 
 // ---------------------------------------------------------------------------
-// Исполнение
+// Execution
 // ---------------------------------------------------------------------------
 
 /**
- * Предпроверка до тяжёлой команды: путь существует и это директория.
- * Разделение ошибок как в routes/metrics.ts: отказ stat (нет пути, нет прав) —
- * пользовательская ошибка (400), а отказ getSftp (соединение) пробрасывается
- * как есть — транспорт (502). Раньше вся ошибка withSftp заворачивалась в
- * DiskUsageError, и упавший SSH выглядел как «Путь недоступен: …» с кнопкой
- * «Повторить» вместо честного «Сервер недоступен».
+ * Precheck before the heavy command: the path exists and is a directory.
+ * Error separation as in routes/metrics.ts: a stat failure (no path, no
+ * permissions) is a user-facing error (400), while a getSftp failure (the
+ * connection) is rethrown as is — transport (502). Previously the whole
+ * withSftp error was wrapped into DiskUsageError, and a dead SSH looked like
+ * "Path unavailable: …" with a "Retry" button instead of an honest "Server
+ * unavailable".
  */
 export async function precheckNavigableDir(profile: Profile, path: string): Promise<void> {
-  // getSftp вне try: обрыв соединения — транспорт.
+  // getSftp outside try: a dropped connection is transport.
   const sftp = await getSftp(profile);
   let st;
   try {
@@ -335,12 +339,13 @@ export async function precheckNavigableDir(profile: Profile, path: string): Prom
 }
 
 /**
- * exec du/find с таймаутом. План называет долгий du риском №1 и обещает
- * «понятная ошибка „Превышено время ожидания"»: ssh/manager.ts бросает
- * английское «Command timed out…», которое иначе ушло бы в 502 «Сервер
- * недоступен» — сервер в порядке, это команда не уложилась. Сюда же попадает
- * агент: его деградированная строка «крупнейшие файлы недоступны» получила бы
- * тот же английский текст. Транспорт (не-таймаут) пробрасывается как есть.
+ * exec du/find with a timeout. The plan names a slow du risk #1 and promises
+ * a "clear 'Превышено время ожидания' error": ssh/manager.ts throws the
+ * English "Command timed out…", which would otherwise end up in a 502
+ * "Server unavailable" — the server is fine, it is the command that ran too
+ * long. The agent goes through here as well: its degraded "largest files
+ * unavailable" line would get the same English text. Transport errors
+ * (non-timeout) are rethrown as is.
  */
 async function runDuExec(profile: Profile, command: string, execFn: ExecFn): Promise<ExecResult> {
   try {
@@ -359,13 +364,14 @@ interface CacheEntry {
   promise: Promise<DiskUsageSnapshot>;
 }
 
-// Ключ — "<profileId>\0<path>" (NUL не может встретиться в пути).
+// The key is "<profileId>\0<path>" (NUL cannot occur in a path).
 const duCache = new Map<string, CacheEntry>();
 
 /**
- * Снимок du одного каталога. Кэш 2 с на (профиль, путь) — du самая тяжёлая
- * команда приложения; повторный клик по тому же каталогу не должен гонять
- * её снова. Ошибочный промис из кэша удаляется (паттерн collectMetrics).
+ * du snapshot of a single directory. A 2 s cache per (profile, path) — du is
+ * the heaviest command in the app; a repeated click on the same directory
+ * must not run it again. A failed promise is evicted from the cache (the
+ * collectMetrics pattern).
  */
 export function diskUsageSnapshot(
   profile: Profile,
@@ -386,7 +392,7 @@ export function diskUsageSnapshot(
     }
     const result = await runDuExec(profile, buildDuCommand(path), execFn);
     if (result.code !== 0) {
-      // нет прав на сам путь, путь пропал между stat и du
+      // no permissions on the path itself, or the path vanished between stat and du
       throw new DiskUsageError(result.stderr.trim() || `du завершился с кодом ${result.code}`);
     }
     const { totalKb, children } = parseDuKb(result.stdout, path);
@@ -408,14 +414,14 @@ export function diskUsageSnapshot(
 }
 
 /**
- * Топ крупнейших файлов каталога. Стратегия: пробуем `-printf`-вариант;
- * при признаке незнакомой опции (BusyBox) или пустом stdout с непустым
- * stderr (код пайплайна принадлежит head — провал find по коду не виден)
- * повторяем stat-вариантом. Эвристика «пустой stdout» сужена условием
- * `countUnreadable === 0`: штатный пустой каталог с отказами доступа в
- * подкаталогах не должен гонять второй (самый долгий) обход дерева вхолостую.
- * Один лишний exec только на BusyBox-серверах, решение не кэшируем — запрос
- * ручной и редкий.
+ * Top largest files of a directory. Strategy: try the `-printf` variant;
+ * on a sign of an unknown option (BusyBox) or empty stdout with non-empty
+ * stderr (the pipeline's exit code belongs to head — a find failure is not
+ * visible in the code), retry with the stat variant. The "empty stdout"
+ * heuristic is narrowed by `countUnreadable === 0`: a legitimately empty
+ * directory with access denials in subdirectories must not run the second
+ * (the longest) tree walk in vain. One extra exec on BusyBox servers only;
+ * the decision is not cached — the request is manual and rare.
  */
 export async function topFiles(
   profile: Profile,
@@ -438,7 +444,7 @@ export async function topFiles(
   ) {
     const statResult = await runDuExec(profile, buildTopFilesStatCommand(path, limit), execFn);
     if (needsStatFallback(statResult.stderr)) {
-      // и -exec … + не поддержан (экзотика): режим «Файлы» деградирует с пояснением
+      // -exec … + is unsupported as well (exotic): the "Files" mode degrades with an explanation
       throw new DiskUsageError('find не поддерживает -printf и -exec stat — режим «Файлы» недоступен на этом сервере');
     }
     if (statResult.code !== 0) {
