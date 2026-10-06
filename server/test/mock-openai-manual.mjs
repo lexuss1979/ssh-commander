@@ -1,16 +1,17 @@
-// Моковый OpenAI-совместимый endpoint для ручного теста мульти-серверного
-// режима агента (multi-server.manual.mjs) и цикла агента (agent.manual.mjs).
-// Отвечает обычным JSON (не SSE) — клиент server/src/ai/client.ts умеет
-// fallback на не-streaming ответ. Каждый ответ несёт верхнеуровневый `usage`
-// (токены вызова) — проверка учёта расходов в agent.manual.mjs.
+// A mock OpenAI-compatible endpoint for the manual tests of the agent
+// multi-server mode (multi-server.manual.mjs) and of the agent loop
+// (agent.manual.mjs).
+// It answers plain JSON (not SSE) — the server/src/ai/client.ts client can
+// fall back to a non-streaming response. Every response carries a top-level
+// `usage` (the call tokens) — the cost accounting check in agent.manual.mjs.
 //
-// Скриптовая последовательность ответов по номеру запроса:
-//   1) tool_call list_servers (без аргументов)
+// The scripted response sequence by the request number:
+//   1) tool_call list_servers (no arguments)
 //   2) tool_call connect_server {server: "test-sshd-b"}
 //   3) tool_call exec_readonly {command: "hostname", server: "test-sshd-b"}
-//   4) финальный assistant content с хвостовым маркером подсказки
-//      [[SUGGEST]] — сервер вырезает его и шлёт WS-событие suggestion
-//      (проверка в agent.manual.mjs).
+//   4) the final assistant content with a trailing suggestion marker
+//      [[SUGGEST]] — the server cuts it out and sends the WS suggestion event
+//      (checked in agent.manual.mjs).
 import http from 'node:http';
 
 const PORT = 8199;
@@ -31,7 +32,7 @@ function toolCall(id, name, args) {
   };
 }
 
-// Токены вызова (usage не-stream ответа): cached ⊂ prompt — инвариант захвата.
+// The call tokens (usage of a non-stream response): cached ⊂ prompt — the capture invariant.
 function withUsage(response) {
   return {
     ...response,

@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
-// ws/agent.ts тянет за собой ai/agent.ts (SSH/docker-слой) — импорт
-// динамический, после выставления DATA_DIR на tmpdir (паттерн agent-usage).
+// ws/agent.ts pulls in ai/agent.ts (the SSH/docker layer) — the import is
+// dynamic, after setting DATA_DIR to a tmpdir (the agent-usage pattern).
 const dataDir = mkdtempSync(path.join(tmpdir(), 'sc-agent-lang-'));
 process.env.DATA_DIR = dataDir;
 
@@ -15,12 +15,12 @@ afterAll(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-describe('parseAgentLang (query WS-подключения агента)', () => {
+describe('parseAgentLang (the agent WS connection query)', () => {
   it('en → en', () => {
     expect(parseAgentLang('en')).toBe('en');
   });
 
-  it('ru, мусор и отсутствие параметра → дефолт ru (не валимся)', () => {
+  it('ru, garbage and a missing parameter → the ru default (no crash)', () => {
     expect(parseAgentLang('ru')).toBe('ru');
     expect(parseAgentLang('EN')).toBe('ru');
     expect(parseAgentLang('fr')).toBe('ru');
@@ -29,14 +29,14 @@ describe('parseAgentLang (query WS-подключения агента)', () => 
   });
 });
 
-describe('buildToolDefs — язык описаний инструментов', () => {
-  it('en: ни одного кириллического символа во всех схемах', () => {
+describe('buildToolDefs — the tool description language', () => {
+  it('en: not a single Cyrillic character in any schema', () => {
     const defs = buildToolDefs('en');
     expect(defs.length).toBeGreaterThan(0);
     expect(JSON.stringify(defs)).not.toMatch(/\p{Script=Cyrillic}/u);
   });
 
-  it('ru: описания дословно прежние русские', () => {
+  it('ru: the descriptions are verbatim the former Russian ones', () => {
     const defs = buildToolDefs('ru');
     const byName = (n: string) => defs.find((d) => d.function.name === n);
     expect(byName('read_file')?.function.description).toBe('Прочитать текстовый файл на сервере (до 256 КБ).');
@@ -46,7 +46,7 @@ describe('buildToolDefs — язык описаний инструментов',
     expect(JSON.stringify(defs)).toContain('Имя профиля сервера из list_servers');
   });
 
-  it('имена инструментов и параметров одинаковы в обоих языках', () => {
+  it('the tool and parameter names are identical in both languages', () => {
     const shape = (lang: 'ru' | 'en') =>
       buildToolDefs(lang).map((d) => ({
         name: d.function.name,

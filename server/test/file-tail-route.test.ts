@@ -26,8 +26,8 @@ writeFileSync(
   }),
 );
 
-// Маршрут ходит через реальный getClient/execStream/withSftp → ssh2.Client
-// (фейк в helpers/fake-ssh2.ts).
+// The route goes through the real getClient/execStream/withSftp → ssh2.Client
+// (the fake in helpers/fake-ssh2.ts).
 vi.mock('ssh2', () => ({ Client: FakeClient }));
 
 const express = (await import('express')).default;
@@ -53,10 +53,10 @@ afterAll(async () => {
 });
 
 afterEach(async () => {
-  // Закрываем все открытые follow-каналы и рвём кэшированное SSH-соединение:
-  // слоты лимитера и соединение менеджера — модульные синглтоны и не должны
-  // протекать между тестами (иначе instances.at(-1) указывает на удалённый
-  // кэшем клиент).
+  // Close all open follow channels and tear down the cached SSH connection:
+  // the limiter slots and the manager connection are module singletons and
+  // must not leak between tests (otherwise instances.at(-1) points at a client
+  // evicted from the cache).
   for (const client of FakeClient.instances) {
     for (const ch of client.channels) ch.emit('close', null);
   }
@@ -76,13 +76,13 @@ function tailUrl(follow: 0 | 1): string {
 }
 
 describe('GET /api/files/tail', () => {
-  it('follow=0: разовый снимок text/plain, слот не занимается', async () => {
+  it('follow=0: a one-shot text/plain snapshot, no slot taken', async () => {
     FakeClient.autoCloseNext = true;
     const res = await fetch(tailUrl(0));
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/plain');
     expect(await res.text()).toBe('snapshot line 1\nsnapshot line 2');
-    // Слот действительно не занят: три follow-стрима после снимка проходят.
+    // The slot is indeed free: three follow streams after the snapshot go through.
     const held: AbortController[] = [];
     for (let i = 0; i < 3; i++) {
       const controller = new AbortController();
@@ -93,7 +93,7 @@ describe('GET /api/files/tail', () => {
     for (const c of held) c.abort();
   });
 
-  it('follow=1 занимает слот: четвёртый стрим — 429', async () => {
+  it('follow=1 takes a slot: the fourth stream — 429', async () => {
     const held: Array<{ controller: AbortController; res: Response }> = [];
     for (let i = 0; i < 3; i++) {
       const controller = new AbortController();
@@ -107,7 +107,7 @@ describe('GET /api/files/tail', () => {
     for (const h of held) h.controller.abort();
   });
 
-  it('req close снимает слот: после обрыва стрима доступен снова', async () => {
+  it('req close releases the slot: after a dropped stream it is available again', async () => {
     const controller = new AbortController();
     const first = await fetch(tailUrl(1), { signal: controller.signal });
     expect(first.status).toBe(200);
@@ -119,15 +119,15 @@ describe('GET /api/files/tail', () => {
     await reader.cancel();
   });
 
-  it('settle handle.code снимает слот: завершение канала освобождает доступ', async () => {
+  it('the settled handle.code releases the slot: the channel completion frees access', async () => {
     const res = await fetch(tailUrl(1));
     expect(res.status).toBe(200);
-    // Канал tail -F открыт; эмулируем его завершение (SSH-обрыв).
+    // The tail -F channel is open; we emulate its completion (an SSH drop).
     const client = FakeClient.instances.at(-1);
     const ch = client?.channels.at(-1);
     expect(ch).toBeDefined();
     ch!.emit('close', null);
-    // Ответ завершается — читаем до done.
+    // The response completes — we read until done.
     const text = await res.text();
     expect(text).toBe('');
     const next = await fetch(tailUrl(1));
@@ -136,7 +136,7 @@ describe('GET /api/files/tail', () => {
     await reader.cancel();
   });
 
-  it('несуществующий профиль — JSON-ошибка до открытия канала', async () => {
+  it('a nonexistent profile — a JSON error before the channel opens', async () => {
     const params = new URLSearchParams({ profileId: 'no-such', path: '/a.log', follow: '0' });
     const res = await fetch(`${base}/tail?${params}`);
     expect(res.status).toBe(400);

@@ -5,9 +5,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-// Роут профилей: форма ответа без секретов (toSafeProfile) и правила экспорта
-// бэкапа. config/profiles читают env при загрузке модуля — свежие модули
-// (паттерн settings-route.test.ts).
+// The profiles route: the response shape without secrets (toSafeProfile) and
+// the backup export rules. config/profiles read the env at module load — fresh
+// modules (the settings-route.test.ts pattern).
 const dataDir = mkdtempSync(path.join(tmpdir(), 'sc-profiles-route-'));
 const keysDir = mkdtempSync(path.join(tmpdir(), 'sc-profiles-route-keys-'));
 process.env.DATA_DIR = dataDir;
@@ -47,7 +47,7 @@ afterAll(async () => {
 });
 
 describe('GET /api/profiles', () => {
-  it('не отдаёт пароль наружу — только признак «задан»', async () => {
+  it('does not leak the password — only the "is set" flag', async () => {
     const res = await fetch(`${base}/api/profiles`);
     const list = (await res.json()) as Array<Record<string, unknown>>;
     expect(list).toHaveLength(1);
@@ -59,7 +59,7 @@ describe('GET /api/profiles', () => {
 });
 
 describe('POST /api/profiles/export', () => {
-  it('по умолчанию отдаёт бэкап без секретов', async () => {
+  it('by default returns a backup without secrets', async () => {
     const res = await fetch(`${base}/api/profiles/export`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -73,7 +73,7 @@ describe('POST /api/profiles/export', () => {
     expect(parsed.profiles[0].password).toBeUndefined();
   });
 
-  it('секреты без пароля шифрования — отказ, а не открытый файл', async () => {
+  it('secrets without an encryption password — a rejection, not a plain file', async () => {
     const res = await fetch(`${base}/api/profiles/export`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -83,7 +83,7 @@ describe('POST /api/profiles/export', () => {
     expect(((await res.json()) as { error: string }).error).toMatch(/пароль шифрования/);
   });
 
-  it('секреты с паролем — зашифрованный конверт без открытого секрета', async () => {
+  it('secrets with a password — an encrypted envelope without a plain secret', async () => {
     const res = await fetch(`${base}/api/profiles/export`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

@@ -89,8 +89,8 @@ describe('checkReadOnlyCommand', () => {
     }
   });
 
-  // Регрессия аудита: deny-лист имён обходился записью того же бинарника
-  // мимо имени и утилитами, которых в списке просто не было.
+  // Audit regression: the deny-list of names was bypassed by invoking the same
+  // binary past its name and by utilities that were simply not in the list.
   it('blocks the deny-list bypasses (absolute path, backslash, alternative binaries)', () => {
     for (const cmd of [
       '/bin/rm -rf /tmp/x',
@@ -113,7 +113,7 @@ describe('checkReadOnlyCommand', () => {
   it('allows a system binary by absolute path, but not from an arbitrary directory', () => {
     expect(checkReadOnlyCommand('/usr/bin/cat /etc/hosts').ok).toBe(true);
     expect(checkReadOnlyCommand('/bin/ls -la /etc').ok).toBe(true);
-    // Подброшенный бинарник с «правильным» именем: basename совпадает, каталог — нет.
+    // A planted binary with the "right" name: the basename matches, the directory does not.
     expect(checkReadOnlyCommand('/tmp/evil/cat /etc/hosts').ok).toBe(false);
     expect(checkReadOnlyCommand('./cat /etc/hosts').ok).toBe(false);
   });
@@ -134,7 +134,7 @@ describe('checkReadOnlyCommand', () => {
     ]) {
       expect(checkReadOnlyCommand(cmd).ok, cmd).toBe(false);
     }
-    // Тот же флаг у другой утилиты безобиден и остаётся разрешённым.
+    // The same flag on another utility is harmless and stays allowed.
     expect(checkReadOnlyCommand('grep -o nginx /etc/hosts').ok).toBe(true);
   });
 

@@ -44,7 +44,7 @@ function byKind(rules: AlertRuleState[], kind: AlertRuleState['kind'], profileId
 }
 
 describe('evaluateAlertRules: server-down', () => {
-  it('недоступный профиль — crit, active, value 1, сообщение с текстом ошибки', () => {
+  it('an unreachable profile — crit, active, value 1, the message with the error text', () => {
     const rules = evaluateAlertRules(
       overview([entry('p1', { ok: false, error: 'Connection refused', metrics: undefined })]),
       T,
@@ -59,12 +59,12 @@ describe('evaluateAlertRules: server-down', () => {
     expect(r.message).toBe('Сервер недоступен: Connection refused');
   });
 
-  it('недоступный без текста ошибки — подставка «нет данных»', () => {
+  it('unreachable without an error text — the "no data" fallback', () => {
     const rules = evaluateAlertRules(overview([entry('p1', { ok: false, metrics: undefined })]), T);
     expect(rules[0].message).toBe('Сервер недоступен: нет данных');
   });
 
-  it('доступный — active false, value 0, message null', () => {
+  it('reachable — active false, value 0, message null', () => {
     const rules = evaluateAlertRules(overview([entry('p1')]), T);
     const r = byKind(rules, 'server-down')[0];
     expect(r.active).toBe(false);
@@ -72,7 +72,7 @@ describe('evaluateAlertRules: server-down', () => {
     expect(r.message).toBe('Сервер доступен');
   });
 
-  it('ok:true без metrics — единственное состояние server-down', () => {
+  it('ok:true without metrics — the only server-down state', () => {
     const rules = evaluateAlertRules(overview([entry('p1', { metrics: undefined })]), T);
     expect(rules).toHaveLength(1);
     expect(rules[0].kind).toBe('server-down');
@@ -80,7 +80,7 @@ describe('evaluateAlertRules: server-down', () => {
 });
 
 describe('evaluateAlertRules: disk', () => {
-  it('несколько дисков: состояние на каждый mount, subject = mount', () => {
+  it('several disks: a state per mount, subject = the mount', () => {
     const m = metrics({
       disks: [
         { filesystem: '/dev/sda1', mount: '/', totalBytes: 100, usedBytes: 93, availableBytes: 7, usedPercent: 93 },
@@ -99,7 +99,7 @@ describe('evaluateAlertRules: disk', () => {
     expect(data.message).toBe('Диск «/data» занят на 40.0% (порог 90%)');
   });
 
-  it('граница включительно: 90.0 при пороге 90 — active', () => {
+  it('the boundary inclusive: 90.0 at a threshold of 90 — active', () => {
     const m = metrics({
       disks: [{ filesystem: '/dev/sda1', mount: '/', totalBytes: 100, usedBytes: 90, availableBytes: 10, usedPercent: 90 }],
     });
@@ -107,7 +107,7 @@ describe('evaluateAlertRules: disk', () => {
     expect(byKind(rules, 'disk')[0].active).toBe(true);
   });
 
-  it('usedPercent null — состояния нет', () => {
+  it('usedPercent null — no state', () => {
     const m = metrics({
       disks: [{ filesystem: '/dev/sda1', mount: '/', totalBytes: 100, usedBytes: 0, availableBytes: 100, usedPercent: null }],
     });
@@ -117,7 +117,7 @@ describe('evaluateAlertRules: disk', () => {
 });
 
 describe('evaluateAlertRules: memory', () => {
-  it('за порогом — active с сообщением; под порогом — inactive; null — состояния нет', () => {
+  it('over the threshold — active with a message; under it — inactive; null — no state', () => {
     const over = metrics({ memory: { totalBytes: 1, availableBytes: 0, usedBytes: 1, usedPercent: 91.2 } });
     const under = metrics({ memory: { totalBytes: 1, availableBytes: 1, usedBytes: 0, usedPercent: 40 } });
     const broken = metrics({ memory: { totalBytes: 1, availableBytes: null, usedBytes: null, usedPercent: null } });
@@ -135,7 +135,7 @@ describe('evaluateAlertRules: memory', () => {
 });
 
 describe('evaluateAlertRules: load', () => {
-  it('load1 4.2 при 2 ядрах — value 2.1, active при пороге 2, исходные числа в сообщении', () => {
+  it('load1 4.2 on 2 cores — value 2.1, active at a threshold of 2, the raw numbers in the message', () => {
     const m = metrics({ cpu: { percent: 10, cores: 2 }, loadAverage: [4.2, 3, 2] });
     const rules = evaluateAlertRules(overview([entry('p1', { metrics: m })]), T);
     const r = byKind(rules, 'load')[0];
@@ -144,13 +144,13 @@ describe('evaluateAlertRules: load', () => {
     expect(r.message).toBe('Load 4.2 при 2 ядрах (2.1/ядро, порог 2)');
   });
 
-  it('округление до 2 знаков: 4.3 / 3 ядра — 1.43', () => {
+  it('rounding to 2 digits: 4.3 / 3 cores — 1.43', () => {
     const m = metrics({ cpu: { percent: 10, cores: 3 }, loadAverage: [4.3, 3, 2] });
     const rules = evaluateAlertRules(overview([entry('p1', { metrics: m })]), T);
     expect(byKind(rules, 'load')[0].value).toBe(1.43);
   });
 
-  it('под порогом — inactive с message null', () => {
+  it('under the threshold — inactive with a null message', () => {
     const m = metrics({ cpu: { percent: 10, cores: 4 }, loadAverage: [2, 2, 2] });
     const rules = evaluateAlertRules(overview([entry('p1', { metrics: m })]), T);
     const r = byKind(rules, 'load')[0];
@@ -159,7 +159,7 @@ describe('evaluateAlertRules: load', () => {
     expect(r.message).toBe('Load 2 при 4 ядрах (0.5/ядро, порог 2)');
   });
 
-  it('cores null или loadAverage null — состояния нет', () => {
+  it('cores null or loadAverage null — no state', () => {
     const noCores = metrics({ cpu: { percent: 10, cores: null } });
     const noLoad = metrics({ loadAverage: null });
     const rules = evaluateAlertRules(
@@ -169,15 +169,15 @@ describe('evaluateAlertRules: load', () => {
     expect(byKind(rules, 'load')).toHaveLength(0);
   });
 
-  it('cores 0 — состояния нет (делить не на что)', () => {
+  it('cores 0 — no state (nothing to divide by)', () => {
     const m = metrics({ cpu: { percent: 10, cores: 0 } });
     const rules = evaluateAlertRules(overview([entry('p1', { metrics: m })]), T);
     expect(byKind(rules, 'load')).toHaveLength(0);
   });
 });
 
-describe('evaluateAlertRules: общий вид', () => {
-  it('несколько профилей в одном overview — правила всех', () => {
+describe('evaluateAlertRules: the general shape', () => {
+  it('several profiles in one overview — the rules of all of them', () => {
     const rules = evaluateAlertRules(
       overview([entry('a'), entry('b', { ok: false, metrics: undefined })]),
       T,

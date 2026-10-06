@@ -217,7 +217,7 @@ describe('validateTunnelParams', () => {
         status: 'closed' as const,
         createdAt: Date.now(),
       }));
-      // Closed не считаются в лимите — 9 active + 5 closed = можно создать ещё.
+      // Closed tunnels do not count into the limit — 9 active + 5 closed = one more can be created.
       expect(() =>
         validateTunnelParams(baseParams, [...active, ...closed]),
       ).not.toThrow();

@@ -16,7 +16,7 @@ describe('buildNameSearchCommand', () => {
 
   it('quotes pattern as a single shell argument (injection-safe)', () => {
     const pattern = `*'; rm -rf /; '`;
-    // pattern уходит одним экранированным аргументом — как shq и делает
+    // the pattern goes as a single escaped argument — exactly what shq does
     expect(buildNameSearchCommand('/etc', pattern)).toBe(
       `find ${shq('/etc')} -maxdepth 10 -iname ${shq(pattern)}`,
     );

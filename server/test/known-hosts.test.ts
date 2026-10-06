@@ -12,7 +12,7 @@ import {
   resetKnownHostsCache,
 } from '../src/services/known-hosts.js';
 
-/** Блоб публичного ключа в формате RFC 4253: длина + имя алгоритма + тело. */
+/** A public key blob in the RFC 4253 format: the length + the algorithm name + the body. */
 function blob(algo: string, body: string): Buffer {
   const name = Buffer.from(algo, 'ascii');
   const len = Buffer.alloc(4);
@@ -39,7 +39,7 @@ describe('known hosts (TOFU)', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('запоминает ключ при первой встрече и узнаёт его потом', () => {
+  it('remembers the key at the first encounter and recognizes it later', () => {
     const first = checkHostKey('example.com', 22, KEY_A);
     expect(first.status).toBe('new');
     expect(first.algo).toBe('ssh-ed25519');
@@ -50,7 +50,7 @@ describe('known hosts (TOFU)', () => {
     expect(second.fingerprint).toBe(first.fingerprint);
   });
 
-  it('ловит подмену ключа и отдаёт оба отпечатка', () => {
+  it('catches a key substitution and returns both fingerprints', () => {
     const first = checkHostKey('example.com', 22, KEY_A);
     const changed = checkHostKey('example.com', 22, KEY_B);
     expect(changed.status).toBe('mismatch');
@@ -61,19 +61,19 @@ describe('known hosts (TOFU)', () => {
     expect(message).toContain('ssh-keyscan');
   });
 
-  it('хост и порт различаются, регистр имени — нет', () => {
+  it('host and port differ, the name case does not', () => {
     checkHostKey('example.com', 22, KEY_A);
     expect(checkHostKey('example.com', 2222, KEY_B).status).toBe('new');
     expect(checkHostKey('EXAMPLE.com', 22, KEY_A).status).toBe('match');
   });
 
-  it('после forgetHostKey хост снова незнакомый', () => {
+  it('after forgetHostKey the host is unknown again', () => {
     checkHostKey('example.com', 22, KEY_A);
     forgetHostKey('example.com', 22);
     expect(checkHostKey('example.com', 22, KEY_B).status).toBe('new');
   });
 
-  it('файл переживает перезапуск и пишется с правами 0600', () => {
+  it('the file survives a restart and is written with 0600', () => {
     const first = checkHostKey('example.com', 22, KEY_A);
     resetKnownHostsCache();
     expect(checkHostKey('example.com', 22, KEY_A).status).toBe('match');
@@ -87,13 +87,13 @@ describe('known hosts (TOFU)', () => {
     }
   });
 
-  it('битый файл не ломает старт: отодвигается и заводится заново', () => {
+  it('a broken file does not break the start: it is moved aside and started anew', () => {
     fs.writeFileSync(path.join(dir, 'known-hosts.json'), '{ не json');
     expect(checkHostKey('example.com', 22, KEY_A).status).toBe('new');
     expect(fs.readdirSync(dir).some((f) => f.includes('.corrupt-'))).toBe(true);
   });
 
-  it('отпечаток — sha256 в формате ssh-keygen, алгоритм читается из блоба', () => {
+  it('the fingerprint is sha256 in the ssh-keygen format, the algorithm is read from the blob', () => {
     expect(fingerprintOf(KEY_A)).toMatch(/^SHA256:[A-Za-z0-9+/]+$/);
     expect(algoFromBlob(KEY_A)).toBe('ssh-ed25519');
     expect(algoFromBlob(Buffer.from([0, 0]))).toBe('unknown');

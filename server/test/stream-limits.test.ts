@@ -9,11 +9,11 @@ import {
 } from '../src/services/stream-limits.js';
 
 // ---------------------------------------------------------------------------
-// stream-limits: общий лимитер follow-стримов на профиль
+// stream-limits: the shared per-profile follow-stream limiter
 // ---------------------------------------------------------------------------
 
 describe('stream-limits', () => {
-  it('acquire/release меняют счётчик профиля', () => {
+  it('acquire/release change the profile counter', () => {
     const pid = 'sl-acquire';
     expect(followStreamCount(pid)).toBe(0);
     expect(acquireFollowSlot(pid)).toBe(true);
@@ -22,7 +22,7 @@ describe('stream-limits', () => {
     expect(followStreamCount(pid)).toBe(0);
   });
 
-  it('отсечка на границе лимита: сверх — false', () => {
+  it('the cutoff at the limit boundary: beyond it — false', () => {
     const pid = 'sl-limit';
     for (let i = 0; i < FOLLOW_STREAM_LIMIT; i++) {
       expect(acquireFollowSlot(pid)).toBe(true);
@@ -32,7 +32,7 @@ describe('stream-limits', () => {
     expect(followStreamCount(pid)).toBe(FOLLOW_STREAM_LIMIT);
   });
 
-  it('release идемпотентен: двойной release не уводит счётчик в минус', () => {
+  it('release is idempotent: a double release does not push the counter negative', () => {
     const pid = 'sl-idempotent';
     acquireFollowSlot(pid);
     releaseFollowSlot(pid);
@@ -41,19 +41,19 @@ describe('stream-limits', () => {
     expect(followStreamCount(pid)).toBe(0);
   });
 
-  it('release для неизвестного профиля — no-op', () => {
+  it('release for an unknown profile — a no-op', () => {
     expect(() => releaseFollowSlot('sl-unknown')).not.toThrow();
     expect(followStreamCount('sl-unknown')).toBe(0);
   });
 
-  it('после полного освобождения слоты снова доступны', () => {
+  it('after a full release the slots are available again', () => {
     const pid = 'sl-reuse';
     for (let i = 0; i < FOLLOW_STREAM_LIMIT; i++) acquireFollowSlot(pid);
     for (let i = 0; i < FOLLOW_STREAM_LIMIT; i++) releaseFollowSlot(pid);
     expect(acquireFollowSlot(pid)).toBe(true);
   });
 
-  it('ключ — профиль: слоты разных профилей не пересекаются', () => {
+  it('the key is the profile: the slots of different profiles do not overlap', () => {
     const a = 'sl-pa';
     const b = 'sl-pb';
     for (let i = 0; i < FOLLOW_STREAM_LIMIT; i++) acquireFollowSlot(a);
@@ -62,7 +62,7 @@ describe('stream-limits', () => {
 });
 
 // ---------------------------------------------------------------------------
-// chunk-gate: дроп чанков при переполнении сокета + маркер «пропущено N байт»
+// chunk-gate: dropping chunks on socket overflow + the "skipped N bytes" marker
 // ---------------------------------------------------------------------------
 
 interface FakeRes {
@@ -89,7 +89,7 @@ function gate(res: FakeRes): (chunk: string) => void {
 }
 
 describe('createChunkGate', () => {
-  it('пропускает чанки в норме', () => {
+  it('passes chunks normally', () => {
     const res = fakeRes(1024);
     const write = gate(res);
     write('line1\n');
@@ -97,23 +97,23 @@ describe('createChunkGate', () => {
     expect(res.writes).toEqual(['line1\n', 'line2\n']);
   });
 
-  it('дропает чанки при writableLength > 1 МБ, при возврате в норму пишет маркер с суммой', () => {
-    const res = fakeRes(2 * 1024 * 1024); // переполнено
+  it('drops chunks at writableLength > 1 MB, on recovery writes a marker with the total', () => {
+    const res = fakeRes(2 * 1024 * 1024); // overflowed
     const write = gate(res);
-    write('a'.repeat(100)); // дроп: 100 байт
-    write('b'.repeat(250)); // дроп: ещё 250 (накоплено 350)
+    write('a'.repeat(100)); // dropped: 100 bytes
+    write('b'.repeat(250)); // dropped: 250 more (350 accumulated)
     expect(res.writes).toEqual([]);
-    res.writableLength = 0; // сокет освободился
+    res.writableLength = 0; // the socket drained
     write('ok\n');
     expect(res.writes[0]).toContain('пропущено 350 байт');
     expect(res.writes[1]).toBe('ok\n');
-    // Маркер одноразовый: следующий чанк без дропа идёт напрямую.
+    // The marker is one-shot: the next chunk without a drop goes directly.
     write('again\n');
     expect(res.writes).toHaveLength(3);
     expect(res.writes[2]).toBe('again\n');
   });
 
-  it('не пишет в уничтоженный response', () => {
+  it('does not write into a destroyed response', () => {
     const res = fakeRes(0);
     res.destroyed = true;
     const write = gate(res);
@@ -121,7 +121,7 @@ describe('createChunkGate', () => {
     expect(res.writes).toEqual([]);
   });
 
-  it('счётчик дропа сбрасывается после маркера', () => {
+  it('the drop counter resets after the marker', () => {
     const res = fakeRes(2 * 1024 * 1024);
     const write = gate(res);
     write('a'.repeat(10));
@@ -131,13 +131,13 @@ describe('createChunkGate', () => {
     write('b'.repeat(5));
     res.writableLength = 0;
     write('ok2');
-    // Второй маркер считает только второй цикл дропа (5 байт), не 10+5.
+    // The second marker counts only the second drop cycle (5 bytes), not 10+5.
     expect(res.writes[2]).toContain('пропущено 5 байт');
   });
 });
 
 describe('createChunkGate.finish', () => {
-  it('маркер для байтов, дропнутых до конца стрима', () => {
+  it('a marker for the bytes dropped before the end of the stream', () => {
     const res = fakeRes(2 * 1024 * 1024);
     const write = gate(res);
     write('a'.repeat(100));
@@ -145,13 +145,13 @@ describe('createChunkGate.finish', () => {
     expect(res.writes).toEqual([]);
     write.finish();
     expect(res.writes[0]).toContain('пропущено 150 байт');
-    // finish сбрасывает счётчик — повторный вызов пуст.
+    // finish resets the counter — a repeated call writes nothing.
     expect(res.writes).toHaveLength(1);
     write.finish();
     expect(res.writes).toHaveLength(1);
   });
 
-  it('без дропа finish ничего не пишет', () => {
+  it('without drops finish writes nothing', () => {
     const res = fakeRes(0);
     const write = gate(res);
     write('ok\n');

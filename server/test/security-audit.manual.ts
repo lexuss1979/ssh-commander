@@ -1,7 +1,7 @@
-// Ручной live-сценарий security-audit: требует тестовый sshd
-// (linuxserver/openssh-server на 127.0.0.1:2222, user test / pass test123,
+// Manual live security-audit scenario: requires a test sshd
+// (linuxserver/openssh-server on 127.0.0.1:2222, user test / pass test123,
 // SUDO_ACCESS=true).
-// Запуск: npx tsx test/security-audit.manual.ts
+// Run: npx tsx test/security-audit.manual.ts
 import { runSecurityAudit } from '../src/services/security-audit.js';
 import type { Profile } from '../src/types.js';
 
@@ -27,29 +27,29 @@ function check(name: string, ok: boolean, detail = '') {
   }
 }
 
-console.log('== Аудит без привилегий (все секции) ==');
+console.log('== Unprivileged audit (all sections) ==');
 const plain = await runSecurityAudit(profile, {});
 console.log(plain);
-check('есть все секции', ['auth', 'network', 'updates', 'activity', 'docker', 'filesystem'].every((s) => plain.includes(`## ${s}`)));
-check('root-подсекции помечены пропуском', plain.includes('пропущено: нет прав'));
-check('sshd_config прочитан', /PermitRootLogin|PasswordAuthentication/i.test(plain));
-check('порты видны', plain.includes('Открытые порты') && /LISTEN/.test(plain));
-check('docker недоступен — пометка, не падение', /docker недоступен|контейнеров нет/.test(plain));
+check('all sections present', ['auth', 'network', 'updates', 'activity', 'docker', 'filesystem'].every((s) => plain.includes(`## ${s}`)));
+check('root subsections marked as skipped', plain.includes('пропущено: нет прав'));
+check('sshd_config read', /PermitRootLogin|PasswordAuthentication/i.test(plain));
+check('ports visible', plain.includes('Открытые порты') && /LISTEN/.test(plain));
+check('docker unavailable — a note, not a crash', /docker недоступен|контейнеров нет/.test(plain));
 
-console.log('\n== Аудит с привилегиями (sudo) ==');
+console.log('\n== Privileged audit (sudo) ==');
 const priv = await runSecurityAudit(profile, { privileged: true, sudoPassword: 'test123' });
 console.log(priv);
-check('нет сообщения о нерабочем sudo', !priv.includes('sudo не сработал'));
-check('root-подсекции выполнены', !priv.includes('пропущено: нет прав'));
-check('пароль не попал в вывод', !priv.includes('test123'));
+check('no broken-sudo message', !priv.includes('sudo не сработал'));
+check('root subsections executed', !priv.includes('пропущено: нет прав'));
+check('the password never leaked into the output', !priv.includes('test123'));
 
-console.log('\n== Аудит с неверным sudo-паролем ==');
+console.log('\n== Audit with a wrong sudo password ==');
 const wrong = await runSecurityAudit(profile, { privileged: true, sudoPassword: 'wrong-pass' });
-check('sudo не сработал — деградация', wrong.includes('sudo не сработал') && wrong.includes('пропущено: нет прав'));
+check('sudo failed — graceful degradation', wrong.includes('sudo не сработал') && wrong.includes('пропущено: нет прав'));
 
-console.log('\n== Запрос одной секции ==');
+console.log('\n== A single section request ==');
 const one = await runSecurityAudit(profile, { sections: ['network'] });
-check('только network', one.includes('## network') && !one.includes('## auth'));
+check('network only', one.includes('## network') && !one.includes('## auth'));
 
-console.log(failed === 0 ? '\nВСЁ OK' : `\nПРОВАЛОВ: ${failed}`);
+console.log(failed === 0 ? '\nALL OK' : `\nFAILURES: ${failed}`);
 process.exit(failed === 0 ? 0 : 1);

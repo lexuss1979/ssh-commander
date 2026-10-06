@@ -26,7 +26,7 @@ interface ExecCall {
   stdin?: string;
 }
 
-/** Мок exec: записывает вызовы, sudo-проверку считает успешной/неуспешной. */
+/** Mocked exec: records calls, treats the sudo check as successful/failed. */
 function fakeExec(opts: { sudoOk?: boolean; stdout?: string } = {}) {
   const calls: ExecCall[] = [];
   const execFn: ExecFn = async (_p, command, execOpts) => {
@@ -40,7 +40,7 @@ function fakeExec(opts: { sudoOk?: boolean; stdout?: string } = {}) {
 }
 
 describe('commandsForSection', () => {
-  it('covers all sections; docker собирается не shell-командами', () => {
+  it('covers all sections; docker is not built from shell commands', () => {
     for (const section of ALL_SECTIONS) {
       expect(Array.isArray(commandsForSection(section))).toBe(true);
     }
@@ -48,7 +48,7 @@ describe('commandsForSection', () => {
     expect(commandsForSection('auth').length).toBeGreaterThan(0);
   });
 
-  it('marks root-only подсекции в auth', () => {
+  it('marks the root-only subsections in auth', () => {
     const titles = commandsForSection('auth')
       .filter((c) => c.rootOnly)
       .map((c) => c.title);
@@ -59,7 +59,7 @@ describe('commandsForSection', () => {
     ]);
   });
 
-  it('все команды — из фиксированного белого списка (без пользовательского ввода)', () => {
+  it('every command comes from the fixed allow-list (no user input)', () => {
     for (const section of ALL_SECTIONS) {
       for (const cmd of commandsForSection(section)) {
         expect(cmd.command).toBeTruthy();
@@ -70,21 +70,21 @@ describe('commandsForSection', () => {
 });
 
 describe('sudoWrap', () => {
-  it('оборачивает команду в sudo -S без пароля в строке команды', () => {
+  it('wraps a command in sudo -S without the password in the command line', () => {
     const wrapped = sudoWrap(`awk -F: '$2=="" {print $1}' /etc/shadow`);
     expect(wrapped.startsWith(`sudo -S -p '' -- sh -c '`)).toBe(true);
     expect(wrapped).toContain('/etc/shadow');
-    // Пароль сюда не передаётся вообще — проверка ниже на уровне runSecurityAudit.
+    // The password is not passed here at all — checked below at the runSecurityAudit level.
   });
 
-  it('экранирует одинарные кавычки внутри команды', () => {
+  it('escapes single quotes inside the command', () => {
     const wrapped = sudoWrap(`awk -F: '$3==0 {print $1}' /etc/passwd`);
     expect(wrapped).toBe(`sudo -S -p '' -- sh -c 'awk -F: '\\''$3==0 {print $1}'\\'' /etc/passwd'`);
   });
 });
 
 describe('limitLines', () => {
-  it('обрезает длинный вывод с пометкой', () => {
+  it('truncates long output with a note', () => {
     const text = Array.from({ length: 10 }, (_, i) => `line${i}`).join('\n');
     const limited = limitLines(text, 3);
     expect(limited).toContain('line0');
@@ -92,13 +92,13 @@ describe('limitLines', () => {
     expect(limited).toContain('обрезано: показано 3 из 10 строк');
   });
 
-  it('не трогает короткий вывод', () => {
+  it('leaves short output untouched', () => {
     expect(limitLines('a\nb', 5)).toBe('a\nb');
   });
 });
 
 describe('findContainerIssues', () => {
-  it('флагает privileged, host network, docker.sock и монтирование корня', () => {
+  it('flags privileged, host network, docker.sock and a root mount', () => {
     const issues = findContainerIssues({
       HostConfig: { Privileged: true, NetworkMode: 'host', Binds: ['/:/host:ro'] },
       Mounts: [{ Source: '/var/run/docker.sock', Destination: '/var/run/docker.sock' }],
@@ -109,7 +109,7 @@ describe('findContainerIssues', () => {
     expect(issues).toContain('монтирует корень ФС (/)');
   });
 
-  it('обычный контейнер — без замечаний', () => {
+  it('a regular container — no issues', () => {
     expect(
       findContainerIssues({
         HostConfig: { Privileged: false, NetworkMode: 'bridge', Binds: ['/srv/data:/data'] },
@@ -120,22 +120,22 @@ describe('findContainerIssues', () => {
 });
 
 describe('normalizeSections', () => {
-  it('по умолчанию — все секции', () => {
+  it('defaults to all sections', () => {
     expect(normalizeSections()).toEqual(ALL_SECTIONS);
     expect(normalizeSections([])).toEqual(ALL_SECTIONS);
   });
 
-  it('фильтрует неизвестные секции', () => {
+  it('filters out unknown sections', () => {
     expect(normalizeSections(['auth', 'bogus'])).toEqual(['auth']);
     expect(normalizeSections(['bogus'])).toEqual(ALL_SECTIONS);
   });
 });
 
 describe('runSecurityAudit', () => {
-  it('без пароля root-подсекции пропускаются, остальное выполняется', async () => {
+  it('without a password the root subsections are skipped, the rest runs', async () => {
     const { calls, execFn } = fakeExec();
-    // Docker-секция мокается: тест про sudo/root-подсекции, а не про docker —
-    // реальный SSH к 127.0.0.1:22 сделал бы прогон зависимым от машины.
+    // The docker section is mocked: this test is about sudo/root subsections,
+    // not docker — real SSH to 127.0.0.1:22 would make the run machine-dependent.
     const out = await runSecurityAudit(
       profile,
       { privileged: true },
@@ -144,11 +144,11 @@ describe('runSecurityAudit', () => {
     expect(out).toContain('root-проверки пропущены');
     expect(out).toContain('пропущено: нет прав (нужен sudo)');
     expect(out).toContain('ok-output');
-    // Ни одна команда не ушла через sudo.
+    // No command went through sudo.
     expect(calls.every((c) => !c.command.startsWith('sudo '))).toBe(true);
   });
 
-  it('с паролем root-команды идут через sudo, пароль — только в stdin', async () => {
+  it('with a password the root commands go through sudo, the password only in stdin', async () => {
     const { calls, execFn } = fakeExec({ sudoOk: true });
     const password = 's3cret-pass';
     const out = await runSecurityAudit(
@@ -156,12 +156,12 @@ describe('runSecurityAudit', () => {
       { sections: ['auth'], privileged: true, sudoPassword: password },
       { execFn },
     );
-    // Пароль нигде не появляется в строках команд и в выводе отчёта.
+    // The password never appears in command lines or in the report output.
     expect(out).not.toContain(password);
     for (const call of calls) {
       expect(call.command).not.toContain(password);
     }
-    // sudo-проверка и root-подсекции получили пароль в stdin.
+    // The sudo check and the root subsections received the password in stdin.
     const sudoCalls = calls.filter((c) => c.command.startsWith(`sudo -S -p '' --`));
     expect(sudoCalls.length).toBeGreaterThan(1);
     for (const call of sudoCalls) {
@@ -170,7 +170,7 @@ describe('runSecurityAudit', () => {
     expect(out).not.toContain('пропущено: нет прав');
   });
 
-  it('нерабочий sudo — мягкая деградация с пометкой', async () => {
+  it('a failing sudo — a graceful degradation with a note', async () => {
     const { execFn } = fakeExec({ sudoOk: false });
     const out = await runSecurityAudit(
       profile,
@@ -181,14 +181,14 @@ describe('runSecurityAudit', () => {
     expect(out).toContain('пропущено: нет прав (нужен sudo)');
   });
 
-  it('непривилегированный режим не запрашивает sudo вообще', async () => {
+  it('unprivileged mode never requests sudo at all', async () => {
     const { calls, execFn } = fakeExec();
     await runSecurityAudit(profile, { sections: ['network'] }, { execFn });
     expect(calls.some((c) => c.command.startsWith('sudo '))).toBe(false);
     expect(calls.some((c) => c.stdin !== undefined)).toBe(false);
   });
 
-  it('docker недоступен — пометка, а не ошибка', async () => {
+  it('docker unavailable — a note, not an error', async () => {
     const { execFn } = fakeExec();
     const out = await runSecurityAudit(
       profile,
@@ -203,7 +203,7 @@ describe('runSecurityAudit', () => {
     expect(out).toContain('docker недоступен');
   });
 
-  it('docker: проблемные контейнеры перечисляются с флагами', async () => {
+  it('docker: problem containers are listed with their flags', async () => {
     const { execFn } = fakeExec();
     const out = await runSecurityAudit(
       profile,
@@ -217,10 +217,10 @@ describe('runSecurityAudit', () => {
     expect(out).toContain('web: privileged-режим');
   });
 
-  it('общий вывод ограничен по объёму с подсказкой про sections', async () => {
+  it('the whole output is size-limited with a hint about sections', async () => {
     const big = 'x'.repeat(4000);
     const { execFn } = fakeExec({ stdout: big });
-    // Docker-секция мокается — тест про лимит вывода, а не про docker.
+    // The docker section is mocked — this test is about the output limit, not docker.
     const out = await runSecurityAudit(
       profile,
       {},

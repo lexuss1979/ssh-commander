@@ -3,9 +3,9 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { OverviewResponse } from '../src/services/overview.js';
 
-// Фикстура: сервер 'a' — диск 93% (порог 90 по умолчанию), память 60%,
-// load 3.6 при 2 ядрах = 1.8/ядро (порог 2); сервер 'b' — память 88%,
-// которая включается порогом 85, но не дефолтным 90.
+// The fixture: server 'a' — disk 93% (a threshold of 90 by default), memory 60%,
+// load 3.6 on 2 cores = 1.8/core (a threshold of 2); server 'b' — memory 88%,
+// which is enabled by the threshold 85 but not by the default 90.
 const overviewFixture: OverviewResponse = {
   timestamp: 123456,
   servers: [
@@ -79,12 +79,12 @@ function ruleBy(rules: Rule[], profileId: string, kind: string, subject?: string
   const found = rules.find(
     (r) => r.profileId === profileId && r.kind === kind && (subject === undefined || r.subject === subject),
   );
-  if (!found) throw new Error(`правило не найдено: ${profileId}/${kind}/${subject ?? ''}`);
+  if (!found) throw new Error(`rule not found: ${profileId}/${kind}/${subject ?? ''}`);
   return found;
 }
 
 describe('GET /api/alerts', () => {
-  it('без параметров — дефолты в thresholds (echo), правила формы фикстуры', async () => {
+  it('without parameters — the defaults in thresholds (echo), rules shaped like the fixture', async () => {
     const res = await fetch(base);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -100,7 +100,7 @@ describe('GET /api/alerts', () => {
     expect(ruleBy(body.rules, 'b', 'memory').active).toBe(false);
   });
 
-  it('?disk=95&mem=85&load=1.5 — параметры применены к active фикстуры', async () => {
+  it('?disk=95&mem=85&load=1.5 — the parameters applied to the fixture actives', async () => {
     const res = await fetch(`${base}?disk=95&mem=85&load=1.5`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -119,12 +119,12 @@ describe('GET /api/alerts', () => {
     expect(((await res.json()) as { error: string }).error).toBeTruthy();
   });
 
-  it('disk=10 (ниже диапазона) → 400', async () => {
+  it('disk=10 (below the range) → 400', async () => {
     const res = await fetch(`${base}?disk=10`);
     expect(res.status).toBe(400);
   });
 
-  it('load=0 (ниже диапазона) → 400', async () => {
+  it('load=0 (below the range) → 400', async () => {
     const res = await fetch(`${base}?load=0`);
     expect(res.status).toBe(400);
   });

@@ -1,20 +1,21 @@
-// Тест цикла AI-агента против мокового OpenAI-совместимого endpoint'а
-// (mock-openai-manual.mjs): сценарий мока — list_servers (read-only,
-// автоматически) → connect_server (мутирующий, ждёт approve) →
-// exec_readonly на подключённом сервере → финальный ответ с маркером
-// подсказки [[SUGGEST]]. Проверяется:
-// 1) read-only инструменты выполняются автоматически,
-// 2) мутирующий инструмент ждёт подтверждения и выполняется после approve,
-// 3) агент завершает цикл,
-// 4) usage каждого вызова пишется в журнал расходов (ai-usage.json), сессия
-//    шлёт WS-событие usage, summaries диалогов обогащаются итогами,
-// 5) маркер [[SUGGEST]] вырезается из ответа: WS-последовательность
-//    message (без маркера) → suggestion → done, в data/ai-dialogues.json
-//    маркера нет.
+// The AI agent loop test against a mock OpenAI-compatible endpoint
+// (mock-openai-manual.mjs): the mock scenario — list_servers (read-only,
+// automatic) → connect_server (mutating, waits for approve) →
+// exec_readonly on the attached server → the final response with the
+// [[SUGGEST]] suggestion marker. Checked:
+// 1) read-only tools run automatically,
+// 2) a mutating tool waits for approval and runs after approve,
+// 3) the agent finishes the loop,
+// 4) the usage of every call is recorded into the cost journal
+//    (ai-usage.json), the session sends the WS usage event, the dialogue
+//    summaries are enriched with the totals,
+// 5) the [[SUGGEST]] marker is cut out of the response: the WS sequence is
+//    message (without the marker) → suggestion → done, and data/ai-dialogues.json
+//    has no marker.
 //
-// Запуск: mock-openai-manual.mjs (:8199) + sshd на 127.0.0.1:2222 (user test)
-// и сервер: APP_PASSWORD=test123 AI_API_KEY=x AI_API_BASE=http://127.0.0.1:8199/v1
-// node server/dist/index.js (DATA_DIR по умолчанию — data/ в cwd сервера).
+// Run: mock-openai-manual.mjs (:8199) + an sshd on 127.0.0.1:2222 (user test)
+// and the server: APP_PASSWORD=test123 AI_API_KEY=x AI_API_BASE=http://127.0.0.1:8199/v1
+// node server/dist/index.js (DATA_DIR defaults to data/ in the server cwd).
 import WebSocket from 'ws';
 import fs from 'node:fs';
 
@@ -54,8 +55,8 @@ const cookie = `sc_session=${m[1]}`;
 const existing = await req('/api/profiles', {}, cookie);
 for (const p of existing) await req(`/api/profiles/${p.id}`, { method: 'DELETE' }, cookie);
 
-// Оба профиля смотрят на один sshd: мок подключает «второй сервер» по имени
-// test-sshd-b и выполняет exec_readonly с параметром server="test-sshd-b".
+// Both profiles point at the same sshd: the mock attaches the "second server"
+// by the name test-sshd-b and runs exec_readonly with server="test-sshd-b".
 const makeProfile = (name) =>
   req(
     '/api/profiles',
@@ -113,11 +114,11 @@ await new Promise((resolve, reject) => {
 
 ws.send(JSON.stringify({ type: 'message', content: 'выполни проверку' }));
 
-// 1) list_servers — read-only, выполняется автоматически без подтверждения
+// 1) list_servers — read-only, runs automatically without approval
 const listResult = await waitFor((m) => m.type === 'tool_result' && m.name === 'list_servers');
 check('read-only tool ran automatically', listResult.status === 'ok', JSON.stringify(listResult).slice(0, 200));
 
-// 2) connect_server — мутирующий, ждёт approve
+// 2) connect_server — mutating, waits for approve
 const pending = await waitFor((m) => m.type === 'tool_pending' && m.name === 'connect_server');
 check('mutating tool waits for approval', pending.server === 'test-sshd-b', `server=${pending.server}`);
 
@@ -125,7 +126,7 @@ ws.send(JSON.stringify({ type: 'approve', callId: pending.callId }));
 const connectResult = await waitFor((m) => m.type === 'tool_result' && m.callId === pending.callId);
 check('approved tool executed', connectResult.status === 'ok', JSON.stringify(connectResult).slice(0, 200));
 
-// Подключение имело эффект: событие servers с двумя attached серверами
+// The connect had an effect: a servers event with two attached servers
 const serversTwo = await waitFor((m) => m.type === 'servers' && m.attached?.length === 2);
 check(
   'connect had effect (servers event with 2 attached)',
@@ -133,7 +134,7 @@ check(
   JSON.stringify(serversTwo.attached.map((s) => s.name)),
 );
 
-// 3) exec_readonly на подключённом сервере — тоже автоматически
+// 3) exec_readonly on the attached server — also automatic
 const execResult = await waitFor((m) => m.type === 'tool_result' && m.name === 'exec_readonly');
 check(
   'exec_readonly ran automatically on attached server',
@@ -141,7 +142,7 @@ check(
   String(execResult.output ?? '').slice(0, 120),
 );
 
-// 4) финальный ответ: маркер вырезан из message, подсказка — отдельное событие
+// 4) the final response: the marker is cut out of message, the suggestion is a separate event
 const finalMessage = await waitFor(
   (m) => m.type === 'message' && typeof m.content === 'string' && m.content.includes('Готово'),
 );
@@ -153,7 +154,7 @@ check('suggestion event carries marker text', suggestion.text === 'Да, пер�
 const done = await waitFor((m) => m.type === 'done');
 check('agent loop finished', done.note === undefined || done.note !== 'Достигнут лимит шагов', JSON.stringify(done));
 
-// Порядок событий: message (чистый контент) → suggestion → done
+// The event order: message (clean content) → suggestion → done
 const idxMessage = events.indexOf(finalMessage);
 const idxSuggestion = events.indexOf(suggestion);
 const idxDone = events.indexOf(done);
@@ -163,7 +164,7 @@ check(
   `${idxMessage}, ${idxSuggestion}, ${idxDone}`,
 );
 
-// Расходы: WS-событие usage с кумулятивными итогами диалога после записи.
+// Costs: the WS usage event with the cumulative dialogue totals after the record.
 const usageEvent = await waitFor((m) => m.type === 'usage');
 check(
   'WS usage event carries dialogue totals',
@@ -173,7 +174,7 @@ check(
 
 ws.close();
 
-// Проверяем, что диалог сохранился и в нём есть сообщения
+// Check that the dialogue persisted and holds messages
 const dialogues = await req(`/api/ai/dialogues?profileId=${pid}`, {}, cookie);
 check('dialogue persisted', dialogues.dialogues.length > 0, JSON.stringify(dialogues.dialogues.map((d) => d.messageCount)));
 const saved = dialogues.dialogues[0];
@@ -193,7 +194,7 @@ check(
   JSON.stringify(full.dialogue.extraProfileIds),
 );
 
-// Персист на диске: в data/ai-dialogues.json маркера нет.
+// On-disk persist: data/ai-dialogues.json has no marker.
 const dialoguesPath = 'data/ai-dialogues.json';
 if (fs.existsSync(dialoguesPath)) {
   const store = JSON.parse(fs.readFileSync(dialoguesPath, 'utf8'));
@@ -203,10 +204,10 @@ if (fs.existsSync(dialoguesPath)) {
     Boolean(stored) && !JSON.stringify(stored.messages ?? []).includes(MARKER),
   );
 } else {
-  check(`ai-dialogues.json exists at ${dialoguesPath}`, false, 'server DATA_DIR не по умолчанию?');
+  check(`ai-dialogues.json exists at ${dialoguesPath}`, false, 'is the server DATA_DIR non-default?');
 }
 
-// Расходы: summaries обогащены итогами (usage), итоги диалога и отчёт сходятся.
+// Costs: the summaries are enriched with the usage totals, the dialogue totals and the report agree.
 check(
   'dialogue summary enriched with usage',
   saved.usage && saved.usage.calls >= 1 && typeof saved.usage.costUsd === 'number',
@@ -218,7 +219,7 @@ check(
   JSON.stringify(full.dialogue.usage),
 );
 
-// Журнал расходов на диске: записи по профилю (DATA_DIR по умолчанию — data/).
+// The cost journal on disk: records per profile (DATA_DIR defaults to data/).
 const usagePath = 'data/ai-usage.json';
 if (fs.existsSync(usagePath)) {
   const store = JSON.parse(fs.readFileSync(usagePath, 'utf8'));
@@ -229,10 +230,10 @@ if (fs.existsSync(usagePath)) {
     JSON.stringify(recs.map((r) => ({ kind: r.kind, tokens: r.promptTokens, costUsd: r.costUsd }))),
   );
 } else {
-  check(`ai-usage.json exists at ${usagePath}`, false, 'server DATA_DIR не по умолчанию?');
+  check(`ai-usage.json exists at ${usagePath}`, false, 'is the server DATA_DIR non-default?');
 }
 
-// Отчёт API: профиль и итоги за весь период.
+// The API report: the profile and the totals for the whole period.
 const report = await req('/api/ai/usage?days=all', {}, cookie);
 check(
   'usage report API lists the profile and totals',

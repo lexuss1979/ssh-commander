@@ -31,9 +31,9 @@ const MYSQL: DbExecTarget = {
 
 describe('pgDumpArgs', () => {
   it('reads password from stdin first line, pipes through gzip, no pipefail', () => {
-    // Без `set -o pipefail`: dash 0.5.11 (ubuntu/mariadb-образы) абортит
-    // скрипт на неизвестной опции — дамп умирал бы целиком. Ошибки ловит
-    // роут буферизацией головы stdout (см. routes/db.ts).
+    // Without `set -o pipefail`: dash 0.5.11 (ubuntu/mariadb images) aborts the
+    // script on an unknown option — the dump would die entirely. The route
+    // catches errors by buffering the head of stdout (see routes/db.ts).
     expect(pgDumpArgs(PG, 'appdb')).toEqual([
       'exec', '-i', 'abc123', 'sh', '-c',
       `IFS= read -r PGPASSWORD; export PGPASSWORD; pg_dump -U 'app' 'appdb' | gzip`,

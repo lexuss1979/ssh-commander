@@ -8,8 +8,8 @@ import { FakeClient, FakeChannel } from './helpers/fake-ssh2.js';
 
 const dataDir = mkdtempSync(path.join(tmpdir(), 'sc-packages-route-'));
 process.env.DATA_DIR = dataDir;
-// Несколько профилей: кэш снимка пакетов и лимитер follow-слотов — модульные
-// синглтоны, разные id изолируют тесты друг от друга.
+// Several profiles: the package snapshot cache and the follow-slot limiter are
+// module singletons — distinct ids isolate the tests from each other.
 writeFileSync(
   path.join(dataDir, 'profiles.json'),
   JSON.stringify({
@@ -26,7 +26,7 @@ writeFileSync(
   }),
 );
 
-// Маршруты ходят через реальный getClient/execStream → ssh2.Client (фейк).
+// The routes go through the real getClient/execStream → ssh2.Client (fake).
 vi.mock('ssh2', () => ({ Client: FakeClient }));
 
 const express = (await import('express')).default;
@@ -58,8 +58,8 @@ afterAll(async () => {
 });
 
 afterEach(async () => {
-  // Закрываем все открытые каналы (слоты лимитера) и рвём кэшированное
-  // SSH-соединение — модульные синглтоны не должны протекать между тестами.
+  // Close all open channels (the limiter slots) and tear down the cached SSH
+  // connection — the module singletons must not leak between tests.
   for (const client of FakeClient.instances) {
     for (const ch of client.channels) ch.emit('close', null);
   }
@@ -82,11 +82,11 @@ function applyUrl(profileId: string): string {
 }
 
 /**
- * Стандартный маршрутизатор apt-стенда:
- * - детект → /usr/bin/apt-get, код 0;
- * - снимок (apt list) → список + @@LIST_CODE@@0, код 0;
- * - зонд → stderr/код из probe;
- * - apply → чанки (канал остаётся открытым, тест закрывает сам).
+ * The standard apt-stand router:
+ * - detect → /usr/bin/apt-get, code 0;
+ * - snapshot (apt list) → the list + @@LIST_CODE@@0, code 0;
+ * - probe → the probe stderr/code;
+ * - apply → chunks (the channel stays open, the test closes it itself).
  */
 function aptRouter(opts: {
   probe?: { stderr: string; code: number } | null;
@@ -116,7 +116,7 @@ function aptRouter(opts: {
       for (const c of opts.applyChunks ?? ['Reading package lists...\n']) {
         ch.emit('data', Buffer.from(c));
       }
-      return; // канал открыт — тест сам эмитит close
+      return; // the channel is open — the test emits close itself
     }
     ch.emit('close', 0);
   };
@@ -131,7 +131,7 @@ async function apply(profileId: string, body: unknown): Promise<Response> {
 }
 
 describe('GET /api/packages/updates', () => {
-  it('снимок: 200, форма и кэш 60 с (повторный запрос не исполняет exec)', async () => {
+  it('the snapshot: 200, the shape and the 60 s cache (a repeated request runs no exec)', async () => {
     FakeClient.execRouter = aptRouter();
     const res = await fetch(updatesUrl('p-1'));
     expect(res.status).toBe(200);
@@ -144,23 +144,23 @@ describe('GET /api/packages/updates', () => {
     const again = await fetch(updatesUrl('p-1'));
     expect(again.status).toBe(200);
     const execCount2 = FakeClient.instances.reduce((n, c) => n + c.channels.length, 0);
-    expect(execCount2).toBe(execCount); // кэш вернул тот же промис
+    expect(execCount2).toBe(execCount); // the cache returned the same promise
   });
 
-  it('неизвестный профиль — 404', async () => {
+  it('an unknown profile — 404', async () => {
     const res = await fetch(updatesUrl('no-such'));
     expect(res.status).toBe(404);
     expect(((await res.json()) as { error: string }).error).toContain('not found');
   });
 });
 
-describe('POST /api/packages/apply — валидация до стрима', () => {
-  it('неизвестный профиль — 404', async () => {
+describe('POST /api/packages/apply — validation before the stream', () => {
+  it('an unknown profile — 404', async () => {
     const res = await apply('no-such', {});
     expect(res.status).toBe(404);
   });
 
-  it('менеджера нет — 400, стрим не открывается', async () => {
+  it('no package manager — 400, the stream never opens', async () => {
     FakeClient.execRouter = (cmd, ch) => {
       if (cmd === detectPmCommand()) {
         ch.emit('data', Buffer.from('command not found\n'));
@@ -172,14 +172,14 @@ describe('POST /api/packages/apply — валидация до стрима', ()
     expect(((await res.json()) as { error: string }).error).toContain('Менеджер пакетов не найден');
   });
 
-  it('зонд wrong-password → 400 «Неверный sudo-пароль» до открытия канала', async () => {
+  it('the probe wrong-password → 400 "wrong sudo password" before the channel opens', async () => {
     FakeClient.execRouter = aptRouter({ probe: { stderr: 'Sorry, try again.\n', code: 1 } });
     const res = await apply('p-3', { sudoPassword: 'bad' });
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toBe('Неверный sudo-пароль');
   });
 
-  it('зонд not-in-sudoers → 400 «нет прав sudo»', async () => {
+  it('the probe not-in-sudoers → 400 "no sudo rights"', async () => {
     FakeClient.execRouter = aptRouter({
       probe: { stderr: 'u is not in the sudoers file. This incident will be reported.\n', code: 1 },
     });
@@ -188,22 +188,22 @@ describe('POST /api/packages/apply — валидация до стрима', ()
     expect(((await res.json()) as { error: string }).error).toContain('нет прав sudo');
   });
 
-  it('зонд sudo-not-found → 400 «sudo не установлен»', async () => {
+  it('the probe sudo-not-found → 400 "sudo is not installed"', async () => {
     FakeClient.execRouter = aptRouter({ probe: { stderr: 'sudo: not found\n', code: 127 } });
     const res = await apply('p-5', { sudoPassword: 'x' });
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toContain('sudo не установлен');
   });
 
-  it('зонд other → 502', async () => {
+  it('the probe other → 502', async () => {
     FakeClient.execRouter = aptRouter({ probe: { stderr: 'some odd error\n', code: 1 } });
     const res = await apply('p-1', { sudoPassword: 'x' });
     expect(res.status).toBe(502);
   });
 });
 
-describe('POST /api/packages/apply — стрим', () => {
-  it('успех: пароль только в stdin (не в команде), чанки в теле, завершение по close', async () => {
+describe('POST /api/packages/apply — the stream', () => {
+  it('success: the password only in stdin (not in the command), chunks in the body, completion by close', async () => {
     FakeClient.execRouter = aptRouter({ probe: null });
     const res = await apply('p-2', { sudoPassword: 's3cret-pass' });
     expect(res.status).toBe(200);
@@ -211,20 +211,20 @@ describe('POST /api/packages/apply — стрим', () => {
     const client = FakeClient.instances.at(-1);
     const applyCh = client?.channels.at(-1);
     expect(applyCh).toBeDefined();
-    // Пароль ушёл первой строкой stdin, в командную строку — нет.
+    // The password went as the first stdin line, not into the command line.
     expect(applyCh!.stdinWritten).toBe('s3cret-pass\n');
     expect(applyCh!.endCalls).toBe(1);
     applyCh!.emit('close', 0);
     const text = await res.text();
     expect(text).toContain('Reading package lists...');
-    // После settle слот свободен.
+    // After settle the slot is free.
     const next = await apply('p-2', {});
     expect(next.status).toBe(200);
     FakeClient.instances.at(-1)?.channels.at(-1)?.emit('close', 0);
     await next.text();
   });
 
-  it('неверный пароль → 400 (зонд до стрима: канал применения не открывался)', async () => {
+  it('a wrong password → 400 (the probe before the stream: the apply channel never opened)', async () => {
     const commands: string[] = [];
     FakeClient.execRouter = (cmd, ch) => {
       commands.push(cmd);
@@ -238,11 +238,11 @@ describe('POST /api/packages/apply — стрим', () => {
     };
     const res = await apply('p-3', { sudoPassword: 'bad' });
     expect(res.status).toBe(400);
-    // Детект + зонд отработали, команда применения не запускалась.
+    // Detect + probe ran, the apply command never started.
     expect(commands.some((c) => c.includes('apt-get -y upgrade'))).toBe(false);
   });
 
-  it('четвёртый одновременный стрим — 429', async () => {
+  it('the fourth concurrent stream — 429', async () => {
     FakeClient.execRouter = aptRouter();
     const held: Array<{ controller: AbortController; res: Response }> = [];
     for (let i = 0; i < 3; i++) {
@@ -257,7 +257,7 @@ describe('POST /api/packages/apply — стрим', () => {
     for (const h of held) h.controller.abort();
   });
 
-  it('req close снимает слот: после обрыва стрима доступен снова', async () => {
+  it('req close releases the slot: after a dropped stream it is available again', async () => {
     FakeClient.execRouter = aptRouter();
     const controller = new AbortController();
     const first = await apply('p-5', {});
@@ -270,7 +270,7 @@ describe('POST /api/packages/apply — стрим', () => {
     await second.text();
   });
 
-  it('settle handle.code снимает слот: завершение канала освобождает доступ', async () => {
+  it('the settled handle.code releases the slot: the channel completion frees access', async () => {
     FakeClient.execRouter = aptRouter();
     const first = await apply('p-1', {});
     expect(first.status).toBe(200);
@@ -284,17 +284,17 @@ describe('POST /api/packages/apply — стрим', () => {
     await second.text();
   });
 
-  it('settle инвалидирует кэш снимка: следующий GET /updates исполняет exec заново', async () => {
+  it('settle invalidates the snapshot cache: the next GET /updates runs the exec again', async () => {
     FakeClient.execRouter = aptRouter();
     await fetch(updatesUrl('p-2'));
     const before = FakeClient.instances.reduce((n, c) => n + c.channels.length, 0);
-    // Применение до конца.
+    // The apply runs to the end.
     const res = await apply('p-2', {});
     expect(res.status).toBe(200);
     FakeClient.instances.at(-1)?.channels.at(-1)?.emit('close', 0);
     await res.text();
     await fetch(updatesUrl('p-2'));
     const after = FakeClient.instances.reduce((n, c) => n + c.channels.length, 0);
-    expect(after).toBeGreaterThan(before); // кэш сброшен — детект+снимок исполнены снова
+    expect(after).toBeGreaterThan(before); // the cache was reset — detect+snapshot ran again
   });
 });

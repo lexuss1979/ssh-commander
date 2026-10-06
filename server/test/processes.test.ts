@@ -36,29 +36,29 @@ function result(code: number | null, message: string): ExecResult {
 // ---------------------------------------------------------------------------
 
 describe('parsePid', () => {
-  it('валидные pid: 2..4194304', () => {
+  it('valid pids: 2..4194304', () => {
     expect(parsePid('2')).toBe(2);
     expect(parsePid('1234')).toBe(1234);
     expect(parsePid('4194304')).toBe(4194304);
   });
 
-  it('запрещены 0, 1 (kill -0/-1 — группы/широковещание)', () => {
+  it('0 and 1 are rejected (kill -0/-1 — process groups/broadcast)', () => {
     expect(parsePid('0')).toBeNull();
     expect(parsePid('1')).toBeNull();
   });
 
-  it('отрицательные, дробные, экспонента — мимо', () => {
+  it('negatives, fractions, exponent — out', () => {
     expect(parsePid('-1')).toBeNull();
     expect(parsePid('1.5')).toBeNull();
     expect(parsePid('1e3')).toBeNull();
   });
 
-  it('ведущие нули и пробелы — мимо (каноничность)', () => {
+  it('leading zeros and spaces — out (canonicity)', () => {
     expect(parsePid('007')).toBeNull();
     expect(parsePid(' 12')).toBeNull();
   });
 
-  it('нечисловое, пустое, мусор сверх pid_max — мимо', () => {
+  it('non-numeric, empty, garbage beyond pid_max — out', () => {
     expect(parsePid('abc')).toBeNull();
     expect(parsePid('')).toBeNull();
     expect(parsePid('4194305')).toBeNull();
@@ -67,34 +67,34 @@ describe('parsePid', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Whitelist сигналов и диапазон nice (zod-схемы роута)
+// The signal whitelist and the nice range (the route zod schemas)
 // ---------------------------------------------------------------------------
 
-describe('валидация сигнала (signalSchema)', () => {
-  it('TERM/KILL/HUP принимаются', () => {
+describe('signal validation (signalSchema)', () => {
+  it('TERM/KILL/HUP are accepted', () => {
     for (const signal of PROCESS_SIGNALS) {
       expect(signalSchema.safeParse({ signal }).success).toBe(true);
     }
   });
 
-  it('SIGKILL, 9, kill, пустое — мимо', () => {
+  it('SIGKILL, 9, kill, empty — out', () => {
     for (const signal of ['SIGKILL', '9', 'kill', '']) {
       expect(signalSchema.safeParse({ signal }).success).toBe(false);
     }
   });
 
-  it('константа — ровно whitelist', () => {
+  it('the constant is exactly the whitelist', () => {
     expect(PROCESS_SIGNALS).toEqual(['TERM', 'KILL', 'HUP']);
   });
 });
 
-describe('валидация nice (reniceSchema)', () => {
-  it('−20 и 19 принимаются', () => {
+describe('nice validation (reniceSchema)', () => {
+  it('−20 and 19 are accepted', () => {
     expect(reniceSchema.safeParse({ nice: NICE_MIN }).success).toBe(true);
     expect(reniceSchema.safeParse({ nice: NICE_MAX }).success).toBe(true);
   });
 
-  it('−21, 20, дробное, NaN — мимо', () => {
+  it('−21, 20, a fraction, NaN — out', () => {
     expect(reniceSchema.safeParse({ nice: NICE_MIN - 1 }).success).toBe(false);
     expect(reniceSchema.safeParse({ nice: NICE_MAX + 1 }).success).toBe(false);
     expect(reniceSchema.safeParse({ nice: 1.5 }).success).toBe(false);
@@ -103,26 +103,26 @@ describe('валидация nice (reniceSchema)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Сборка команд
+// Command builders
 // ---------------------------------------------------------------------------
 
-describe('сборка команд', () => {
-  it('kill: `kill -<sig> <pid>` без -- (builtin login-shell)', () => {
+describe('command builders', () => {
+  it('kill: `kill -<sig> <pid>` without -- (the login-shell builtin)', () => {
     expect(killCommand('TERM', 1234)).toBe('kill -TERM 1234');
     expect(killCommand('KILL', 2)).toBe('kill -KILL 2');
   });
 
-  it('sudo-форма kill: sudo -S -p \'\' -- kill -<sig> <pid> без sh -c', () => {
+  it('the sudo form of kill: sudo -S -p \'\' -- kill -<sig> <pid> without sh -c', () => {
     expect(sudoKillCommand('TERM', 1234)).toBe("sudo -S -p '' -- kill -TERM 1234");
   });
 
-  it('renice: отрицательный nice — законное значение опции -n', () => {
+  it('renice: a negative nice is a legitimate value of the -n option', () => {
     expect(reniceCommand(5, 1234)).toBe('renice -n 5 -p 1234');
     expect(reniceCommand(-5, 1234)).toBe('renice -n -5 -p 1234');
     expect(reniceCommand(-20, 2)).toBe('renice -n -20 -p 2');
   });
 
-  it('sudo-форма renice', () => {
+  it('the sudo form of renice', () => {
     expect(sudoReniceCommand(-5, 1234)).toBe("sudo -S -p '' -- renice -n -5 -p 1234");
   });
 });
@@ -132,11 +132,11 @@ describe('сборка команд', () => {
 // ---------------------------------------------------------------------------
 
 describe('classifyProcessActionFailure', () => {
-  it('код 0 → ok', () => {
+  it('code 0 → ok', () => {
     expect(classifyProcessActionFailure(result(0, ''))).toBe('ok');
   });
 
-  it('EPERM (util-linux и builtin bash) → sudo-needed', () => {
+  it('EPERM (util-linux and the bash builtin) → sudo-needed', () => {
     expect(classifyProcessActionFailure(result(1, 'kill: (1234) - Operation not permitted'))).toBe('sudo-needed');
     expect(
       classifyProcessActionFailure(result(1, 'bash: line 1: kill: (1234) - Operation not permitted')),
@@ -149,25 +149,25 @@ describe('classifyProcessActionFailure', () => {
     ).toBe('sudo-needed');
   });
 
-  it('No such process (kill и renice) → gone', () => {
+  it('No such process (kill and renice) → gone', () => {
     expect(classifyProcessActionFailure(result(1, 'kill: (1234) - No such process'))).toBe('gone');
     expect(
       classifyProcessActionFailure(result(1, 'renice: failed to set niceness for process 1234: No such process')),
     ).toBe('gone');
   });
 
-  it('утилиты нет (sh и sudo) → no-tool', () => {
+  it('the utility is missing (sh and sudo) → no-tool', () => {
     expect(classifyProcessActionFailure(result(127, 'sh: renice: command not found'))).toBe('no-tool');
     expect(classifyProcessActionFailure(result(127, 'sudo: renice: command not found'))).toBe('no-tool');
   });
 
-  it('мусор → transport', () => {
+  it('garbage → transport', () => {
     expect(classifyProcessActionFailure(result(255, 'connection reset'))).toBe('transport');
   });
 });
 
 // ---------------------------------------------------------------------------
-// runProcessSignal / runProcessRenice: поток с sudo-ретраем
+// runProcessSignal / runProcessRenice: the flow with a sudo retry
 // ---------------------------------------------------------------------------
 
 interface ExecCall {
@@ -175,7 +175,7 @@ interface ExecCall {
   stdin?: string;
 }
 
-/** Мок exec: настраиваемое поведение по команде (паттерн systemd.test.ts). */
+/** Mocked exec: per-command configurable behavior (the systemd.test.ts pattern). */
 function fakeExec(router: (command: string, stdin?: string) => ExecResult) {
   const calls: ExecCall[] = [];
   const execFn: ExecFn = async (_p, command, opts) => {
@@ -188,14 +188,14 @@ function fakeExec(router: (command: string, stdin?: string) => ExecResult) {
 const PROBE = "sudo -S -p '' -- true";
 
 describe('runProcessSignal', () => {
-  it('успех без sudo: kill -TERM, output пустой', async () => {
+  it('success without sudo: kill -TERM, an empty output', async () => {
     const { calls, execFn } = fakeExec(() => result(0, ''));
     const out = await runProcessSignal(profile, 1234, 'TERM', undefined, { execFn });
     expect(out).toEqual({ ok: true, output: '' });
     expect(calls.map((c) => c.command)).toEqual(['kill -TERM 1234']);
   });
 
-  it('gone → 400 «больше не существует», без retry', async () => {
+  it('gone → 400 "no longer exists", no retry', async () => {
     const { calls, execFn } = fakeExec(() => result(1, 'kill: (1234) - No such process'));
     try {
       await runProcessSignal(profile, 1234, 'KILL', 's3cret', { execFn });
@@ -207,7 +207,7 @@ describe('runProcessSignal', () => {
     expect(calls).toHaveLength(1);
   });
 
-  it('no-tool → 400 «Команда `kill` недоступна»', async () => {
+  it('no-tool → 400 "the `kill` command is unavailable"', async () => {
     const { execFn } = fakeExec(() => result(127, 'sudo: kill: command not found'));
     try {
       await runProcessSignal(profile, 1234, 'TERM', undefined, { execFn });
@@ -218,7 +218,7 @@ describe('runProcessSignal', () => {
     }
   });
 
-  it('EPERM без пароля → 400 «укажите sudo-пароль», действие не выполняется', async () => {
+  it('EPERM without a password → 400 "specify the sudo password", the action is not run', async () => {
     const { calls, execFn } = fakeExec(() => result(1, 'kill: (1234) - Operation not permitted'));
     try {
       await runProcessSignal(profile, 1234, 'TERM', undefined, { execFn });
@@ -230,7 +230,7 @@ describe('runProcessSignal', () => {
     expect(calls).toHaveLength(1);
   });
 
-  it('EPERM + пароль → зонд ok → sudo-ретрай ok; пароль только в stdin', async () => {
+  it('EPERM + a password → a green probe → a sudo retry ok; the password only in stdin', async () => {
     const { calls, execFn } = fakeExec((command, stdin) => {
       if (command === PROBE) return result(0, '');
       if (command.startsWith('sudo ')) return result(0, '');
@@ -248,7 +248,7 @@ describe('runProcessSignal', () => {
     expect(calls.every((c) => !c.command.includes('s3cret'))).toBe(true);
   });
 
-  it('зонд «Sorry, try again» → 400 «Неверный sudo-пароль»', async () => {
+  it('the probe "Sorry, try again" → 400 "wrong sudo password"', async () => {
     const { calls, execFn } = fakeExec((command) =>
       command === PROBE ? result(1, 'Sorry, try again.') : result(1, 'kill: (1234) - Operation not permitted'),
     );
@@ -262,7 +262,7 @@ describe('runProcessSignal', () => {
     expect(calls).toHaveLength(2);
   });
 
-  it('зонд «not in the sudoers» → 400 «нет прав sudo»', async () => {
+  it('the probe "not in the sudoers" → 400 "no sudo rights"', async () => {
     const { execFn } = fakeExec((command) =>
       command === PROBE
         ? result(1, 'test is not in the sudoers file. This incident will be reported.')
@@ -277,7 +277,7 @@ describe('runProcessSignal', () => {
     }
   });
 
-  it('зонд-мусор → 502', async () => {
+  it('probe garbage → 502', async () => {
     const { execFn } = fakeExec((command) =>
       command === PROBE ? result(1, 'some odd error') : result(1, 'kill: (1234) - Operation not permitted'),
     );
@@ -289,10 +289,10 @@ describe('runProcessSignal', () => {
     }
   });
 
-  it('sudo-ретрай: утилиты нет (sudo: kill: command not found) → 400, а не 502', async () => {
-    // no-tool на plain-пути невозможен (kill — builtin login-shell);
-    // единственный путь, где промах по бинарнику реален, — sudo-ретрай,
-    // и здесь должна быть 400 «недоступна на этом сервере», а не 502.
+  it('the sudo retry: the utility is missing (sudo: kill: command not found) → 400, not 502', async () => {
+    // no-tool is impossible on the plain path (kill is a login-shell builtin);
+    // the only path where a binary miss is real is the sudo retry,
+    // and it must yield 400 "unavailable on this server", not 502.
     const { calls, execFn } = fakeExec((command) => {
       if (command === PROBE) return result(0, '');
       if (command.startsWith('sudo ')) return result(127, 'sudo: kill: command not found');
@@ -308,7 +308,7 @@ describe('runProcessSignal', () => {
     expect(calls).toHaveLength(3);
   });
 
-  it('sudo-ретрай: процесс умер за время зонда → 400 «больше не существует»', async () => {
+  it('the sudo retry: the process died during the probe → 400 "no longer exists"', async () => {
     const { execFn } = fakeExec((command) => {
       if (command === PROBE) return result(0, '');
       if (command.startsWith('sudo ')) return result(1, 'sudo: kill: (1234) - No such process');
@@ -323,7 +323,7 @@ describe('runProcessSignal', () => {
     }
   });
 
-  it('sudo-ретрай с ненулевым кодом (транспорт) → 502', async () => {
+  it('the sudo retry with a non-zero code (transport) → 502', async () => {
     const { calls, execFn } = fakeExec((command) => {
       if (command === PROBE) return result(0, '');
       if (command.startsWith('sudo ')) return result(255, 'connection reset');
@@ -340,14 +340,14 @@ describe('runProcessSignal', () => {
 });
 
 describe('runProcessRenice', () => {
-  it('успех своего процесса (+5, без sudo): вывод renice в output', async () => {
+  it('success on an own process (+5, no sudo): the renice output lands in output', async () => {
     const { calls, execFn } = fakeExec(() => result(0, '1234: old priority 0, new priority 5'));
     const out = await runProcessRenice(profile, 1234, 5, undefined, { execFn });
     expect(out).toEqual({ ok: true, output: '1234: old priority 0, new priority 5' });
     expect(calls.map((c) => c.command)).toEqual(['renice -n 5 -p 1234']);
   });
 
-  it('понижение (−5) → EPERM → sudo-ветка с паролем', async () => {
+  it('a decrease (−5) → EPERM → the sudo branch with the password', async () => {
     const { calls, execFn } = fakeExec((command) => {
       if (command === PROBE) return result(0, '');
       if (command.startsWith('sudo ')) return result(0, '1234: old priority 0, new priority -5');
@@ -363,7 +363,7 @@ describe('runProcessRenice', () => {
     expect(calls.every((c) => !c.command.includes('s3cret'))).toBe(true);
   });
 
-  it('EPERM без пароля → 400 «укажите sudo-пароль»', async () => {
+  it('EPERM without a password → 400 "specify the sudo password"', async () => {
     const { execFn } = fakeExec(() => result(1, 'renice: failed to set niceness for process 1234: Permission denied'));
     try {
       await runProcessRenice(profile, 1234, -5, undefined, { execFn });
@@ -374,7 +374,7 @@ describe('runProcessRenice', () => {
     }
   });
 
-  it('нет renice (BusyBox) → 400, а не 502', async () => {
+  it('no renice (BusyBox) → 400, not 502', async () => {
     const { execFn } = fakeExec(() => result(127, 'sh: renice: command not found'));
     try {
       await runProcessRenice(profile, 1234, 5, undefined, { execFn });

@@ -5,14 +5,14 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-// Страница «Настройки» (эпик 23, docs/settings-model-plan.md): GET отдаёт
-// маскированный AI-статус (ключ — только фактом «задан»), PUT — смена пароля
-// парой и замена/очистка AI-конфига. Оба роута под requireAuth. config/
-// settings/auth читают env при загрузке модуля — свежие модули (паттерн
-// setup-route.test.ts).
+// The "Settings" page (epic 23, docs/settings-model-plan.md): GET returns the
+// masked AI status (the key only as the fact of being set), PUT — a password
+// change as a pair and a replacement/clearing of the AI config. Both routes are
+// behind requireAuth. config/settings/auth read the env at module load — fresh
+// modules (the setup-route.test.ts pattern).
 const dataDir = mkdtempSync(path.join(tmpdir(), 'sc-settings-route-'));
 process.env.DATA_DIR = dataDir;
-// searchAvailable должен определяться провайдером, без env-оверрайда.
+// searchAvailable must be derived from the provider, without the env override.
 delete process.env.AI_SEARCH_API_BASE;
 
 let base = '';
@@ -54,8 +54,8 @@ afterAll(async () => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-// cookie подставляется в момент вызова (переменная заполняется в beforeAll),
-// явное `cookie: ''` — сценарий без сессии.
+// The cookie is substituted at call time (the variable is filled in beforeAll),
+// an explicit `cookie: ''` is the no-session scenario.
 function get(headers: Record<string, string> = {}): Promise<Response> {
   return fetch(base, { headers: { cookie, ...headers } });
 }
@@ -82,18 +82,18 @@ function onDisk(): Record<string, unknown> {
 }
 
 describe('requireAuth', () => {
-  it('GET без cookie → 401', async () => {
+  it('GET without a cookie → 401', async () => {
     expect((await get(noCookie)).status).toBe(401);
   });
 
-  it('PUT без cookie → 401', async () => {
+  it('PUT without a cookie → 401', async () => {
     expect((await put({ newPassword: 'whatever-123' }, noCookie)).status).toBe(401);
   });
 });
 
 describe('GET /api/settings', () => {
-  it('маскированный статус: ключ не утекает, только apiKeySet; поиск DeepSeek включён', async () => {
-    // Явный сид: тесты не зависят от порядка (второй GET меняет провайдера).
+  it('the masked status: the key does not leak, only apiKeySet; the DeepSeek search is enabled', async () => {
+    // An explicit seed: the tests do not depend on the order (the second GET changes the provider).
     settings.saveSettings({
       passwordHash: settings.hashPassword(PASSWORD),
       aiProvider: 'deepseek',
@@ -114,8 +114,8 @@ describe('GET /api/settings', () => {
     expect(JSON.stringify(body)).not.toContain('super-secret-key');
   });
 
-  it('searchAvailable: у не-DeepSeek без env AI_SEARCH_API_BASE → false', async () => {
-    // Хеш пароля не трогаем — дальше его проверяют PUT-тесты.
+  it('searchAvailable: non-DeepSeek without the AI_SEARCH_API_BASE env → false', async () => {
+    // The password hash is untouched — the PUT tests below check it.
     settings.saveSettings({
       ...settings.getSettings()!,
       aiProvider: 'custom',
@@ -130,9 +130,9 @@ describe('GET /api/settings', () => {
   });
 });
 
-describe('PUT /api/settings — смена пароля', () => {
-  // Явный сид: предыдущий describe менял провайдера, тесты ниже проверяют
-  // и мерж AI-полей.
+describe('PUT /api/settings — password change', () => {
+  // An explicit seed: the previous describe changed the provider, the tests
+  // below also check the AI-field merge.
   beforeAll(() => {
     settings.saveSettings({
       passwordHash: settings.hashPassword(PASSWORD),
@@ -143,7 +143,7 @@ describe('PUT /api/settings — смена пароля', () => {
     });
   });
 
-  it('верный текущий → 200, хеш заменён, AI-поля сохранены (мерж), сессия жива', async () => {
+  it('a correct current password → 200, the hash replaced, the AI fields kept (merge), the session alive', async () => {
     const res = await put(
       { currentPassword: PASSWORD, newPassword: 'brand-new-pass-1' },
     );
@@ -153,11 +153,11 @@ describe('PUT /api/settings — смена пароля', () => {
     expect(settings.verifyPassword('brand-new-pass-1')).toBe(true);
     expect(settings.verifyPassword(PASSWORD)).toBe(false);
     expect(onDisk().aiApiKey).toBe('super-secret-key');
-    // Сессии не инвалидируются: cookie, выданная до смены, продолжает работать.
+    // Sessions are not invalidated: a cookie issued before the change keeps working.
     expect(auth.hasSession(cookie.split('=')[1])).toBe(true);
   });
 
-  it('неверный текущий → 400, пароль не изменился', async () => {
+  it('a wrong current password → 400, the password unchanged', async () => {
     const res = await put({ currentPassword: 'totally-wrong', newPassword: 'never-set-99' });
     expect(res.status).toBe(400);
     expect(await errorOf(res)).toBe('Неверный текущий пароль');
@@ -165,13 +165,13 @@ describe('PUT /api/settings — смена пароля', () => {
     expect(settings.verifyPassword('never-set-99')).toBe(false);
   });
 
-  it('короткий новый пароль → 400', async () => {
+  it('a short new password → 400', async () => {
     const res = await put({ currentPassword: 'brand-new-pass-1', newPassword: 'short' });
     expect(res.status).toBe(400);
     expect(await errorOf(res)).toContain('8 символов');
   });
 
-  it('перевод строки в новом пароле → 400', async () => {
+  it('a newline in the new password → 400', async () => {
     const res = await put(
       { currentPassword: 'brand-new-pass-1', newPassword: '12345678\n' },
     );
@@ -179,21 +179,21 @@ describe('PUT /api/settings — смена пароля', () => {
     expect(await errorOf(res)).toContain('перевод строки');
   });
 
-  it('только newPassword без текущего → 400 (пароль идёт парой)', async () => {
+  it('only newPassword without the current one → 400 (the password goes as a pair)', async () => {
     const res = await put({ newPassword: 'lonely-pass-123' });
     expect(res.status).toBe(400);
     expect(await errorOf(res)).toContain('парой');
   });
 
-  it('только currentPassword без нового → 400', async () => {
+  it('only currentPassword without the new one → 400', async () => {
     const res = await put({ currentPassword: 'brand-new-pass-1' });
     expect(res.status).toBe(400);
     expect(await errorOf(res)).toContain('парой');
   });
 });
 
-describe('PUT /api/settings — AI-конфиг', () => {
-  it('смена только модели сохраняет ключ, провайдера, адрес и пароль', async () => {
+describe('PUT /api/settings — AI config', () => {
+  it('a model-only change keeps the key, provider, base and password', async () => {
     const before = onDisk();
     const res = await put({ aiModel: 'updated-model' });
     expect(res.status).toBe(200);
@@ -204,7 +204,7 @@ describe('PUT /api/settings — AI-конфиг', () => {
     expect(text).not.toContain('aiApiKey');
   });
 
-  it('смена модели Go через прокси сохраняет его адрес и ключ', async () => {
+  it('a Go model change via a proxy keeps its base and key', async () => {
     await put({ aiApiKey: 'go-proxy-key', aiProvider: 'opencode-go', aiApiBase: 'https://proxy.example/v1', aiModel: 'glm-5.3-flash' });
     const before = onDisk();
     const res = await put({ aiModel: 'gpt-6-luna' });
@@ -212,13 +212,13 @@ describe('PUT /api/settings — AI-конфиг', () => {
     expect(onDisk()).toEqual({ ...before, aiModel: 'gpt-6-luna' });
   });
 
-  it.each(['', '   ', 'bad model'])('некорректная модель %s не изменяет сохранённый ключ', async (aiModel) => {
+  it.each(['', '   ', 'bad model'])('an invalid model %s does not change the saved key', async (aiModel) => {
     const before = onDisk();
     expect((await put({ aiModel })).status).toBe(400);
     expect(onDisk()).toEqual(before);
   });
 
-  it('пресет OpenCode Go сохраняется и читается без раскрытия ключа и автоматического поиска', async () => {
+  it('the OpenCode Go preset is saved and read without leaking the key or enabling the search', async () => {
     const res = await put({
       aiApiKey: 'go-secret-key', aiProvider: 'opencode-go',
       aiApiBase: 'https://opencode.ai/zen/go/v1/', aiModel: 'glm-5.3-flash',
@@ -233,7 +233,7 @@ describe('PUT /api/settings — AI-конфиг', () => {
     expect(onDisk()).toMatchObject({ aiProvider: 'opencode-go', aiApiKey: 'go-secret-key' });
   });
 
-  it('замена целиком → все четыре поля на диске, хвостовой / срезан, ключ trim', async () => {
+  it('a full replacement → all four fields on disk, the trailing / trimmed, the key trimmed', async () => {
     const res = await put(
       {
         aiApiKey: 'sk-replacement ',
@@ -254,19 +254,19 @@ describe('PUT /api/settings — AI-конфиг', () => {
     expect(onDisk().aiApiKey).toBe('sk-replacement');
   });
 
-  it('частичный AI-патч (без модели) → 400', async () => {
+  it('a partial AI patch (without the model) → 400', async () => {
     const res = await put({ aiApiKey: 'sk-x', aiProvider: 'deepseek', aiApiBase: 'https://api.deepseek.com/v1' });
     expect(res.status).toBe(400);
     expect(await errorOf(res)).toContain('Модель');
   });
 
-  it('одно AI-поле без ключа → 400', async () => {
+  it('a single AI field without the key → 400', async () => {
     const res = await put({ aiProvider: 'deepseek' });
     expect(res.status).toBe(400);
     expect(await errorOf(res)).toContain('Ключ API');
   });
 
-  it('ключ с пробелом → 400', async () => {
+  it('a key with a space → 400', async () => {
     const res = await put(
       { aiApiKey: 'sk bad', aiProvider: 'deepseek', aiApiBase: 'https://api.deepseek.com/v1', aiModel: 'm' },
     );
@@ -274,7 +274,7 @@ describe('PUT /api/settings — AI-конфиг', () => {
     expect(await errorOf(res)).toContain('пробелы');
   });
 
-  it('aiApiKey: null → AI-поля удалены, apiKeySet: false, пароль сохранён', async () => {
+  it('aiApiKey: null → the AI fields removed, apiKeySet: false, the password kept', async () => {
     const res = await put({ aiApiKey: null });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ai: Record<string, unknown> };
@@ -291,13 +291,13 @@ describe('PUT /api/settings — AI-конфиг', () => {
     expect(disk.passwordHash).toMatch(/^scrypt\$/);
   });
 
-  it('aiApiKey: null вместе с другими AI-полями → 400', async () => {
+  it('aiApiKey: null together with other AI fields → 400', async () => {
     const res = await put({ aiApiKey: null, aiProvider: 'deepseek' });
     expect(res.status).toBe(400);
     expect(await errorOf(res)).toContain('очистке');
   });
 
-  it('смена модели без настроенного ключа → 400 и настройки не меняются', async () => {
+  it('a model change without a configured key → 400 and the settings unchanged', async () => {
     const before = onDisk();
     const res = await put({ aiModel: 'gpt-6-luna' });
     expect(res.status).toBe(400);
@@ -305,7 +305,7 @@ describe('PUT /api/settings — AI-конфиг', () => {
     expect(onDisk()).toEqual(before);
   });
 
-  it('пустое тело {} → 400', async () => {
+  it('an empty {} body → 400', async () => {
     const res = await put({});
     expect(res.status).toBe(400);
   });

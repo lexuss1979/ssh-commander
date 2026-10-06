@@ -11,9 +11,9 @@ import {
 
 const openShellMock = vi.mocked(openShell);
 
-// Реестр shells, созданных моком openShell: тестам нужен доступ к каналу
-// (эмит 'close' = выход из shell). vi.hoisted — фабрика vi.mock поднимается
-// выше обычных объявлений и не может замыкаться на внешние переменные.
+// Registry of shells created by the openShell mock: tests need access to the
+// channel (emitting 'close' = shell exit). vi.hoisted — the vi.mock factory is
+// hoisted above regular declarations and cannot close over outer variables.
 const h = vi.hoisted(() => {
   interface Handler {
     (...args: unknown[]): void;
@@ -42,8 +42,8 @@ vi.mock('../src/ssh/manager.js', () => ({
       write: () => {},
       resize: () => {},
       destroy: () => {
-        // Как у ssh2: channel.close() в итоге даёт событие 'close' канала —
-        // ревью №4: рестарт/ws-close гоняют именно этот путь.
+        // Like ssh2: channel.close() eventually raises the channel 'close' event —
+        // review #4: restart/ws-close exercise exactly this path.
         shell.channel.emit('close');
       },
     };
@@ -55,10 +55,10 @@ vi.mock('../src/ssh/manager.js', () => ({
 
 type SentFrame = { type: string; data?: string };
 
-/** Фейковый WebSocket: пишет sent/close-вызовы, раздаёт события. */
+/** Fake WebSocket: records sent/close calls, dispatches events. */
 class FakeWs {
-  // broadcast в ws/terminal.ts сверяет readyState со статикой ws.OPEN,
-  // доступной и через инстанс, — фейк повторяет это свойство.
+  // broadcast in ws/terminal.ts compares readyState with the static ws.OPEN,
+  // also reachable through the instance — the fake mirrors that property.
   readonly OPEN = 1;
   readyState = 1;
   sent: SentFrame[] = [];
@@ -85,7 +85,7 @@ class FakeWs {
     for (const fn of [...(this.listeners.get(event) ?? [])]) fn();
   }
 
-  /** Клиентский фрейм (как term.onData / кнопки тулбара). */
+  /** A client frame (like term.onData / toolbar buttons). */
   message(msg: unknown): void {
     for (const fn of this.listeners.get('message') ?? []) fn(JSON.stringify(msg));
   }
@@ -116,8 +116,8 @@ function attach(
   );
 }
 
-// attach() запускает spawn асинхронно; макротаска достаточна, чтобы openShell
-// резолвнулся и обработчики канала встали.
+// attach() starts the spawn asynchronously; a macrotask is enough for openShell
+// to resolve and the channel handlers to be in place.
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 async function openSession(
@@ -131,31 +131,31 @@ async function openSession(
 }
 
 describe('sessionKey', () => {
-  it('включает container и tabId, дефолты — host::0', () => {
+  it('includes container and tabId, defaults are host::0', () => {
     expect(sessionKey('p1')).toBe('p1::host::0');
     expect(sessionKey('p1', undefined, 3)).toBe('p1::host::3');
     expect(sessionKey('p1', 'abc', 2)).toBe('p1::abc::2');
   });
 
-  it('различает вкладки одного контейнера и host-вкладки', () => {
+  it('distinguishes tabs of one container from host tabs', () => {
     expect(sessionKey('p1', 'abc', 1)).not.toBe(sessionKey('p1', 'abc', 2));
     expect(sessionKey('p1', undefined, 1)).not.toBe(sessionKey('p1', 'abc', 1));
   });
 });
 
 describe('parseTabId', () => {
-  it('отсутствие параметра — дефолт 0 (бесшовный деплой старого клиента)', () => {
+  it('missing parameter — default 0 (seamless deploy of the old client)', () => {
     expect(parseTabId(null)).toBe(0);
   });
 
-  it('валидные значения 0..9999', () => {
+  it('valid values 0..9999', () => {
     expect(parseTabId('0')).toBe(0);
     expect(parseTabId('7')).toBe(7);
     expect(parseTabId('9999')).toBe(9999);
     expect(parseTabId('007')).toBe(7);
   });
 
-  it('мусор — null: не-число, дробное, отрицательное, вне диапазона, пустое', () => {
+  it('garbage — null: not a number, fractional, negative, out of range, empty', () => {
     expect(parseTabId('abc')).toBeNull();
     expect(parseTabId('1.5')).toBeNull();
     expect(parseTabId('-1')).toBeNull();
@@ -167,7 +167,7 @@ describe('parseTabId', () => {
 });
 
 describe('attachTerminal: tabId', () => {
-  it('невалидный tabId — close(1008) без создания сессии', () => {
+  it('rejects garbage tabId with close(1008)', () => {
     const ws = new FakeWs();
     attach(ws, 'tp1', { tabId: 'abc' });
     expect(ws.closes).toEqual([{ code: 1008, reason: 'Invalid tabId' }]);
@@ -175,15 +175,15 @@ describe('attachTerminal: tabId', () => {
     expect(ws.sent).toEqual([]);
   });
 
-  it('без tabId — сессия с tabId 0 (старый клиент)', async () => {
+  it('without tabId — a session with tabId 0 (old client)', async () => {
     await openSession('tp2');
     const sessions = listTerminalSessions('tp2');
     expect(sessions).toEqual([{ tabId: 0, container: null, containerName: null }]);
   });
 });
 
-describe('attachTerminal: лимит', () => {
-  it('пятая новая сессия — error-фрейм + close(1013), записи нет', async () => {
+describe('attachTerminal: limit', () => {
+  it('the fifth new session — an error frame + close(1013), no record', async () => {
     const profileId = 'tl1';
     for (let i = 0; i < MAX_TERMINAL_SESSIONS_PER_PROFILE; i++) {
       await openSession(profileId, { tabId: String(i) });
@@ -198,7 +198,7 @@ describe('attachTerminal: лимит', () => {
     expect(listTerminalSessions(profileId)).toHaveLength(4);
   });
 
-  it('повторный attach к существующей сессии поверх полного лимита проходит', async () => {
+  it('re-attaching to an existing session on top of the full limit passes', async () => {
     const profileId = 'tl2';
     for (let i = 0; i < MAX_TERMINAL_SESSIONS_PER_PROFILE; i++) {
       await openSession(profileId, { tabId: String(i) });
@@ -208,11 +208,11 @@ describe('attachTerminal: лимит', () => {
     await flush();
     expect(ws.closes).toEqual([]);
     expect(ws.sentTypes()).toContain('connected');
-    // Нового канала не открылось, записей по-прежнему 4.
+    // No new channel opened, still 4 records.
     expect(listTerminalSessions(profileId)).toHaveLength(4);
   });
 
-  it('лимит на профиль — сессии другого профиля не считаются', async () => {
+  it('the limit is per profile — sessions of another profile do not count', async () => {
     for (let i = 0; i < MAX_TERMINAL_SESSIONS_PER_PROFILE; i++) {
       await openSession('tl3a', { tabId: String(i) });
     }
@@ -222,26 +222,26 @@ describe('attachTerminal: лимит', () => {
   });
 });
 
-describe('жизненный цикл записи', () => {
-  it('exit внутри shell удаляет запись и освобождает слот', async () => {
+describe('record lifecycle', () => {
+  it('exit inside the shell removes the record and frees the slot', async () => {
     const profileId = 'tc1';
     const firstIdx = h.shells.length;
     const ws = await openSession(profileId, { tabId: '5' });
     expect(listTerminalSessions(profileId)).toHaveLength(1);
 
     h.shells[firstIdx].channel.emit('close');
-    // Сервер закрыл аттачменты (1011), запись исчезла из реестра.
+    // The server closed the attachments (1011), the record vanished from the registry.
     expect(ws.closes).toEqual([{ code: 1011, reason: 'Terminal session closed' }]);
     expect(listTerminalSessions(profileId)).toEqual([]);
 
-    // Тот же tabId поднимает свежую сессию — слот свободен.
+    // The same tabId raises a fresh session — the slot is free.
     const ws2 = await openSession(profileId, { tabId: '5' });
     expect(ws2.sentTypes()).toContain('connected');
     expect(listTerminalSessions(profileId)).toHaveLength(1);
     expect(h.shells.length).toBe(firstIdx + 2);
   });
 
-  it('WS-сообщение close → destroy → слот освободился', async () => {
+  it('a WS close message → destroy → the slot is freed', async () => {
     const profileId = 'tc2';
     for (let i = 0; i < MAX_TERMINAL_SESSIONS_PER_PROFILE; i++) {
       await openSession(profileId, { tabId: String(i) });
@@ -257,32 +257,32 @@ describe('жизненный цикл записи', () => {
     expect(listTerminalSessions(profileId)).toHaveLength(4);
   });
 
-  it('отказ spawn удаляет запись и не занимает слот (ревью №1)', async () => {
+  it('spawn failure removes the record and does not occupy a slot (review #1)', async () => {
     const profileId = 'tc4';
     openShellMock.mockRejectedValueOnce(new Error('SSH connect fail'));
     const ws = new FakeWs();
     attach(ws, profileId, { tabId: '1' });
     await flush();
     expect(ws.sentTypes()).toContain('error');
-    // Записи-призрака нет: ни в списке, ни в мапе (слот свободен).
+    // No ghost record: neither in the list nor in the map (the slot is free).
     expect(listTerminalSessions(profileId)).toEqual([]);
-    // Повторный attach тем же tabId создаёт свежую запись, не муторясь
-    // с протухшей.
+    // Re-attaching with the same tabId creates a fresh record instead of
+    // struggling with the stale one.
     const ws2 = await openSession(profileId, { tabId: '1' });
     expect(ws2.sentTypes()).toContain('connected');
     expect(listTerminalSessions(profileId)).toHaveLength(1);
     ws2.message({ type: 'close' });
   });
 
-  it('restart переживает close старого канала: запись жива, канал пересоздан', async () => {
+  it('restart survives the old channel close: the record is alive, the channel is recreated', async () => {
     const profileId = 'tc5';
     const firstIdx = h.shells.length;
     const ws = await openSession(profileId, { tabId: '3' });
     ws.message({ type: 'restart' });
     await flush();
-    // restart обнуляет this.shell ДО destroy старого канала — guard в
-    // обработчике close не даёт удалить запись: «Обновить сессию» держит её
-    // для нового shell (фиксация инварианта, ревью №4).
+    // restart nulls this.shell BEFORE destroying the old channel — the guard in
+    // the close handler keeps the record: "Refresh session" holds it for the new
+    // shell (invariant fixed in review #4).
     expect(listTerminalSessions(profileId)).toHaveLength(1);
     expect(h.shells.length).toBe(firstIdx + 2);
     expect(ws.sentTypes()).toContain('connected');
@@ -290,39 +290,39 @@ describe('жизненный цикл записи', () => {
     expect(listTerminalSessions(profileId)).toEqual([]);
   });
 
-  it('выход из shell во время grace снимает запись сразу', async () => {
+  it('shell exit during grace removes the record immediately', async () => {
     const profileId = 'tc6';
     const firstIdx = h.shells.length;
     const ws = await openSession(profileId, { tabId: '2' });
-    ws.close(); // detach без close-фрейма → grace-таймер 60 с
+    ws.close(); // detach without a close frame → the 60 s grace timer
     expect(listTerminalSessions(profileId)).toHaveLength(1);
-    // Shell умер в grace: обработчик close снимает и таймер, и запись —
-    // повторный destroy по таймеру не срабатывает, слот свободен.
+    // The shell died during grace: the close handler clears both the timer and
+    // the record — a second destroy by the timer does not fire, the slot is free.
     h.shells[firstIdx].channel.emit('close');
     expect(listTerminalSessions(profileId)).toEqual([]);
     const ws2 = await openSession(profileId, { tabId: '2' });
     ws2.message({ type: 'close' });
   });
 
-  it('grace: detach без close-фрейма держит запись живой (shell не вышел)', async () => {
+  it('grace: a detach without a close frame keeps the record alive (the shell has not exited)', async () => {
     const profileId = 'tc3';
     const ws = await openSession(profileId);
-    ws.close(); // клиент отвалился без close-фрейма — сессия в grace 60 c
+    ws.close(); // the client dropped without a close frame — the session is in 60 s grace
     expect(listTerminalSessions(profileId)).toHaveLength(1);
-    // Повторное подключение той же вкладки переиспользует shell.
+    // Re-attaching the same tab reuses the shell.
     const ws2 = new FakeWs();
     attach(ws2, profileId);
     await flush();
     expect(ws2.sentTypes()).toContain('connected');
     expect(listTerminalSessions(profileId)).toHaveLength(1);
-    // Явное закрытие вкладки гасит grace-таймер (не держит event loop теста).
+    // Closing the tab explicitly cancels the grace timer (does not hold the test event loop).
     ws2.message({ type: 'close' });
     expect(listTerminalSessions(profileId)).toEqual([]);
   });
 });
 
 describe('listTerminalSessions', () => {
-  it('поля tabId/container/containerName, фильтр по профилю', async () => {
+  it('tabId/container/containerName fields, filter by profile', async () => {
     await openSession('tls-a', { tabId: '2' });
     await openSession('tls-a', { tabId: '3', container: 'abc123', containerName: 'web-1' });
     await openSession('tls-b', { tabId: '0' });
@@ -336,7 +336,7 @@ describe('listTerminalSessions', () => {
     ]);
   });
 
-  it('containerName обрезается до 200 символов', async () => {
+  it('containerName is truncated to 200 characters', async () => {
     await openSession('tls-c', { tabId: '1', container: 'c1', containerName: 'x'.repeat(300) });
     const [info] = listTerminalSessions('tls-c');
     expect(info?.containerName).toHaveLength(200);

@@ -26,8 +26,8 @@ writeFileSync(
   }),
 );
 
-// Follow docker-логов ходит через streamContainerLogs → execStream →
-// ssh2.Client (фейк в helpers/fake-ssh2.ts).
+// The docker log follow goes through streamContainerLogs → execStream →
+// ssh2.Client (the fake in helpers/fake-ssh2.ts).
 vi.mock('ssh2', () => ({ Client: FakeClient }));
 
 const express = (await import('express')).default;
@@ -83,7 +83,7 @@ function tailUrl(): string {
 }
 
 describe('GET /api/docker/containers/:id/logs', () => {
-  it('снимок (без stream) — text/plain, слот не занимается', async () => {
+  it('a snapshot (no stream) — text/plain, no slot taken', async () => {
     FakeClient.autoCloseNext = true;
     const res = await fetch(dockerLogsUrl(false));
     expect(res.status).toBe(200);
@@ -91,7 +91,7 @@ describe('GET /api/docker/containers/:id/logs', () => {
     expect(await res.text()).toContain('snapshot line 1');
   });
 
-  it('follow-стрим занимает слот: четвёртый docker-стрим — 429', async () => {
+  it('a follow stream takes a slot: the fourth docker stream — 429', async () => {
     const held: AbortController[] = [];
     for (let i = 0; i < 3; i++) {
       const controller = new AbortController();
@@ -105,7 +105,7 @@ describe('GET /api/docker/containers/:id/logs', () => {
     for (const c of held) c.abort();
   });
 
-  it('лимит общий с tail: 2 docker + 1 tail, четвёртый (tail) — 429', async () => {
+  it('the limit is shared with tail: 2 docker + 1 tail, the fourth (tail) — 429', async () => {
     const held: AbortController[] = [];
     for (let i = 0; i < 2; i++) {
       const controller = new AbortController();
@@ -117,7 +117,7 @@ describe('GET /api/docker/containers/:id/logs', () => {
     held.push(tailController);
     const tail = await fetch(tailUrl(), { signal: tailController.signal });
     expect(tail.status).toBe(200);
-    // Слоты исчерпаны суммарно — отказ получает и tail, и docker-follow.
+    // The slots are exhausted in total — both tail and docker-follow get the rejection.
     const tailRejected = await fetch(tailUrl());
     expect(tailRejected.status).toBe(429);
     const dockerRejected = await fetch(dockerLogsUrl(true));
@@ -125,7 +125,7 @@ describe('GET /api/docker/containers/:id/logs', () => {
     for (const c of held) c.abort();
   });
 
-  it('req close снимает слот: после обрыва docker-стрима доступен снова', async () => {
+  it('req close releases the slot: after a dropped docker stream it is available again', async () => {
     const controller = new AbortController();
     const first = await fetch(dockerLogsUrl(true), { signal: controller.signal });
     expect(first.status).toBe(200);

@@ -78,14 +78,14 @@ describe('psqlArgs / buildQueryCommand (postgres)', () => {
   });
 
   it('IFS= and -r guard spaces and backslashes in the password', () => {
-    // IFS= — не обрезать пробелы по краям, -r — не съедать бэкслеши.
+    // IFS= — do not trim the edge spaces, -r — do not eat backslashes.
     const inner = psqlArgs({ ...PG, password: ' pass\\word ' }, 'appdb')[7];
     expect(inner.startsWith('IFS= read -r PGPASSWORD; export PGPASSWORD; ')).toBe(true);
   });
 
   it('renders the full command with shq-escaped args (double escaping)', () => {
-    // Внутренние кавычки билдера переживают внешний shq; bare-аргументы
-    // psql -v/--csv — часть одного sh -c-аргумента, внешне не квотятся.
+    // The inner quotes of the builder survive the outer shq; the bare psql
+    // -v/--csv arguments are part of one sh -c argument, not quoted outwardly.
     expect(buildQueryCommand(PROFILE, PG, 'appdb')).toBe(
       "docker 'exec' '-i' '-e' 'PGOPTIONS=-c statement_timeout=115s' 'abc123' " +
       "'sh' '-c' 'IFS= read -r PGPASSWORD; export PGPASSWORD; " +
@@ -104,8 +104,8 @@ describe('psqlArgs / buildQueryCommand (postgres)', () => {
   });
 
   it('escapes quotes in username for the inner shell', () => {
-    // Имя с кавычкой не пройдёт валидацию подключения — тест фиксирует
-    // устойчивость билдера к произвольным строкам.
+    // A name with a quote would fail the connection validation — the test pins
+    // the builder resilience to arbitrary strings.
     const args = psqlArgs({ ...PG, username: "we'ird" }, 'appdb');
     expect(args[7]).toContain(`-U 'we'\\''ird'`);
   });
@@ -126,8 +126,8 @@ describe('mysqlArgs / buildQueryCommand (mysql)', () => {
   });
 
   it('empty password: no read prologue, ~/.my.cnf stays in effect', () => {
-    // Пустой MYSQL_PWD отправлял бы «using password: NO» и затирал клиентский
-    // конфиг — без пароля переменную вообще не подставляем.
+    // An empty MYSQL_PWD would send "using password: NO" and wipe the client
+    // config — without a password the variable is not set at all.
     expect(mysqlArgs({ ...MYSQL, password: '' }, 'shop')[5]).toBe(
       `exec mysql -u 'root' --batch --default-character-set=utf8mb4 'shop'`,
     );
@@ -142,12 +142,12 @@ describe('mysqlArgs / buildQueryCommand (mysql)', () => {
   });
 });
 
-describe('buildChannelStdin (пароль первой строкой)', () => {
+describe('buildChannelStdin (the password as the first line)', () => {
   it('password occupies exactly the first line, SQL follows', () => {
     const stdin = buildChannelStdin(MYSQL, 'SELECT 1;', { readOnly: true });
     const firstLineEnd = stdin.indexOf('\n');
     expect(stdin.slice(0, firstLineEnd)).toBe('mysecret');
-    // Дальше — обычный SQL-блок итерации 1 (таймаут + read-only + запрос).
+    // Then — the regular SQL block of iteration 1 (timeout + read-only + the query).
     expect(stdin.slice(firstLineEnd + 1)).toBe(
       'SET SESSION max_execution_time=115000;\nSET SESSION TRANSACTION READ ONLY;\nSELECT 1;\n',
     );
@@ -176,7 +176,7 @@ describe('buildChannelStdin (пароль первой строкой)', () => {
 
   it('mariadb flavor: timeout in seconds', () => {
     const stdin = buildChannelStdin(MARIA, 'SELECT 1;', { readOnly: false });
-    expect(stdin.startsWith('\n')).toBe(false); // пустой пароль — без пустой строки
+    expect(stdin.startsWith('\n')).toBe(false); // an empty password — no empty line
     expect(stdin).toBe('SET SESSION max_statement_time=115;\nSELECT 1;\n');
   });
 });
@@ -213,8 +213,8 @@ describe('buildStdinSql', () => {
   });
 
   it('terminator on its own line survives a trailing line comment', () => {
-    // `;` в той же строке поглотился бы комментарием и statement остался бы
-    // незавершённым.
+    // A `;` on the same line would be swallowed by the comment and the statement
+    // would stay unterminated.
     expect(buildStdinSql('postgres', 'SELECT 1 -- done', { readOnly: false })).toBe(
       'SELECT 1 -- done\n;\n',
     );
@@ -342,8 +342,8 @@ describe('unescapeMysql / parseTsvTable', () => {
   });
 
   it('NULL arrives as literal string NULL — known mysql --batch limitation', () => {
-    // Значение NULL и строка 'NULL' в batch-режиме неразличимы (эпик 12,
-    // фиксируется тестом-документацией).
+    // The NULL value and the string 'NULL' are indistinguishable in batch mode
+    // (epic 12, pinned by this documentation test).
     expect(parseTsvTable('a\tb\nNULL\tx\n').rows).toEqual([['NULL', 'x']]);
   });
 

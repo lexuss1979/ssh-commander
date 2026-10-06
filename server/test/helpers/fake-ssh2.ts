@@ -1,17 +1,17 @@
 /**
- * Общий фейк ssh2 для интеграционных тестов маршрутов (vitest + vi.mock).
- * Тестовый файл делает `vi.mock('ssh2', () => ({ Client: FakeClient }))` —
- * фабрика ленивая, маршруты импортируются динамически после неё, так что
- * классы успевают инициализироваться (в отличие от vi.hoisted, результат
- * которого нельзя экспортировать из модуля).
+ * The shared ssh2 fake for the route integration tests (vitest + vi.mock).
+ * A test file does `vi.mock('ssh2', () => ({ Client: FakeClient }))` —
+ * the factory is lazy, the routes are imported dynamically after it, so the
+ * classes have time to initialize (unlike vi.hoisted, whose result cannot be
+ * exported from a module).
  *
- * connect → async ready; exec → канал (follow держим открытым, снимок
- * авто-кормится данными и close через FakeClient.autoCloseNext); sftp →
- * stat обычного файла + readStream с текстом без NUL (precheck проходит).
+ * connect → async ready; exec → a channel (follow is kept open, a snapshot
+ * auto-feeds data and close via FakeClient.autoCloseNext); sftp → the stat of
+ * a regular file + a readStream with NUL-free text (the precheck passes).
  *
- * FakeChannel.close() НЕ эмитит 'close' — настоящий ssh2 не переэмитит
- * событие из close() (иначе exec() перезаписывает exit code после finish());
- * тесты эмитят 'close' явно, когда нужно.
+ * FakeChannel.close() does NOT emit 'close' — real ssh2 does not re-emit the
+ * event from close() (otherwise exec() overwrites the exit code after finish());
+ * the tests emit 'close' explicitly when needed.
  */
 class FakeEmitter {
   handlers = new Map<string, Array<(...args: unknown[]) => void>>();
@@ -43,7 +43,7 @@ class FakeEmitter {
 export class FakeChannel extends FakeEmitter {
   stderr = new FakeEmitter();
   closeCalls = 0;
-  /** Записанный в канал stdin (для проверок «пароль только в stdin»). */
+  /** The stdin written into the channel (for the "password only in stdin" checks). */
   stdinWritten = '';
   endCalls = 0;
   write(data: string | Buffer): void {
@@ -75,15 +75,15 @@ class FakeSftp {
 
 export class FakeClient extends FakeEmitter {
   static instances: FakeClient[] = [];
-  /** Следующий созданный клиент отдаст exec-каналу данные и close (снимок). */
+  /** The next created client feeds the exec channel data and close (a snapshot). */
   static autoCloseNext = false;
-  /** Все новые клиенты отдают exec-каналу данные и close (для мульти-профильных тестов). */
+  /** All new clients feed the exec channel data and close (for multi-profile tests). */
   static autoCloseAll = false;
   /**
-   * Командный маршрутизатор exec (для маршрутных тестов, которым нужен
-   * разный ответ по команде: детект менеджера, зонд sudo, снимок, apply).
-   * Когда задан, вызывается вместо авто-снимка; тест сам эмитит data/close.
-   * Сбрасывается в afterEach.
+   * The exec command router (for route tests that need a different answer per
+   * command: the manager detect, the sudo probe, a snapshot, apply).
+   * When set, it is called instead of the auto-snapshot; the test emits
+   * data/close itself. Reset in afterEach.
    */
   static execRouter: ((cmd: string, ch: FakeChannel) => void) | null = null;
   channels: FakeChannel[] = [];

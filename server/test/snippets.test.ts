@@ -18,7 +18,7 @@ writeFileSync(
   }),
 );
 
-// Happy-path запуск идёт через реальный getClient/exec → ssh2.Client (фейк).
+// The happy-path run goes through the real getClient/exec → ssh2.Client (fake).
 vi.mock('ssh2', () => ({ Client: FakeClient }));
 
 const store = await import('../src/services/snippets.js');
@@ -33,11 +33,11 @@ afterAll(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Стор
+// Store
 // ---------------------------------------------------------------------------
 
 describe('snippets store', () => {
-  it('round-trips a snippet, персистится атомарно (tmp+rename)', () => {
+  it('round-trips a snippet, persisted atomically (tmp+rename)', () => {
     const created = store.createSnippet(INPUT);
     expect(created).toMatchObject({
       id: expect.any(String),
@@ -56,7 +56,7 @@ describe('snippets store', () => {
       .toHaveLength(1);
   });
 
-  it('profileIds: null — все серверы, массив — выбранные; отсутствие поля = null', () => {
+  it('profileIds: null — all servers, an array — the selected ones; a missing field = null', () => {
     const scoped = store.createSnippet({ ...INPUT, profileIds: ['p1', 'p2'] });
     expect(scoped.profileIds).toEqual(['p1', 'p2']);
     const all = store.createSnippet({ ...INPUT, name: 'везде' });
@@ -65,7 +65,7 @@ describe('snippets store', () => {
     expect(store.getSnippet(all.id)?.profileIds).toBeNull();
   });
 
-  it('update полностью заменяет поля, createdAt стабилен', () => {
+  it('update fully replaces the fields, createdAt stays stable', () => {
     const s = store.createSnippet(INPUT);
     const updated = store.updateSnippet(s.id, {
       name: 'Место на диске',
@@ -84,18 +84,18 @@ describe('snippets store', () => {
     expect(store.getSnippet(s.id)).toMatchObject({ name: 'Место на диске' });
   });
 
-  it('update/delete несуществующего — ошибка', () => {
+  it('update/delete of a nonexistent snippet — an error', () => {
     expect(() => store.updateSnippet('nope', INPUT)).toThrow(/не найден/);
     expect(() => store.deleteSnippet('nope')).toThrow(/не найден/);
   });
 
-  it('delete удаляет запись', () => {
+  it('delete removes the record', () => {
     const s = store.createSnippet({ ...INPUT, name: 'на удаление' });
     store.deleteSnippet(s.id);
     expect(store.getSnippet(s.id)).toBeUndefined();
   });
 
-  it('zod-отказы: пустые name/command, переполнение лимитов', () => {
+  it('zod rejections: empty name/command, limit overflows', () => {
     expect(() => store.createSnippet({ ...INPUT, name: '' })).toThrow();
     expect(() => store.createSnippet({ ...INPUT, command: '' })).toThrow();
     expect(() => store.createSnippet({ ...INPUT, command: 'x'.repeat(10001) })).toThrow();
@@ -105,11 +105,11 @@ describe('snippets store', () => {
     expect(() => store.createSnippet({ ...INPUT, profileIds: [1 as unknown as string] })).toThrow();
   });
 
-  it('битый JSON → *.corrupt-* + отказ persist до рестарта', async () => {
+  it('broken JSON → *.corrupt-* + persist refusal until restart', async () => {
     rmSync(path.join(dataDir, 'snippets.json'), { force: true });
     writeFileSync(path.join(dataDir, 'snippets.json'), '{not json');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    // Свежий экземпляр модуля: кэш в памяти не должен маскировать битый файл.
+    // A fresh module instance: the in-memory cache must not mask the broken file.
     vi.resetModules();
     const fresh = await import('../src/services/snippets.js');
 
@@ -126,13 +126,13 @@ describe('snippets store', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Схема запуска
+// Run schema
 // ---------------------------------------------------------------------------
 
 describe('snippetRunBodySchema', () => {
   const { snippetRunBodySchema } = store;
 
-  it('XOR: оба поля или ни одного — отказ', () => {
+  it('XOR: both fields or none — rejected', () => {
     expect(snippetRunBodySchema.safeParse({
       snippetId: 'a1',
       command: 'true',
@@ -141,12 +141,12 @@ describe('snippetRunBodySchema', () => {
     expect(snippetRunBodySchema.safeParse({ profileIds: ['p1'] }).success).toBe(false);
   });
 
-  it('ровно одно поле + цели — проходит', () => {
+  it('exactly one field + targets — passes', () => {
     expect(snippetRunBodySchema.safeParse({ snippetId: 'a1', profileIds: ['p1'] }).success).toBe(true);
     expect(snippetRunBodySchema.safeParse({ command: 'uptime', profileIds: ['p1', 'p2'] }).success).toBe(true);
   });
 
-  it('profileIds: пустой или 11 — отказ; дубликаты допустимы (дедуп на роуте)', () => {
+  it('profileIds: empty or 11 — rejected; duplicates allowed (dedup on the route)', () => {
     expect(snippetRunBodySchema.safeParse({ command: 'x', profileIds: [] }).success).toBe(false);
     const ids = Array.from({ length: 11 }, (_, i) => `p${i}`);
     expect(snippetRunBodySchema.safeParse({ command: 'x', profileIds: ids }).success).toBe(false);
@@ -162,7 +162,7 @@ describe('mapRunResults', () => {
   const fulfilled = (code: number | null, stdout = '', stderr = '') =>
     ({ status: 'fulfilled', value: { code, stdout, stderr } }) as const;
 
-  it('успех: ok по коду 0, stdout/stderr/ms на месте', () => {
+  it('success: ok by code 0, stdout/stderr/ms in place', () => {
     const [r] = store.mapRunResults([{
       profileId: 'p1',
       ms: 42,
@@ -171,7 +171,7 @@ describe('mapRunResults', () => {
     expect(r).toEqual({ profileId: 'p1', ok: true, code: 0, stdout: 'out', stderr: 'warn', ms: 42, truncated: false });
   });
 
-  it('ненулевой код: ok:false, это не ошибка запроса', () => {
+  it('a non-zero code: ok:false, not a request error', () => {
     const [r] = store.mapRunResults([{
       profileId: 'p1',
       ms: 5,
@@ -181,7 +181,7 @@ describe('mapRunResults', () => {
     expect(r.error).toBeUndefined();
   });
 
-  it('транспортный отказ/таймаут: ok:false, code:null, текст ошибки', () => {
+  it('transport failure/timeout: ok:false, code:null, the error text', () => {
     const [err] = store.mapRunResults([{
       profileId: 'p1',
       ms: 120_000,
@@ -203,7 +203,7 @@ describe('mapRunResults', () => {
     expect(str.error).toBe('boom');
   });
 
-  it('вывод длиннее 100 000 символов обрезается с пометкой truncated', () => {
+  it('output longer than 100,000 characters is truncated with the truncated flag', () => {
     const big = 'x'.repeat(store.RUN_RESULT_TEXT_LIMIT + 500);
     const [r] = store.mapRunResults([{
       profileId: 'p1',
@@ -213,8 +213,8 @@ describe('mapRunResults', () => {
     expect(r.stdout).toHaveLength(store.RUN_RESULT_TEXT_LIMIT);
     expect(r.stderr).toHaveLength(store.RUN_RESULT_TEXT_LIMIT);
     expect(r.truncated).toBe(true);
-    // Внутренний кап exec в 2 МБ обрезал бы молча — серверная обрезка честно
-    // помечает и этот случай.
+    // The internal 2 MB exec cap would cut it off silently — the server-side
+    // truncation marks this case honestly too.
     const [capped] = store.mapRunResults([{
       profileId: 'p2',
       ms: 1,
@@ -225,11 +225,11 @@ describe('mapRunResults', () => {
 });
 
 // ---------------------------------------------------------------------------
-// runSnippetOnProfiles (инъекция execFn)
+// runSnippetOnProfiles (execFn injection)
 // ---------------------------------------------------------------------------
 
 describe('runSnippetOnProfiles', () => {
-  it('команда передаётся в exec как есть, параллельно на каждый профиль', async () => {
+  it('the command is passed to exec as is, in parallel for each profile', async () => {
     const calls: Array<{ profileId: string; command: string; timeoutMs?: number }> = [];
     const execFn = async (profile: { id: string }, command: string, opts: { timeoutMs?: number }) => {
       calls.push({ profileId: profile.id, command, timeoutMs: opts.timeoutMs });
@@ -240,7 +240,7 @@ describe('runSnippetOnProfiles', () => {
     });
     const results = await store.runSnippetOnProfiles('echo "hi; rm -rf /" && true', [mk('a'), mk('b')], { execFn });
 
-    // Никакого экранирования и deny-листа — уровень терминала.
+    // No escaping and no deny-list — terminal-level tool.
     expect(calls.map((c) => c.command)).toEqual(['echo "hi; rm -rf /" && true', 'echo "hi; rm -rf /" && true']);
     expect(calls.every((c) => c.timeoutMs === store.RUN_TIMEOUT_MS)).toBe(true);
     expect(results.map((r) => [r.profileId, r.ok, r.stdout])).toEqual([
@@ -250,7 +250,7 @@ describe('runSnippetOnProfiles', () => {
     expect(results.every((r) => r.ms >= 0)).toBe(true);
   });
 
-  it('отказ одного профиля не роняет остальные', async () => {
+  it('one profile failing does not bring down the others', async () => {
     const execFn = async (profile: { id: string }) => {
       if (profile.id === 'bad') throw new Error('Connection refused');
       return { code: 1, stdout: '', stderr: 'oops' };
@@ -266,22 +266,22 @@ describe('runSnippetOnProfiles', () => {
 });
 
 // ---------------------------------------------------------------------------
-// withTimeout (после выноса в util/async.ts)
+// withTimeout (after the extraction into util/async.ts)
 // ---------------------------------------------------------------------------
 
 describe('withTimeout', () => {
-  it('резолвится до дедлайна', async () => {
+  it('resolves before the deadline', async () => {
     const { withTimeout } = await import('../src/util/async.js');
     await expect(withTimeout(Promise.resolve(7), 1000, 'late')).resolves.toBe(7);
   });
 
-  it('отвергается по дедлайну с текстом, если промис молчит', async () => {
+  it('rejects at the deadline with the given text when the promise is silent', async () => {
     const { withTimeout } = await import('../src/util/async.js');
     const silent = new Promise<never>(() => undefined);
     await expect(withTimeout(silent, 20, 'Превышено время ожидания')).rejects.toThrow('Превышено время ожидания');
   });
 
-  it('пробрасывает собственную ошибку промиса раньше дедлайна', async () => {
+  it('rethrows the promise\'s own error ahead of the deadline', async () => {
     const { withTimeout } = await import('../src/util/async.js');
     const failing = new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('ssh down')), 10));
     await expect(withTimeout(failing, 5000, 'timeout')).rejects.toThrow('ssh down');
@@ -289,7 +289,7 @@ describe('withTimeout', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Маршруты (валидация до exec + happy path через фейк ssh2)
+// Routes (validation before exec + the happy path through the ssh2 fake)
 // ---------------------------------------------------------------------------
 
 describe('snippets routes', () => {
@@ -363,7 +363,7 @@ describe('snippets routes', () => {
     expect(((await neither.json()) as { error: string }).error).toContain('сниппет или команду');
   });
 
-  it('POST /run: неизвестный snippetId → 400 до любого exec', async () => {
+  it('POST /run: an unknown snippetId → 400 before any exec', async () => {
     const res = await fetch(`${base}/run`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -374,7 +374,7 @@ describe('snippets routes', () => {
     expect(FakeClient.instances).toHaveLength(0);
   });
 
-  it('POST /run: пустой список, 11 профилей, несуществующий профиль → 400', async () => {
+  it('POST /run: an empty list, 11 profiles, a nonexistent profile → 400', async () => {
     const empty = await fetch(`${base}/run`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -391,7 +391,7 @@ describe('snippets routes', () => {
     });
     expect(over.status).toBe(400);
 
-    // Дубликаты дедуплицируются (в списке отсутствующих — один раз).
+    // Duplicates are deduplicated (the missing list mentions one once).
     const missing = await fetch(`${base}/run`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -401,7 +401,7 @@ describe('snippets routes', () => {
     expect(((await missing.json()) as { error: string }).error).toBe('Профили не найдены: gone');
   });
 
-  it('POST /run: разовая команда на двух профилях — эхо команды + результаты', async () => {
+  it('POST /run: a one-shot command on two profiles — the command echo + results', async () => {
     FakeClient.autoCloseAll = true;
     const res = await fetch(`${base}/run`, {
       method: 'POST',

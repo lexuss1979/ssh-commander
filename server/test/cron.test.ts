@@ -8,7 +8,7 @@ import {
   validateCronFields,
 } from '../src/services/cron.js';
 
-// Пользовательский crontab: задачи, @keyword, env, комментарии, выключенная задача.
+// The user crontab: jobs, @keywords, env, comments, a disabled job.
 const USER_CRONTAB = `# бэкап каждую ночь
 0 3 * * * /home/user/backup.sh --full
 
@@ -21,7 +21,7 @@ PATH=/usr/local/bin:/usr/bin
 SHELL=/bin/bash
 `;
 
-// /etc/crontab: системный формат с колонкой пользователя.
+// /etc/crontab: the system format with a user column.
 const SYSTEM_CRONTAB = `# /etc/crontab: system-wide crontab
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin
@@ -171,7 +171,7 @@ describe('applyCrontabOp', () => {
     expect(next).toContain('# бэкап каждую ночь');
     expect(next).toContain('MAILTO=admin@example.com');
     expect(next.trimEnd().endsWith('0 5 * * * /bin/true')).toBe(true);
-    // исходные строки на месте
+    // the original lines are in place
     const parsed = parseCrontab(next, { system: false });
     expect(parsed.entries).toHaveLength(5);
   });

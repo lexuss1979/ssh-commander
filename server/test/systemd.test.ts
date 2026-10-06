@@ -41,7 +41,7 @@ const profile: Profile = {
 // ---------------------------------------------------------------------------
 
 describe('parseListUnits', () => {
-  it('разбирает обычный unit, имя с @, описание с пробелами (всё после 4-й колонки)', () => {
+  it('parses a regular unit, an @-name, a description with spaces (everything after the 4th column)', () => {
     const raw = [
       'nginx.service loaded active running A high performance web server and a reverse proxy server',
       'getty@tty1.service loaded active running Getty on tty1',
@@ -65,12 +65,12 @@ describe('parseListUnits', () => {
     ]);
   });
 
-  it('load=not-found остаётся строкой', () => {
+  it('load=not-found stays a string', () => {
     const units = parseListUnits('foo.service not-found inactive dead foo failed to load');
     expect(units[0]).toMatchObject({ name: 'foo.service', load: 'not-found', active: 'inactive', sub: 'dead' });
   });
 
-  it('`-` в колонках → null', () => {
+  it('`-` in columns → null', () => {
     const units = parseListUnits('cups.service - - - CUPS Scheduler');
     expect(units[0]).toMatchObject({
       name: 'cups.service',
@@ -81,11 +81,11 @@ describe('parseListUnits', () => {
     });
   });
 
-  it('пустой вывод → []', () => {
+  it('empty output → []', () => {
     expect(parseListUnits('')).toEqual([]);
   });
 
-  it('снимает bullet ● у failed-юнитов (старые сборки без --plain)', () => {
+  it('strips the ● bullet from failed units (old builds without --plain)', () => {
     const units = parseListUnits('● failedsvc.service loaded failed failed Some failed unit');
     expect(units[0]).toMatchObject({
       name: 'failedsvc.service',
@@ -96,7 +96,7 @@ describe('parseListUnits', () => {
     });
   });
 
-  it('мусорные строки отбрасываются', () => {
+  it('garbage lines are dropped', () => {
     const raw = [
       'Warning: some warning printed by systemd',
       'Failed to connect to bus: Host is down',
@@ -109,7 +109,7 @@ describe('parseListUnits', () => {
 });
 
 // ---------------------------------------------------------------------------
-// parseListUnitFiles: оба формата, STATE — всегда второе поле
+// parseListUnitFiles: both formats, STATE is always the second field
 // ---------------------------------------------------------------------------
 
 describe('parseListUnitFiles', () => {
@@ -124,11 +124,11 @@ describe('parseListUnitFiles', () => {
     'bad.service bad -',
   ].join('\n');
 
-  it('трёхколоночный формат (systemd ≥ 245): STATE берётся из fields[1], а не из последнего поля', () => {
+  it('three-column format (systemd ≥ 245): STATE is taken from fields[1], not the last field', () => {
     const files = parseListUnitFiles(THREE_COL);
     const byName = new Map(files.map((f) => [f.name, f.enabled]));
     expect(byName.get('nginx.service')).toBe('enabled');
-    // preset (третья колонка) = enabled, а STATE (вторая) = disabled — проверка против регрессии
+    // preset (third column) = enabled while STATE (second) = disabled — a regression guard
     expect(byName.get('postgresql.service')).toBe('disabled');
     expect(byName.get('foo.service')).toBe('masked');
     expect(byName.get('bar.service')).toBe('static');
@@ -138,7 +138,7 @@ describe('parseListUnitFiles', () => {
     expect(byName.get('bad.service')).toBe('bad');
   });
 
-  it('двухколоночный формат (старый systemd)', () => {
+  it('two-column format (old systemd)', () => {
     const raw = ['nginx.service enabled', 'foo.service disabled', 'bar.service masked'].join('\n');
     const files = parseListUnitFiles(raw);
     expect(files).toEqual([
@@ -148,7 +148,7 @@ describe('parseListUnitFiles', () => {
     ]);
   });
 
-  it('пустой вывод → []', () => {
+  it('empty output → []', () => {
     expect(parseListUnitFiles('')).toEqual([]);
   });
 });
@@ -158,7 +158,7 @@ describe('parseListUnitFiles', () => {
 // ---------------------------------------------------------------------------
 
 describe('mergeUnits', () => {
-  it('unit в обоих списках: значения из list-units + enabled из unit-files', () => {
+  it('unit in both lists: values from list-units + enabled from unit-files', () => {
     const merged = mergeUnits(
       [{ name: 'nginx.service', load: 'loaded', active: 'active', sub: 'running', description: 'nginx' }],
       [{ name: 'nginx.service', enabled: 'enabled' }],
@@ -168,7 +168,7 @@ describe('mergeUnits', () => {
     ]);
   });
 
-  it('только в list-units (transient): enabled null', () => {
+  it('only in list-units (transient): enabled null', () => {
     const merged = mergeUnits(
       [{ name: 'transient.service', load: 'loaded', active: 'active', sub: 'running', description: 'x' }],
       [],
@@ -176,7 +176,7 @@ describe('mergeUnits', () => {
     expect(merged[0]).toMatchObject({ name: 'transient.service', enabled: null });
   });
 
-  it('только в unit-files: load/active/sub/description null', () => {
+  it('only in unit-files: load/active/sub/description null', () => {
     const merged = mergeUnits([], [{ name: 'unused.service', enabled: 'disabled' }]);
     expect(merged[0]).toEqual({
       name: 'unused.service',
@@ -188,7 +188,7 @@ describe('mergeUnits', () => {
     });
   });
 
-  it('сортировка по имени', () => {
+  it('sorted by name', () => {
     const merged = mergeUnits(
       [
         { name: 'zzz.service', load: 'loaded', active: 'active', sub: 'running', description: null },
@@ -205,12 +205,12 @@ describe('mergeUnits', () => {
 // ---------------------------------------------------------------------------
 
 describe('parseVersionLine', () => {
-  it('строка systemd → версия', () => {
+  it('a systemd line → version', () => {
     expect(parseVersionLine('systemd 252 (252.26-1~deb12u2)')).toBe('systemd 252 (252.26-1~deb12u2)');
     expect(parseVersionLine('systemd 245 (245.4-4ubuntu3.20)')).toContain('245');
   });
 
-  it('not found / пустая строка → null', () => {
+  it('not found / empty string → null', () => {
     expect(parseVersionLine('sh: systemctl: command not found')).toBeNull();
     expect(parseVersionLine('systemctl: applet not found')).toBeNull();
     expect(parseVersionLine('')).toBeNull();
@@ -235,7 +235,7 @@ const SNAPSHOT_RAW = [
 ].join('\n');
 
 describe('parseSnapshot', () => {
-  it('systemd доступен: merge снимка с enabled из unit-files', () => {
+  it('systemd available: snapshot merged with enabled from unit-files', () => {
     const snap = parseSnapshot(SNAPSHOT_RAW);
     expect(snap.available).toBe(true);
     expect(snap.reason).toBeUndefined();
@@ -243,24 +243,24 @@ describe('parseSnapshot', () => {
     expect(byName.get('nginx.service')).toMatchObject({ load: 'loaded', active: 'active', sub: 'running', enabled: 'enabled' });
     expect(byName.get('ssh.service')?.enabled).toBe('enabled');
     expect(byName.get('failedsvc.service')).toMatchObject({ active: 'failed', enabled: 'disabled' });
-    // static — тоже из unit-files (STATE = fields[1])
+    // static also comes from unit-files (STATE = fields[1])
     expect(byName.get('static-svc.service')?.enabled).toBe('static');
     // preset != state: STATE = fields[1] = disabled
     expect(byName.get('postgresql.service')?.enabled).toBe('disabled');
-    // template в unit-files не совпадает с инстансом в list-units → enabled null
+    // a template in unit-files does not match the instance in list-units → enabled null
     expect(byName.get('getty@tty1.service')?.enabled).toBeNull();
-    // не загружен: значения есть, только из list-units
+    // not loaded: values present, taken from list-units only
     expect(byName.get('unloaded.service')?.load).toBe('not-found');
   });
 
-  it('systemctl не найден → недоступно с причиной', () => {
+  it('systemctl not found → unavailable with a reason', () => {
     const snap = parseSnapshot('sh: systemctl: command not found\n@@UNITS@@\n@@UNITFILES@@\n');
     expect(snap.available).toBe(false);
     expect(snap.reason).toContain('systemctl не найден');
     expect(snap.units).toEqual([]);
   });
 
-  it('шум rc перед версией (~/.bashrc и т.п.) не ломает детект', () => {
+  it('rc noise before the version (~/.bashrc etc.) does not break detection', () => {
     const raw = [
       'Welcome to my-server',
       'export PATH=/opt/conda/bin:$PATH',
@@ -275,7 +275,7 @@ describe('parseSnapshot', () => {
     expect(snap.units[0].name).toBe('nginx.service');
   });
 
-  it('systemd не PID 1 → недоступно с причиной', () => {
+  it('systemd is not PID 1 → unavailable with a reason', () => {
     const raw = [
       'systemd 252 (252.26-1~deb12u2)',
       '@@UNITS@@',
@@ -289,14 +289,14 @@ describe('parseSnapshot', () => {
     expect(snap.reason).toContain('не является PID 1');
   });
 
-  it('ошибка флага в начале секции → недоступно с текстом ошибки', () => {
+  it('a flag error at the section start → unavailable with the error text', () => {
     const raw = ['systemd 252 (252.26-1~deb12u2)', '@@UNITS@@', "systemctl: Unknown option '--plain'", '@@UNITFILES@@'].join('\n');
     const snap = parseSnapshot(raw);
     expect(snap.available).toBe(false);
     expect(snap.reason).toContain('Unknown option');
   });
 
-  it('ошибка в начале UNITFILES-секции тоже детектится', () => {
+  it('an error at the UNITFILES section start is detected too', () => {
     const raw = [
       'systemd 252 (252.26-1~deb12u2)',
       '@@UNITS@@',
@@ -311,23 +311,23 @@ describe('parseSnapshot', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Валидация имени unit и действий
+// Unit name and action validation
 // ---------------------------------------------------------------------------
 
 describe('unitNameValid', () => {
-  it('принимает допустимые имена', () => {
+  it('accepts valid names', () => {
     for (const name of ['nginx.service', 'foo@bar.service', 'postgresql@14-main', 'a.b-c_d:e', 'getty@tty1.service']) {
       expect(unitNameValid(name)).toBe(true);
     }
   });
 
-  it('отклоняет инъекции и мусор', () => {
+  it('rejects injections and garbage', () => {
     for (const name of ['nginx; rm -rf /', '..', '.', '/etc/passwd', ' ', '$(x)', '', 'nginx.service; rm -rf /', 'a b.service']) {
       expect(unitNameValid(name)).toBe(false);
     }
   });
 
-  it('assertValidUnitName бросает ServiceActionError(400)', () => {
+  it('assertValidUnitName throws ServiceActionError(400)', () => {
     expect(() => assertValidUnitName('../x')).toThrow(ServiceActionError);
     try {
       assertValidUnitName('../x');
@@ -339,12 +339,12 @@ describe('unitNameValid', () => {
 });
 
 describe('isServiceAction', () => {
-  it('whitelist включает reset-failed', () => {
+  it('whitelist includes reset-failed', () => {
     expect((SERVICE_ACTIONS as readonly string[]).includes('reset-failed')).toBe(true);
     expect(isServiceAction('restart')).toBe(true);
   });
 
-  it('отклоняет rm/exec/daemon-reload/пустое', () => {
+  it('rejects rm/exec/daemon-reload/empty', () => {
     expect(isServiceAction('rm')).toBe(false);
     expect(isServiceAction('exec')).toBe(false);
     expect(isServiceAction('daemon-reload')).toBe(false);
@@ -354,7 +354,7 @@ describe('isServiceAction', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Классификация ошибок действий и sudo-зонда
+// Action failure and sudo-probe classification
 // ---------------------------------------------------------------------------
 
 function result(code: number | null, stderr: string, stdout = ''): ExecResult {
@@ -366,13 +366,13 @@ describe('classifyActionFailure', () => {
     expect(classifyActionFailure(result(0, ''))).toBe('ok');
   });
 
-  it('polkit: Interactive authentication required → sudo-needed (основная фикстура)', () => {
+  it('polkit: Interactive authentication required → sudo-needed (primary fixture)', () => {
     expect(classifyActionFailure(result(1, 'Failed to restart nginx.service: Interactive authentication required.'))).toBe(
       'sudo-needed',
     );
   });
 
-  it('вторичные формулировки sudo-needed', () => {
+  it('secondary sudo-needed wordings', () => {
     for (const msg of [
       'Access denied',
       'Operation refused',
@@ -384,7 +384,7 @@ describe('classifyActionFailure', () => {
     }
   });
 
-  it('masked → masked (ретрая нет)', () => {
+  it('masked → masked (no retry)', () => {
     expect(classifyActionFailure(result(1, 'Unit nginx.service is masked.'))).toBe('masked');
   });
 
@@ -399,13 +399,13 @@ describe('classifyActionFailure', () => {
     ).toBe('job-failed');
   });
 
-  it('всё остальное → transport', () => {
+  it('everything else → transport', () => {
     expect(classifyActionFailure(result(255, 'connection reset'))).toBe('transport');
   });
 });
 
 describe('classifySudoProbe', () => {
-  it('код 0 → ok', () => {
+  it('code 0 → ok', () => {
     expect(classifySudoProbe(result(0, ''))).toBe('ok');
   });
 
@@ -413,47 +413,47 @@ describe('classifySudoProbe', () => {
     expect(classifySudoProbe(result(1, 'Sorry, try again.'))).toBe('wrong-password');
   });
 
-  it('не в sudoers → not-in-sudoers (400, не 502)', () => {
+  it('not in sudoers → not-in-sudoers (400, not 502)', () => {
     expect(classifySudoProbe(result(1, 'test is not in the sudoers file. This incident will be reported.'))).toBe(
       'not-in-sudoers',
     );
     expect(classifySudoProbe(result(1, 'user test not allowed to execute /usr/bin/true as root'))).toBe('not-in-sudoers');
   });
 
-  it('sudo не установлен → sudo-not-found', () => {
+  it('sudo not installed → sudo-not-found', () => {
     expect(classifySudoProbe(result(127, 'sudo: not found'))).toBe('sudo-not-found');
   });
 
-  it('прочее → other', () => {
+  it('anything else → other', () => {
     expect(classifySudoProbe(result(1, 'some odd error'))).toBe('other');
   });
 });
 
 // ---------------------------------------------------------------------------
-// Сборка команд
+// Command builders
 // ---------------------------------------------------------------------------
 
-describe('сборка команд', () => {
-  it('без sudo: systemctl <action> -- <unit>', () => {
+describe('command builders', () => {
+  it('without sudo: systemctl <action> -- <unit>', () => {
     expect(systemctlCommand('start', 'nginx.service')).toBe("systemctl start -- 'nginx.service'");
   });
 
-  it('с sudo: прямая форма sudo -S -p \'\' -- systemctl … без sh -c', () => {
+  it('with sudo: the direct form sudo -S -p \'\' -- systemctl … without sh -c', () => {
     const cmd = sudoSystemctlCommand('restart', 'nginx.service');
     expect(cmd).toBe("sudo -S -p '' -- systemctl restart -- 'nginx.service'");
     expect(cmd).not.toContain('sh -c');
   });
 
-  it('зонд: sudo -S -p \'\' -- true', () => {
+  it('probe: sudo -S -p \'\' -- true', () => {
     expect(sudoProbeCommand()).toBe("sudo -S -p '' -- true");
   });
 
-  it('journalctl: tail и follow', () => {
+  it('journalctl: tail and follow', () => {
     expect(journalctlCommand('nginx.service', 500, false)).toBe("journalctl -u 'nginx.service' --no-pager -n 500");
     expect(journalctlCommand('nginx.service', 200, true)).toBe("journalctl -u 'nginx.service' --no-pager -n 200 -f");
   });
 
-  it('деталь: status -n 0 + show с выбранными полями через маркер, `--` перед именем', () => {
+  it('detail: status -n 0 + show with selected fields behind a marker, `--` before the name', () => {
     const cmd = serviceDetailCommand('nginx.service');
     expect(cmd).toContain("systemctl status --no-pager -n 0 -- 'nginx.service' 2>&1");
     expect(cmd).toContain("systemctl show -p MainPID -p ActiveState -p SubState -p UnitFileState -p FragmentPath -p Restart -p NRestarts -p Result -p MemoryCurrent -p TasksCurrent -p ActiveEnterTimestamp -- 'nginx.service' 2>&1");
@@ -462,7 +462,7 @@ describe('сборка команд', () => {
 });
 
 describe('clampTail', () => {
-  it('границы 1..5000, дефолт 500', () => {
+  it('bounds 1..5000, default 500', () => {
     expect(clampTail(undefined)).toBe(500);
     expect(clampTail('abc')).toBe(500);
     expect(clampTail(0)).toBe(1);
@@ -479,7 +479,7 @@ describe('clampTail', () => {
 describe('parseShowOutput', () => {
   const fields = ['MainPID', 'ActiveState', 'FragmentPath', 'NRestarts'];
 
-  it('обычные поля, поле с `=` внутри значения, отсутствующее → null', () => {
+  it('regular fields, a field with `=` inside the value, a missing one → null', () => {
     const show = parseShowOutput('MainPID=1234\nActiveState=active\nFragmentPath=/etc/systemd/system/foo=bar.service\n', fields);
     expect(show).toEqual({
       MainPID: '1234',
@@ -489,19 +489,19 @@ describe('parseShowOutput', () => {
     });
   });
 
-  it('повторяющееся поле — первое вхождение выигрывает', () => {
+  it('repeated field — the first occurrence wins', () => {
     const show = parseShowOutput('MainPID=1\nMainPID=2\n', fields);
     expect(show.MainPID).toBe('1');
   });
 
-  it('мусорные строки игнорируются', () => {
+  it('garbage lines are ignored', () => {
     const show = parseShowOutput('● nginx.service - A web server\nMainPID=5\n', fields);
     expect(show.MainPID).toBe('5');
   });
 });
 
 // ---------------------------------------------------------------------------
-// runServiceAction: поток с sudo-ретраем
+// runServiceAction: flow with a sudo retry
 // ---------------------------------------------------------------------------
 
 interface ExecCall {
@@ -509,7 +509,7 @@ interface ExecCall {
   stdin?: string;
 }
 
-/** Мок exec: настраиваемое поведение по команде. */
+/** Mock exec: per-command configurable behavior. */
 function fakeExec(router: (command: string, stdin?: string) => ExecResult) {
   const calls: ExecCall[] = [];
   const execFn: ExecFn = async (_p, command, opts) => {
@@ -520,13 +520,13 @@ function fakeExec(router: (command: string, stdin?: string) => ExecResult) {
 }
 
 describe('runServiceAction', () => {
-  it('успех без sudo', async () => {
+  it('success without sudo', async () => {
     const { execFn } = fakeExec(() => result(0, ''));
     const out = await runServiceAction(profile, 'nginx.service', 'restart', undefined, { execFn });
     expect(out).toEqual({ ok: true, output: '' });
   });
 
-  it('sudo-needed без пароля → 400 «укажите sudo-пароль», действие не выполняется', async () => {
+  it('sudo-needed without a password → 400 "specify the sudo password", action not run', async () => {
     const { calls, execFn } = fakeExec(() =>
       result(1, 'Failed to restart nginx.service: Interactive authentication required.'),
     );
@@ -537,10 +537,10 @@ describe('runServiceAction', () => {
       expect((err as ServiceActionError).status).toBe(400);
       expect((err as Error).message).toContain('укажите sudo-пароль');
     }
-    expect(calls).toHaveLength(1); // зонда нет — пароль не задан
+    expect(calls).toHaveLength(1); // no probe — no password given
   });
 
-  it('sudo-needed + неверный пароль → зонд → 400 «Неверный sudo-пароль»', async () => {
+  it('sudo-needed + wrong password → probe → 400 "wrong sudo password"', async () => {
     const { calls, execFn } = fakeExec((command, stdin) => {
       if (command === sudoProbeCommand()) return result(1, 'Sorry, try again.');
       return result(1, 'Failed to restart nginx.service: Interactive authentication required.');
@@ -553,11 +553,11 @@ describe('runServiceAction', () => {
       expect((err as Error).message).toBe('Неверный sudo-пароль');
     }
     expect(calls.some((c) => c.command === sudoProbeCommand())).toBe(true);
-    // Пароль в командные строки не попадает
+    // The password never lands in command lines
     expect(calls.every((c) => !c.command.includes('bad-pass'))).toBe(true);
   });
 
-  it('sudo-needed + пользователь не в sudoers → 400, не 502', async () => {
+  it('sudo-needed + user not in sudoers → 400, not 502', async () => {
     const { execFn } = fakeExec((command) => {
       if (command === sudoProbeCommand()) {
         return result(1, 'test is not in the sudoers file. This incident will be reported.');
@@ -573,7 +573,7 @@ describe('runServiceAction', () => {
     }
   });
 
-  it('sudo needed + sudo не установлен → 400', async () => {
+  it('sudo needed + sudo not installed → 400', async () => {
     const { execFn } = fakeExec((command) => {
       if (command === sudoProbeCommand()) return result(127, 'sudo: not found');
       return result(1, 'Access denied');
@@ -587,7 +587,7 @@ describe('runServiceAction', () => {
     }
   });
 
-  it('sudo-needed + верный пароль: ретрай через sudo, пароль только в stdin', async () => {
+  it('sudo-needed + correct password: retry via sudo, password only in stdin', async () => {
     const password = 's3cret-pass';
     const { calls, execFn } = fakeExec((command, stdin) => {
       if (command === sudoProbeCommand()) return result(0, '');
@@ -599,14 +599,14 @@ describe('runServiceAction', () => {
     const out = await runServiceAction(profile, 'nginx.service', 'restart', password, { execFn });
     expect(out).toEqual({ ok: true, output: 'Restarting nginx.service...' });
     const sudoCalls = calls.filter((c) => c.command.startsWith('sudo '));
-    expect(sudoCalls.length).toBe(2); // зонд + ретрай
+    expect(sudoCalls.length).toBe(2); // probe + retry
     for (const c of sudoCalls) {
       expect(c.stdin).toBe(`${password}\n`);
       expect(c.command).not.toContain(password);
     }
   });
 
-  it('masked → 400 с текстом systemd как есть', async () => {
+  it('masked → 400 with the systemd text as is', async () => {
     const { execFn } = fakeExec(() => result(1, 'Unit nginx.service is masked.'));
     try {
       await runServiceAction(profile, 'nginx.service', 'start', undefined, { execFn });
@@ -617,7 +617,7 @@ describe('runServiceAction', () => {
     }
   });
 
-  it('неизвестная ошибка → 502 (транспорт)', async () => {
+  it('unknown error → 502 (transport)', async () => {
     const { execFn } = fakeExec(() => result(255, 'connection reset'));
     try {
       await runServiceAction(profile, 'nginx.service', 'start', undefined, { execFn });
@@ -627,7 +627,7 @@ describe('runServiceAction', () => {
     }
   });
 
-  it('таймаут exec действия → 400 «проверьте статус», а не общий 502', async () => {
+  it('action exec timeout → 400 "check the status", not a generic 502', async () => {
     const execFn: ExecFn = async (_p, _c, opts) => {
       throw new Error(`Command timed out after ${opts?.timeoutMs ?? 60000}ms`);
     };
@@ -641,7 +641,7 @@ describe('runServiceAction', () => {
     }
   });
 
-  it('действия выполняются с явным таймаутом 120 с (а не 60 с по умолчанию)', async () => {
+  it('actions run with an explicit 120 s timeout (not the default 60 s)', async () => {
     let actionTimeout = 0;
     const execFn: ExecFn = async (_p, command, opts) => {
       if (command.startsWith('systemctl ')) actionTimeout = opts?.timeoutMs ?? 0;
@@ -653,11 +653,11 @@ describe('runServiceAction', () => {
 });
 
 // ---------------------------------------------------------------------------
-// getServiceDetail / readServiceLogs / collectServices через мок
+// getServiceDetail / readServiceLogs / collectServices via mocks
 // ---------------------------------------------------------------------------
 
 describe('getServiceDetail', () => {
-  it('разделяет status и show по маркеру', async () => {
+  it('splits status and show by the marker', async () => {
     const execFn: ExecFn = async () => ({
       code: 0,
       stdout: '● nginx.service - A high performance web server\n     Loaded: loaded\n     Active: active (running)\n@@SHOW@@\nMainPID=1234\nActiveState=active\nFragmentPath=/lib/systemd/system/nginx.service\n',
@@ -672,7 +672,7 @@ describe('getServiceDetail', () => {
     expect(detail.show.Restart).toBeNull();
   });
 
-  it('код 3 (inactive) — не ошибка, статус отдаётся', async () => {
+  it('exit code 3 (inactive) is not an error, the status is still returned', async () => {
     const execFn: ExecFn = async () => ({
       code: 3,
       stdout: '● nginx.service - A web server\n     Active: inactive (dead)\n@@SHOW@@\nActiveState=inactive\nMainPID=0\n',
@@ -684,7 +684,7 @@ describe('getServiceDetail', () => {
 });
 
 describe('readServiceLogs', () => {
-  it('разовый журнал: stdout+stderr, таймаут 30 c', async () => {
+  it('one-shot logs: stdout+stderr, 30 s timeout', async () => {
     const execFn: ExecFn = async (_p, command, opts) => {
       expect(opts?.timeoutMs).toBe(30000);
       expect(command).toBe("journalctl -u 'nginx.service' --no-pager -n 200");
@@ -694,7 +694,7 @@ describe('readServiceLogs', () => {
     expect(out).toContain('start');
   });
 
-  it('вывод на пределе 2 МБ → честная пометка обрезки', async () => {
+  it('output at the 2 MB limit → an honest truncation note', async () => {
     const big = 'x'.repeat(2 * 1024 * 1024);
     const execFn: ExecFn = async () => ({ code: 0, stdout: big, stderr: '' });
     const out = await readServiceLogs(profile, 'nginx.service', 5000, { execFn });
@@ -704,7 +704,7 @@ describe('readServiceLogs', () => {
 });
 
 describe('collectServices', () => {
-  it('кэш 2 с на профиль: параллельные вызовы делят один exec (через deps)', async () => {
+  it('2 s cache per profile: parallel calls share one exec (via deps)', async () => {
     const p1: Profile = { ...profile, id: 'cache-fake' };
     let execs = 0;
     const execFn: ExecFn = async () => {
@@ -720,7 +720,7 @@ describe('collectServices', () => {
     expect(snap.units.length).toBeGreaterThan(0);
   });
 
-  it('ошибочный промис удаляется из кэша — следующий вызов исполняет заново', async () => {
+  it('a failed promise is evicted from the cache — the next call executes again', async () => {
     const p1: Profile = { ...profile, id: 'cache-err' };
     await expect(collectServices(p1, { execFn: async () => { throw new Error('ssh down'); } })).rejects.toThrow(
       'ssh down',

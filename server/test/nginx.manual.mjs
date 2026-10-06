@@ -1,15 +1,15 @@
-// Ручной интеграционный тест вкладки «Nginx» (docs/nginx-plan.md).
-// Требует запущенный ssh-commander (APP_PASSWORD=test123, порт 8090) и SSH-хост
-// с реальным docker (например linuxserver/openssh-server на 127.0.0.1:2222,
-// user test / pass test123, с проброшенным docker.sock, либо VPS с docker):
+// Manual integration test of the "Nginx" tab (docs/nginx-plan.md).
+// Requires a running ssh-commander (APP_PASSWORD=test123, port 8090) and an SSH
+// host with real docker (e.g. linuxserver/openssh-server on 127.0.0.1:2222,
+// user test / pass test123, with the docker.sock mounted, or a VPS with docker):
 //   docker run -d --name sc-sshd --restart=unless-stopped -p 2222:2222 \
 //     -e PASSWORD_ACCESS=true -e USER_NAME=test -e USER_PASSWORD=test123 \
 //     -v /var/run/docker.sock:/var/run/docker.sock \
 //     linuxserver/openssh-server
-// Запуск: node test/nginx.manual.mjs
-// Сценарий: поднимает контейнер nginx:alpine с самоподписанным сертификатом,
-// discovery находит его, снапшот содержит сайт, срок сертификата посчитан,
-// nginx -t и reload работают.
+// Run: node test/nginx.manual.mjs
+// Scenario: it raises an nginx:alpine container with a self-signed certificate,
+// discovery finds it, the snapshot contains the site, the certificate expiry is
+// computed, nginx -t and reload work.
 const BASE = process.env.BASE_URL ?? 'http://127.0.0.1:8090';
 const PASSWORD = process.env.APP_PASSWORD ?? 'test123';
 const CONTAINER_NAME = 'sc-nginx-test';
@@ -56,8 +56,8 @@ function shq(s) {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-// Самоподписанный сертификат CN=sc-test.local, действителен до 2126-07-27
-// (пара cert.pem/key.pem сгенерированы вместе — nginx требует совпадения).
+// A self-signed certificate CN=sc-test.local, valid until 2126-07-27
+// (the cert.pem/key.pem pair generated together — nginx requires a match).
 const CERT_PEM = `-----BEGIN CERTIFICATE-----
 MIIDEzCCAfugAwIBAgIUaHtC0q60BLMIc8XRe5aQrM8/Th0wDQYJKoZIhvcNAQEL
 BQAwGDEWMBQGA1UEAwwNc2MtdGVzdC5sb2NhbDAgFw0yNjA4MjAxOTE2NTBaGA8y
@@ -109,7 +109,7 @@ JIrEIBPc/yhrnaDzpqVpAuA=
 -----END PRIVATE KEY-----
 `;
 
-// Конфиг сайта без $-переменных — не требует экранирования в shell.
+// A site config without $-variables — needs no shell escaping.
 const SITE_CONF = `server {
     listen 443 ssl;
     server_name sc-test.local;
@@ -123,7 +123,7 @@ function writeFileCmd(path, content) {
   return `printf '%s' ${shq(content)} > ${shq(path)}`;
 }
 
-/** Команда контейнера: кладёт конфиг/сертификаты и запускает nginx. */
+/** The container command: places the config/certificates and starts nginx. */
 function buildContainerCommand() {
   return [
     'mkdir -p /etc/nginx/conf.d /etc/nginx/ssl',
@@ -167,7 +167,7 @@ async function main() {
   check('profile created', !!pid);
   const P = (extra = {}) => new URLSearchParams({ profileId: pid, ...extra });
 
-  // Старый тестовый контейнер — удалить, чтобы docker run --name не конфликтовал.
+  // Remove the old test container so docker run --name does not conflict.
   console.log('== prepare nginx container ==');
   let containerId = null;
   try {
@@ -191,7 +191,7 @@ async function main() {
     check(
       'nginx container started',
       false,
-      `${err} — нужен SSH-хост с docker (см. шапку файла)`,
+      `${err} — an SSH host with docker is required (see the file header)`,
     );
     await req(`/api/profiles/${pid}`, { method: 'DELETE' }).catch(() => {});
     console.log(`\nRESULT: ${passed} passed, ${failed} failed`);
@@ -201,27 +201,27 @@ async function main() {
   console.log('== discovery + snapshot ==');
   const snap = await req(`/api/nginx?${P()}`);
   const src = snap.sources?.find((s) => s.type === 'container' && s.containerName === CONTAINER_NAME);
-  check('discovery находит контейнер nginx', !!src, JSON.stringify(snap.sources ?? []));
+  check('discovery finds the nginx container', !!src, JSON.stringify(snap.sources ?? []));
   if (!src) {
-    // Дальнейшие проверки бессмысленны — чистим и выходим.
+    // The further checks are pointless — clean up and exit.
     await req(`/api/docker/containers/${containerId}/rm?${P()}`, { method: 'POST' }).catch(() => {});
     await req(`/api/profiles/${pid}`, { method: 'DELETE' }).catch(() => {});
     console.log(`\nRESULT: ${passed} passed, ${failed} failed`);
     process.exit(1);
   }
 
-  check('версия nginx из контейнера', typeof src.version === 'string' && src.version.length > 0, String(src.version));
-  check('nginx -t зелёный', src.configTest?.ok === true, src.configTest?.output ?? '');
+  check('the nginx version from the container', typeof src.version === 'string' && src.version.length > 0, String(src.version));
+  check('nginx -t is green', src.configTest?.ok === true, src.configTest?.output ?? '');
 
   const site = src.sites?.find((s) => s.serverNames?.includes('sc-test.local'));
-  check('снапшот содержит сайт', !!site, JSON.stringify(src.sites ?? []));
+  check('the snapshot contains the site', !!site, JSON.stringify(src.sites ?? []));
   if (site) {
-    check('listen 443 ssl распознан', site.listens?.some((l) => l.port === 443 && l.ssl), JSON.stringify(site.listens));
-    check('target: static по root', site.target?.kind === 'static' && site.target?.value === '/usr/share/nginx/html', JSON.stringify(site.target));
-    check('файл конфига приписан', typeof site.file === 'string' && site.file.includes('site.conf'), site.file);
+    check('listen 443 ssl recognized', site.listens?.some((l) => l.port === 443 && l.ssl), JSON.stringify(site.listens));
+    check('target: static by root', site.target?.kind === 'static' && site.target?.value === '/usr/share/nginx/html', JSON.stringify(site.target));
+    check('the config file is attributed', typeof site.file === 'string' && site.file.includes('site.conf'), site.file);
     const cert = site.cert;
     check(
-      'срок сертификата посчитан',
+      'the certificate expiry is computed',
       !!cert && 'daysLeft' in cert && cert.daysLeft > 0 && 'notAfter' in cert,
       JSON.stringify(cert),
     );
@@ -230,13 +230,13 @@ async function main() {
   const sourceKey = `container:${src.containerId}`;
 
   console.log('== nginx -t / reload ==');
-  // Ходим как фронтенд (web/src/api.ts): profileId в query, тело — только source.
+  // Walk like the frontend does (web/src/api.ts): profileId in the query, the body — the source only.
   const test = await req(`/api/nginx/test?${P()}`, {
     method: 'POST',
     body: JSON.stringify({ source: sourceKey }),
   });
   check('POST /api/nginx/test ok', test.ok === true, JSON.stringify(test));
-  check('вывод теста не пуст', typeof test.output === 'string' && test.output.length > 0, String(test.output));
+  check('the test output is not empty', typeof test.output === 'string' && test.output.length > 0, String(test.output));
 
   const reload = await req(`/api/nginx/reload?${P()}`, {
     method: 'POST',
@@ -244,15 +244,15 @@ async function main() {
   });
   check('POST /api/nginx/reload ok', reload.ok === true, JSON.stringify(reload));
 
-  console.log('== невалидный источник ==');
+  console.log('== an invalid source ==');
   try {
     await req(`/api/nginx/test?${P()}`, {
       method: 'POST',
       body: JSON.stringify({ source: 'container:deadbeef' }),
     });
-    check('произвольный контейнер отклонён', false, 'ожидался 400');
+    check('an arbitrary container is rejected', false, 'a 400 was expected');
   } catch (err) {
-    check('произвольный контейнер отклонён', String(err).includes('400'), String(err));
+    check('an arbitrary container is rejected', String(err).includes('400'), String(err));
   }
 
   console.log('== cleanup ==');

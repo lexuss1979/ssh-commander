@@ -6,8 +6,8 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { PROVIDERS } from '../../web/src/ai-providers.js';
 
-// Триггер onboarding — только отсутствие passwordHash в settings.json
-// (docs/settings-model-plan.md): env-пароля в схеме больше нет.
+// The onboarding trigger is only the absence of passwordHash in settings.json
+// (docs/settings-model-plan.md): the env password is no longer in the schema.
 const dataDirA = mkdtempSync(path.join(tmpdir(), 'sc-setup-a-'));
 const dataDirB = mkdtempSync(path.join(tmpdir(), 'sc-setup-b-'));
 const dataDirC = mkdtempSync(path.join(tmpdir(), 'sc-setup-go-'));
@@ -23,9 +23,9 @@ interface Stack {
 }
 
 /**
- * Свежий стек express+setupRouter на отдельном data-каталоге: config/settings
- * читают env при загрузке, второй сценарий setup'а (он одноразовый на каталог)
- * требует чистых модулей и своего rate-limit- состояния auth.js.
+ * A fresh express+setupRouter stack on a separate data directory: config/settings
+ * read the env at load time, the second setup scenario (it is one-shot per
+ * directory) requires clean modules and its own rate-limit state of auth.js.
  */
 async function freshStack(dir: string): Promise<Stack> {
   rmSync(dir, { recursive: true, force: true });
@@ -38,8 +38,8 @@ async function freshStack(dir: string): Promise<Stack> {
   const settings = await import('../src/services/settings.js');
   const app = express();
   app.use(express.json());
-  // trust proxy — только для тестов: разводим rate-limit по X-Forwarded-For
-  // (в проде trust proxy не включён, req.ip = адрес сокета).
+  // trust proxy — for tests only: it splits the rate-limit by X-Forwarded-For
+  // (in production trust proxy is off, req.ip = the socket address).
   app.set('trust proxy', true);
   app.use('/api/setup', setupRouter);
   app.use('/api/auth', authRouter);
@@ -55,7 +55,7 @@ afterAll(async () => {
   rmSync(dataDirC, { recursive: true, force: true });
 });
 
-/** POST /api/setup от «клиента» с отдельным IP (свой rate-limit bucket). */
+/** POST /api/setup from a "client" with its own IP (its own rate-limit bucket). */
 function post(base: string, body: unknown, ip: string): Promise<Response> {
   return fetch(base, {
     method: 'POST',
@@ -68,8 +68,8 @@ function onDisk(dir: string): Record<string, unknown> {
   return JSON.parse(readFileSync(path.join(dir, 'settings.json'), 'utf8')) as Record<string, unknown>;
 }
 
-describe('setup с OpenCode Go', () => {
-  it('сохраняет пресет, задаёт официальный URL и выполняет авто-вход', async () => {
+describe('setup with OpenCode Go', () => {
+  it('saves the preset, sets the official URL and performs the auto-login', async () => {
     const stack = await freshStack(dataDirC);
     try {
       const res = await post(stack.base, {
@@ -91,7 +91,7 @@ describe('setup с OpenCode Go', () => {
   });
 });
 
-describe('фаза A: setup без ключа — посеянные AI-поля сохраняются', () => {
+describe('phase A: setup without a key — the seeded AI fields are kept', () => {
   let stack: Stack;
   let base = '';
   let authBase = '';
@@ -100,8 +100,8 @@ describe('фаза A: setup без ключа — посеянные AI-поля
     stack = await freshStack(dataDirA);
     base = stack.base;
     authBase = stack.authBase;
-    // Seed только с ключом (как seedSettingsFromEnv при пустом APP_PASSWORD):
-    // settings.json есть, passwordHash нет → onboarding остаётся required.
+    // A seed with the key only (as seedSettingsFromEnv with an empty APP_PASSWORD):
+    // settings.json exists, passwordHash does not → onboarding stays required.
     stack.settings.saveSettings({
       aiProvider: 'deepseek',
       aiApiKey: 'seeded-key',
@@ -114,26 +114,26 @@ describe('фаза A: setup без ключа — посеянные AI-поля
     await new Promise<void>((resolve) => stack.server.close(() => resolve()));
   });
 
-  it('GET /status: AI-поля посеяны, пароля нет → required: true', async () => {
+  it('GET /status: the AI fields are seeded, no password → required: true', async () => {
     const res = await fetch(`${base}/status`);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ required: true });
   });
 
-  describe('валидация', () => {
-    it('короткий пароль → 400', async () => {
+  describe('validation', () => {
+    it('a short password → 400', async () => {
       const res = await post(base, { password: 'short' }, '10.0.0.2');
       expect(res.status).toBe(400);
       expect(((await res.json()) as { error: string }).error).toContain('8 символов');
     });
 
-    it('перевод строки в пароле → 400', async () => {
+    it('a newline in the password → 400', async () => {
       const res = await post(base, { password: '12345678\n' }, '10.0.0.3');
       expect(res.status).toBe(400);
       expect(((await res.json()) as { error: string }).error).toContain('перевод строки');
     });
 
-    it('плохой base URL (не http/https) → 400', async () => {
+    it('a bad base URL (not http/https) → 400', async () => {
       const res = await post(
         base,
         { password: 'password123', aiApiKey: 'sk', aiApiBase: 'ftp://example.com' },
@@ -143,13 +143,13 @@ describe('фаза A: setup без ключа — посеянные AI-поля
       expect(((await res.json()) as { error: string }).error).toContain('http');
     });
 
-    it('ключ API с пробелом → 400', async () => {
+    it('an API key with a space → 400', async () => {
       const res = await post(base, { password: 'password123', aiApiKey: 'sk with space' }, '10.0.0.5');
       expect(res.status).toBe(400);
       expect(((await res.json()) as { error: string }).error).toContain('пробелы');
     });
 
-    it('ключ без aiProvider → 400', async () => {
+    it('a key without aiProvider → 400', async () => {
       const res = await post(
         base,
         { password: 'password123', aiApiKey: 'sk-test', aiModel: 'test-model' },
@@ -159,7 +159,7 @@ describe('фаза A: setup без ключа — посеянные AI-поля
       expect(((await res.json()) as { error: string }).error).toContain('Провайдер');
     });
 
-    it('ключ без aiModel → 400 (пресет без модели не работает)', async () => {
+    it('a key without aiModel → 400 (a preset without a model does not work)', async () => {
       const res = await post(
         base,
         { password: 'password123', aiApiKey: 'sk-test', aiProvider: 'deepseek' },
@@ -169,7 +169,7 @@ describe('фаза A: setup без ключа — посеянные AI-поля
       expect(((await res.json()) as { error: string }).error).toContain('Модель');
     });
 
-    it('неизвестный aiProvider → 400', async () => {
+    it('an unknown aiProvider → 400', async () => {
       const res = await post(
         base,
         { password: 'password123', aiApiKey: 'sk-test', aiProvider: 'anthropic', aiModel: 'm' },
@@ -179,7 +179,7 @@ describe('фаза A: setup без ключа — посеянные AI-поля
       expect(((await res.json()) as { error: string }).error).toContain('Провайдер');
     });
 
-    it('модель с пробелом → 400', async () => {
+    it('a model with a space → 400', async () => {
       const res = await post(
         base,
         { password: 'password123', aiApiKey: 'sk-test', aiProvider: 'deepseek', aiModel: 'deep seek' },
@@ -189,7 +189,7 @@ describe('фаза A: setup без ключа — посеянные AI-поля
       expect(((await res.json()) as { error: string }).error).toContain('пробелы');
     });
 
-    it('custom без base URL → 400 (иначе ключ ушёл бы на дефолтную базу OpenAI)', async () => {
+    it('custom without a base URL → 400 (otherwise the key would go to the default OpenAI base)', async () => {
       const res = await post(
         base,
         { password: 'password123', aiApiKey: 'sk-test', aiProvider: 'custom', aiModel: 'm' },
@@ -201,7 +201,7 @@ describe('фаза A: setup без ключа — посеянные AI-поля
   });
 
   describe('rate-limit', () => {
-    it('11-я неудачная попытка с одного IP → 429', async () => {
+    it('the 11th failed attempt from one IP → 429', async () => {
       const ip = '10.0.0.6';
       for (let i = 0; i < 10; i++) {
         const res = await post(base, { password: 'x' }, ip);
@@ -212,8 +212,8 @@ describe('фаза A: setup без ключа — посеянные AI-поля
     });
   });
 
-  describe('успех и авто-вход', () => {
-    it('тело без AI-полей → хеш записан, посеянные AI-поля сохранены (мерж, не перезапись)', async () => {
+  describe('success and auto-login', () => {
+    it('a body without AI fields → the hash written, the seeded AI fields kept (a merge, not an overwrite)', async () => {
       const res = await post(base, { password: 'password123' }, '10.0.0.7');
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ ok: true });
@@ -227,18 +227,18 @@ describe('фаза A: setup без ключа — посеянные AI-поля
       expect(disk.aiModel).toBe('deepseek-chat');
     });
 
-    it('повторный POST после успеха → 409 (защита от перезаписи без авторизации)', async () => {
+    it('a repeated POST after success → 409 (protection against an unauthorized overwrite)', async () => {
       const res = await post(base, { password: 'another-pass-123' }, '10.0.0.8');
       expect(res.status).toBe(409);
     });
 
-    it('GET status после настройки → required: false', async () => {
+    it('GET status after the setup → required: false', async () => {
       const res = await fetch(`${base}/status`);
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ required: false });
     });
 
-    it('логин новым паролем работает (verifyPassword через settings-хеш)', async () => {
+    it('logging in with the new password works (verifyPassword via the settings hash)', async () => {
       const ok = await fetch(`${authBase}/login`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -255,20 +255,20 @@ describe('фаза A: setup без ключа — посеянные AI-поля
       expect(bad.status).toBe(401);
     });
 
-    it('tmp-файла после успешной записи не остаётся', () => {
+    it('no tmp file is left after a successful write', () => {
       expect(readdirSync(dataDirA).some((f) => f.startsWith('settings.json.tmp'))).toBe(false);
     });
   });
 });
 
-describe('фаза B: setup с ключом — все четыре AI-поля из тела затирают посеянные', () => {
+describe('phase B: setup with a key — all four AI fields from the body overwrite the seeded ones', () => {
   let stack: Stack;
   let base = '';
 
   beforeAll(async () => {
     stack = await freshStack(dataDirB);
     base = stack.base;
-    // Другой посеянный AI-конфиг — setup с ключом должен заменить его целиком.
+    // A different seeded AI config — a setup with a key must replace it entirely.
     stack.settings.saveSettings({
       aiProvider: 'openai',
       aiApiKey: 'old-key',
@@ -281,7 +281,7 @@ describe('фаза B: setup с ключом — все четыре AI-поля 
     await new Promise<void>((resolve) => stack.server.close(() => resolve()));
   });
 
-  it('ключ + провайдер + base + модель → на диске значения из тела, хвостовой / срезан', async () => {
+  it('a key + provider + base + model → the body values on disk, the trailing / trimmed', async () => {
     const res = await post(
       base,
       {

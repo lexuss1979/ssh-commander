@@ -115,16 +115,17 @@ describe('decimate', () => {
 });
 
 describe('appendSample / getHistory roundtrip', () => {
-  // Уникальные id на тест: реестр общий для модуля и между тестами не чистится.
-  // Timestamps — относительно Date.now(): при отдаче история фильтруется по
-  // wall clock (см. тесты stale ниже), абсолютные константы протухли бы.
+  // Unique ids per test: the registry is shared for the module and is not
+  // cleaned between tests.
+  // Timestamps are relative to Date.now(): when served, the history is filtered
+  // by wall clock (see the stale tests below), absolute constants would go stale.
   it('appends fresh snapshots and skips cache-hit duplicates', () => {
     const id = 'rt-dedupe';
     const t0 = Date.now();
     appendSample(id, makeMetrics(t0));
-    appendSample(id, makeMetrics(t0)); // тот же timestamp — кэш
-    appendSample(id, makeMetrics(t0 + 1_500)); // ближе 2 с
-    appendSample(id, makeMetrics(t0 + 2_000)); // ровно 2 с — принимается
+    appendSample(id, makeMetrics(t0)); // the same timestamp — the cache
+    appendSample(id, makeMetrics(t0 + 1_500)); // closer than 2 s
+    appendSample(id, makeMetrics(t0 + 2_000)); // exactly 2 s — accepted
     expect(getHistory(id).map((s) => s.t)).toEqual([t0, t0 + 2_000]);
     clearHistory(id);
   });
@@ -163,9 +164,9 @@ describe('appendSample / getHistory roundtrip', () => {
 });
 
 describe('serve-time staleness', () => {
-  // Возраст при отдаче отмеряется по wall clock: пока профиль лежит и новых
-  // сэмплов нет, история всё равно стареет (trimSamples при записи отрезает
-  // хвост только относительно свежего сэмпла).
+  // The age at serve time is measured by wall clock: while a profile is down
+  // and no new samples arrive, the history still ages (trimSamples at write
+  // time cuts the tail only relative to a fresh sample).
   it('drops everything after the profile was idle over 24 h', () => {
     const id = 'stale-all';
     const t0 = Date.now();
@@ -183,7 +184,7 @@ describe('serve-time staleness', () => {
     const t0 = Date.now();
     appendSample(id, makeMetrics(t0));
     appendSample(id, makeMetrics(t0 + 10_000));
-    // Через сутки минус 5 с: первая точка уже за окном, вторая ещё свежа.
+    // A day minus 5 s: the first point is already out of the window, the second is still fresh.
     vi.setSystemTime(t0 + 10_000 + 24 * 60 * 60 * 1000 - 5_000);
     expect(getHistory(id).map((s) => s.t)).toEqual([t0 + 10_000]);
     vi.useRealTimers();

@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
-// isSearchConfigured/searchWeb (эпик 22) читают AI-конфиг из settings.json,
-// а env AI_SEARCH_API_BASE — при загрузке config: изолируем data-каталог и
-// задаём env до импорта модулей (динамические — как в settings.test.ts).
+// isSearchConfigured/searchWeb (epic 22) read the AI config from settings.json,
+// and AI_SEARCH_API_BASE from config at load time: isolate the data directory and
+// set the env before importing the modules (dynamic — as in settings.test.ts).
 const dataDir = mkdtempSync(path.join(tmpdir(), 'sc-websearch-'));
 process.env.DATA_DIR = dataDir;
 process.env.AI_SEARCH_API_BASE = 'https://search.example';
@@ -22,8 +22,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// Фикстура по мотивам реального ответа api.deepseek.com/anthropic
-// (модель deepseek-v4-flash, серверный инструмент web_search_20260209).
+// A fixture modeled on a real api.deepseek.com/anthropic response
+// (the deepseek-v4-flash model, the server-side web_search_20260209 tool).
 const realResponse = {
   id: '8880fe3c-4664',
   type: 'message',
@@ -84,7 +84,7 @@ const realResponse = {
 };
 
 describe('buildSearchBody', () => {
-  it('собирает Anthropic-запрос с серверным web_search инструментом', () => {
+  it('builds the Anthropic request with the server-side web_search tool', () => {
     const body = ws.buildSearchBody('версия nginx', { model: 'deepseek-v4-flash', maxUses: 3 });
     expect(body.model).toBe('deepseek-v4-flash');
     expect(body.max_tokens).toBeGreaterThan(0);
@@ -100,7 +100,7 @@ describe('buildSearchBody', () => {
 });
 
 describe('sanitizeQuery', () => {
-  it('схлопывает пробелы и обрезает по длине', () => {
+  it('collapses spaces and truncates by length', () => {
     expect(ws.sanitizeQuery('  как   настроить\nfail2ban  ')).toBe('как настроить fail2ban');
     expect(ws.sanitizeQuery(null)).toBe('');
     expect(ws.sanitizeQuery(undefined)).toBe('');
@@ -109,7 +109,7 @@ describe('sanitizeQuery', () => {
 });
 
 describe('parseSearchResponse', () => {
-  it('извлекает текст, поисковые запросы и источники, игнорируя encrypted_content и thinking', () => {
+  it('extracts the text, search queries and sources, ignoring encrypted_content and thinking', () => {
     const parsed = ws.parseSearchResponse(realResponse);
     expect(parsed.text).toBe('Последняя LTS-версия Node.js — 24.x («Krypton»).');
     expect(parsed.queries).toEqual([
@@ -125,17 +125,17 @@ describe('parseSearchResponse', () => {
     expect(JSON.stringify(parsed)).not.toContain('Нужно поискать');
   });
 
-  it('ответ без поиска — пустые queries/sources', () => {
+  it('a response without search — empty queries/sources', () => {
     const parsed = ws.parseSearchResponse({ content: [{ type: 'text', text: 'ответ' }] });
     expect(parsed).toEqual({ text: 'ответ', queries: [], sources: [] });
   });
 
-  it('полностью пустой ответ не падает', () => {
+  it('a fully empty response does not throw', () => {
     expect(ws.parseSearchResponse({})).toEqual({ text: '', queries: [], sources: [] });
     expect(ws.parseSearchResponse({ content: null })).toEqual({ text: '', queries: [], sources: [] });
   });
 
-  it('источник без title всё равно попадает в список (по URL)', () => {
+  it('a source without a title still lands in the list (by URL)', () => {
     const parsed = ws.parseSearchResponse({
       content: [
         {
@@ -147,7 +147,7 @@ describe('parseSearchResponse', () => {
     expect(parsed.sources).toEqual([{ title: '', url: 'https://example.com' }]);
   });
 
-  it('usage пробрасывается: input/output токены + число поисковых запросов', () => {
+  it('usage is passed through: input/output tokens + the number of search requests', () => {
     const parsed = ws.parseSearchResponse(realResponse);
     expect(parsed.usage).toEqual({
       promptTokens: 8641,
@@ -156,7 +156,7 @@ describe('parseSearchResponse', () => {
     });
   });
 
-  it('без usage в ответе — usage undefined', () => {
+  it('no usage in the response — usage undefined', () => {
     expect(ws.parseSearchResponse({ content: [{ type: 'text', text: 'ответ' }] }).usage).toBeUndefined();
     expect(ws.parseSearchResponse({}).usage).toBeUndefined();
     expect(
@@ -166,7 +166,7 @@ describe('parseSearchResponse', () => {
 });
 
 describe('formatSearchOutput', () => {
-  it('склеивает текст, запросы и нумерованные источники', () => {
+  it('joins the text, the queries and the numbered sources', () => {
     const out = ws.formatSearchOutput(ws.parseSearchResponse(realResponse));
     expect(out).toContain('Последняя LTS-версия Node.js');
     expect(out).toContain('Запросы поиска: latest stable Node.js LTS version 2025;');
@@ -176,21 +176,21 @@ describe('formatSearchOutput', () => {
     expect(out).toContain('3. Previous Releases | Node.js — https://nodejs.org/en/about/previous-releases');
   });
 
-  it('пустой результат — понятная заглушка', () => {
+  it('an empty result — a clear placeholder', () => {
     expect(ws.formatSearchOutput({ text: '', queries: [], sources: [] })).toBe(
       '(поиск не дал результатов)',
     );
   });
 });
 
-describe('getToolDefs — гейтинг web_search', () => {
-  it('включён: web_search объявляется модели', () => {
+describe('getToolDefs — the web_search gate', () => {
+  it('enabled: web_search is declared to the model', () => {
     const defs = getToolDefs('ru', true);
     expect(defs.map((d) => d.function.name)).toContain('web_search');
     expect(defs).toHaveLength(buildToolDefs('ru').length);
   });
 
-  it('выключен: web_search не объявляется, остальные инструменты на месте', () => {
+  it('disabled: web_search is not declared, the other tools are in place', () => {
     const defs = getToolDefs('ru', false);
     const names = defs.map((d) => d.function.name);
     expect(names).not.toContain('web_search');
@@ -200,17 +200,17 @@ describe('getToolDefs — гейтинг web_search', () => {
   });
 });
 
-describe('лимиты', () => {
-  it('MAX_USES_PER_CALL ограничивает реальные поиски за один вызов', () => {
+describe('limits', () => {
+  it('MAX_USES_PER_CALL bounds the real searches per call', () => {
     expect(ws.MAX_USES_PER_CALL).toBeLessThanOrEqual(3);
   });
 });
 
 describe('isSearchConfigured (эпик 22: провайдер + env-оверрайд)', () => {
   /**
-   * Свежие модули под конкретный env: config читает AI_SEARCH_API_BASE при
-   * загрузке, settings.json пишется через saveSettings (env-моки ключа
-   * больше не работают). Файл на диске общий — каждая ветка перезаписывает.
+   * Fresh modules per env: config reads AI_SEARCH_API_BASE at load time,
+   * settings.json is written via saveSettings (key env-mocks no longer work).
+   * The file on disk is shared — each branch overwrites it.
    */
   async function fresh(searchApiBase: string | null) {
     if (searchApiBase === null) delete process.env.AI_SEARCH_API_BASE;
@@ -231,32 +231,32 @@ describe('isSearchConfigured (эпик 22: провайдер + env-оверра
     });
   }
 
-  it('deepseek-провайдер + ключ → true без AI_SEARCH_API_BASE (поиск из коробки)', async () => {
+  it('deepseek provider + a key → true without AI_SEARCH_API_BASE (search out of the box)', async () => {
     const { mod, st } = await fresh(null);
     seedAi(st, 'deepseek', 'sk-ds');
     expect(mod.isSearchConfigured()).toBe(true);
   });
 
-  it('deepseek без ключа → false (агент недоступен — поиска нет)', async () => {
+  it('deepseek without a key → false (no agent — no search)', async () => {
     const { mod, st } = await fresh(null);
     seedAi(st, 'deepseek', '');
     st.saveSettings({ passwordHash: 'scrypt$aa$bb', aiProvider: 'deepseek' });
     expect(mod.isSearchConfigured()).toBe(false);
   });
 
-  it('custom + env AI_SEARCH_API_BASE → true (обратная совместимость)', async () => {
+  it('custom + the AI_SEARCH_API_BASE env → true (backward compatibility)', async () => {
     const { mod, st } = await fresh('https://search.example');
     seedAi(st, 'custom', 'sk-openai');
     expect(mod.isSearchConfigured()).toBe(true);
   });
 
-  it('custom без env AI_SEARCH_API_BASE → false', async () => {
+  it('custom without the AI_SEARCH_API_BASE env → false', async () => {
     const { mod, st } = await fresh(null);
     seedAi(st, 'custom', 'sk-openai');
     expect(mod.isSearchConfigured()).toBe(false);
   });
 
-  it('OpenCode Go с моделью DeepSeek не включает поиск DeepSeek автоматически', async () => {
+  it('OpenCode Go with a DeepSeek model does not enable the DeepSeek search automatically', async () => {
     const { mod, st } = await fresh(null);
     st.saveSettings({
       aiProvider: 'opencode-go', aiApiKey: 'go-key',
@@ -268,7 +268,7 @@ describe('isSearchConfigured (эпик 22: провайдер + env-оверра
 
 describe('searchWeb: база и ключ по провайдеру', () => {
   /**
-   * Свежие модули: см. fresh выше (наследует поведение без AI_SEARCH_API_BASE).
+   * Fresh modules: see fresh above (inherits the behavior without AI_SEARCH_API_BASE).
    */
   async function freshDeepseek(): Promise<typeof import('../src/ai/web-search.js')> {
     delete process.env.AI_SEARCH_API_BASE;
@@ -285,7 +285,7 @@ describe('searchWeb: база и ключ по провайдеру', () => {
     return mod;
   }
 
-  it('deepseek-пресет ходит на константный DEEPSEEK_SEARCH_BASE с ключом из settings', async () => {
+  it('the deepseek preset hits the constant DEEPSEEK_SEARCH_BASE with the key from settings', async () => {
     const mod = await freshDeepseek();
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ content: [{ type: 'text', text: 'ответ' }] }), {
@@ -298,12 +298,12 @@ describe('searchWeb: база и ключ по провайдеру', () => {
     const result = await mod.searchWeb('версия node');
     expect(result.ok).toBe(true);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    // Только этот endpoint поддерживает серверный web_search у DeepSeek.
+    // Only this endpoint supports the server-side web_search at DeepSeek.
     expect(url).toBe('https://api.deepseek.com/anthropic/v1/messages');
     expect((init.headers as Record<string, string>)['x-api-key']).toBe('sk-ds');
   });
 
-  it('custom без env-базы — «недоступен», fetch не вызывается', async () => {
+  it('custom without an env base — "unavailable", fetch is not called', async () => {
     delete process.env.AI_SEARCH_API_BASE;
     vi.resetModules();
     const mod = await import('../src/ai/web-search.js');

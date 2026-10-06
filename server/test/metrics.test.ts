@@ -10,7 +10,7 @@ import {
   parsePsAux,
 } from '../src/services/metrics.js';
 
-// Дельта между снимками: total +150, idle (idle+iowait) +100 → 33.3%.
+// The delta between snapshots: total +150, idle (idle+iowait) +100 → 33.3%.
 const STAT_BEFORE = 'cpu  2255 34 2290 25563 629 0 178 0 0 0\n';
 const STAT_AFTER = 'cpu  2285 34 2310 25663 629 0 178 0 0 0\n';
 
@@ -33,8 +33,8 @@ SwapTotal:       2097152 kB
 SwapFree:        2097152 kB
 `;
 
-// df -P -k: tmpfs и overlay должны отфильтроваться (страховка к -x флагам),
-// /dev/sdb1 — терабайтный диск (~1.8 ТиБ).
+// df -P -k: tmpfs and overlay must be filtered out (a safety net for the -x flags),
+// /dev/sdb1 — a terabyte disk (~1.8 TiB).
 const DF = `Filesystem     1024-blocks      Used Available Capacity Mounted on
 /dev/sda1       511750488 120033024 365063436      25% /
 tmpfs              819200         0    819200       0% /dev/shm

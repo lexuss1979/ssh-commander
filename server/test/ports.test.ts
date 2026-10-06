@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseListeners } from '../src/services/ports.js';
 
-// ss -tulpn (root): tcp/udp, IPv4/IPv6, %iface, несколько процессов.
+// ss -tulpn (root): tcp/udp, IPv4/IPv6, %iface, several processes.
 const SS_ROOT = `Netid State  Recv-Q Send-Q Local Address:Port  Peer Address:Port Process
 udp   UNCONN 0      0      127.0.0.53%lo:53        0.0.0.0:*    users:(("systemd-resolve",pid=123,fd=12))
 udp   UNCONN 0      0              0.0.0.0:68        0.0.0.0:*    users:(("udhcpc",pid=456,fd=5))
@@ -10,13 +10,13 @@ tcp   LISTEN 0      511          127.0.0.1:8080      0.0.0.0:*    users:(("node"
 tcp   LISTEN 0      511                 [::]:80           [::]:*    users:(("nginx",pid=3000,fd=6))
 `;
 
-// ss -tulpn без root: колонки users нет вообще.
+// ss -tulpn without root: no users column at all.
 const SS_UNPRIV = `Netid State  Recv-Q Send-Q Local Address:Port  Peer Address:Port
 tcp   LISTEN 0      128            0.0.0.0:22        0.0.0.0:*
 tcp   ESTAB  0      0         10.0.0.2:22        10.0.0.5:51234
 `;
 
-// netstat -tulpn: у udp нет колонки состояния, `-` вместо pid/prog при нехватке прав.
+// netstat -tulpn: udp has no state column, `-` instead of pid/prog without enough rights.
 const NETSTAT = `Active Internet connections (only servers)
 Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
 tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      1000/sshd

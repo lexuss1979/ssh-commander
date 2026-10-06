@@ -29,7 +29,7 @@ function rec(overrides: Partial<Parameters<typeof usage.recordUsage>[0]> = {}) {
 }
 
 describe('ai-usage store', () => {
-  it('round-trip записи: id генерируется, файл персистится атомарно', () => {
+  it('a record round-trip: the id is generated, the file is persisted atomically', () => {
     const r = rec();
     expect(r.id).toMatch(/^[0-9a-f]{8}$/);
     const list = usage.listUsage();
@@ -44,14 +44,14 @@ describe('ai-usage store', () => {
       completionTokens: 500,
       costUsd: 0.0012,
     });
-    // tmp-файла после записи не остаётся.
+    // No tmp file is left after the write.
     const files = readdirSync(dataDir);
     expect(files).toContain('ai-usage.json');
     expect(files.some((f) => f.startsWith('ai-usage.json.tmp'))).toBe(false);
     expect(JSON.parse(readFileSync(path.join(dataDir, 'ai-usage.json'), 'utf8')).usage).toHaveLength(1);
   });
 
-  it('web_search запись несёт searchRequests', () => {
+  it('a web_search record carries searchRequests', () => {
     rec({
       dialogueId: 'd2',
       kind: 'web_search',
@@ -68,13 +68,13 @@ describe('ai-usage store', () => {
     expect(found?.costUsd).toBeNull();
   });
 
-  it('невалидная запись отклоняется (отрицательные токены, чужой kind)', () => {
+  it('an invalid record is rejected (negative tokens, a foreign kind)', () => {
     expect(() => rec({ promptTokens: -1 })).toThrow();
     expect(() => rec({ kind: 'bogus' as never })).toThrow();
   });
 
-  it('usageTotalsByDialogue: смесь priced/unpriced — сумма + unpricedCalls', () => {
-    // d3: два priced + один unpriced вызов.
+  it('usageTotalsByDialogue: a mix of priced/unpriced — the sum + unpricedCalls', () => {
+    // d3: two priced + one unpriced call.
     rec({ dialogueId: 'd3', promptTokens: 1000, costUsd: 0.001 });
     rec({ dialogueId: 'd3', promptTokens: 2000, costUsd: 0.002 });
     rec({ dialogueId: 'd3', promptTokens: 3000, costUsd: null });
@@ -87,8 +87,8 @@ describe('ai-usage store', () => {
     expect(t?.unpricedCalls).toBe(1);
   });
 
-  it('usageReport: группировка по дням и профилям, totals, unpricedCalls', () => {
-    // Сегодня: pA — 2 вызова (1 priced, 1 unpriced); pB — 1 вызов.
+  it('usageReport: grouping by days and profiles, totals, unpricedCalls', () => {
+    // Today: pA — 2 calls (1 priced, 1 unpriced); pB — 1 call.
     const today = usage.dateKey(Date.now());
     rec({ profileId: 'pA', dialogueId: 'dA', costUsd: 0.01, promptTokens: 111 });
     rec({ profileId: 'pA', dialogueId: 'dA', costUsd: null, promptTokens: 222 });
@@ -100,8 +100,8 @@ describe('ai-usage store', () => {
     expect(day?.byProfile['pA']).toMatchObject({ calls: 2, costUsd: 0.01, unpricedCalls: 1 });
     expect(day?.byProfile['pA']?.promptTokens).toBe(333);
     expect(day?.byProfile['pB']).toMatchObject({ calls: 1, costUsd: 0.02, unpricedCalls: 0 });
-    // total дня = сумма всех его профилей (в файле есть и записи из других
-    // тестов — проверяем инвариант согласованности, а не абсолютные числа).
+    // The day total = the sum over its profiles (the file also holds records
+    // from other tests — we check the consistency invariant, not absolute numbers).
     const sumCalls = Object.values(day?.byProfile ?? {}).reduce((n, a) => n + a.calls, 0);
     const sumCost = Object.values(day?.byProfile ?? {}).reduce((n, a) => n + a.costUsd, 0);
     const sumUnpriced = Object.values(day?.byProfile ?? {}).reduce((n, a) => n + a.unpricedCalls, 0);
@@ -112,16 +112,16 @@ describe('ai-usage store', () => {
     expect(report.totals.unpricedCalls).toBeGreaterThanOrEqual(1);
   });
 
-  it('usageReport: дни desc, пустые дни не включаются', () => {
+  it('usageReport: days desc, empty days are not included', () => {
     const report = usage.usageReport('all');
     const dates = report.days.map((d) => d.date);
     const sorted = [...dates].sort((a, b) => (a < b ? 1 : -1));
     expect(dates).toEqual(sorted);
-    // У каждого дня есть хотя бы один вызов.
+    // Every day has at least one call.
     for (const d of report.days) expect(d.total.calls).toBeGreaterThan(0);
   });
 
-  it('usageReport: days=' + "'all'" + ' включает записи старше окна', () => {
+  it('usageReport: days=' + "'all'" + ' includes records older than the window', () => {
     const old = new Date();
     old.setDate(old.getDate() - 60);
     rec({ profileId: 'p1', dialogueId: 'd6', ts: old.getTime(), costUsd: 0.5 });

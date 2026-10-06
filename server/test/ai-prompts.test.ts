@@ -14,7 +14,7 @@ import { MAX_SUGGESTION_LENGTH, SUGGEST_MARKER } from '../src/ai/suggest.js';
 
 const CYRILLIC = /[Ѐ-ӿ]/;
 
-/** Полная сборка системного промпта со всеми условными частями включёнными. */
+/** The full system prompt assembly with every conditional part enabled. */
 function fullPrompt(lang: PromptLang): string {
   return (
     systemPromptBase(lang, 'user@host') +
@@ -26,7 +26,7 @@ function fullPrompt(lang: PromptLang): string {
 }
 
 describe('ai prompts (i18n)', () => {
-  it('базовый промпт обоих языков непустой и содержит маркер [[SUGGEST]]', () => {
+  it('the base prompt of both languages is non-empty and contains the [[SUGGEST]] marker', () => {
     for (const lang of ['ru', 'en'] as const) {
       const prompt = fullPrompt(lang);
       expect(prompt.length).toBeGreaterThan(0);
@@ -34,14 +34,14 @@ describe('ai prompts (i18n)', () => {
     }
   });
 
-  it('протокол [[SUGGEST]] одинаков в обоих языках: маркер и лимит длины', () => {
+  it('the [[SUGGEST]] protocol is identical in both languages: the marker and the length limit', () => {
     for (const lang of ['ru', 'en'] as const) {
       expect(suggestInstruction(lang)).toContain(`${SUGGEST_MARKER} `);
       expect(suggestInstruction(lang)).toContain(String(MAX_SUGGESTION_LENGTH));
     }
   });
 
-  it('ru-вариант содержит кириллицу, en-вариант — нет', () => {
+  it('the ru variant contains Cyrillic, the en variant does not', () => {
     expect(fullPrompt('ru')).toMatch(CYRILLIC);
     expect(fullPrompt('en')).not.toMatch(CYRILLIC);
     expect(memoryPromptHeader('ru')).toMatch(CYRILLIC);
@@ -50,7 +50,7 @@ describe('ai prompts (i18n)', () => {
     expect(planApprovedMessage('en')).not.toMatch(CYRILLIC);
   });
 
-  it('planModeInstruction обоих языков непустые и на своём языке', () => {
+  it('planModeInstruction of both languages is non-empty and in its own language', () => {
     expect(planModeInstruction('ru').length).toBeGreaterThan(0);
     expect(planModeInstruction('en').length).toBeGreaterThan(0);
     expect(planModeInstruction('ru')).toMatch(CYRILLIC);
@@ -58,21 +58,21 @@ describe('ai prompts (i18n)', () => {
     expect(planModeInstruction('ru')).not.toBe(planModeInstruction('en'));
   });
 
-  it('выбор по lang: варианты различаются, каждый на своём языке', () => {
+  it('the lang choice: the variants differ, each in its own language', () => {
     const ru = systemPromptBase('ru', 'user@host');
     const en = systemPromptBase('en', 'user@host');
     expect(ru).not.toBe(en);
     expect(ru).toMatch(CYRILLIC);
     expect(en).not.toMatch(CYRILLIC);
-    // Динамическая часть (user@host) подставляется в обоих вариантах.
+    // The dynamic part (user@host) is substituted in both variants.
     expect(ru).toContain('user@host');
     expect(en).toContain('user@host');
-    // Имена инструментов не переводятся.
+    // Tool names are not translated.
     for (const tool of ['exec_readonly', 'security_audit', 'write_memory', 'disk_usage']) {
       expect(ru).toContain(tool);
       expect(en).toContain(tool);
     }
-    // Список подключённых серверов подставляется в обоих вариантах.
+    // The attached servers list is substituted in both variants.
     expect(attachedServersNote('ru', ['a', 'b'])).toContain('a, b');
     expect(attachedServersNote('en', ['a', 'b'])).toContain('a, b');
   });

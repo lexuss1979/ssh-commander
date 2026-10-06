@@ -125,7 +125,7 @@ describe('profile transfer', () => {
     );
 
     const backup = buildExport({ includeSecrets: true, passphrase: 'pw-123' });
-    // Удаляем ключ и профили: импорт должен восстановить ключ и перепривязать путь.
+    // We delete the key and the profiles: the import must restore the key and rebind the path.
     fs.rmSync(keyPath);
     for (const p of profiles.listProfiles()) profiles.deleteProfile(p.id);
 
@@ -153,8 +153,8 @@ describe('profile transfer', () => {
   it('does not embed keys outside the keys directory', () => {
     const outside = path.join(dataDir, 'outside-key');
     fs.writeFileSync(outside, OPENSSH_KEY);
-    // createProfile такой путь уже не примет (keyPath ограничен KEYS_DIR),
-    // но профиль мог остаться от прежней версии — экспорт обязан его пропустить.
+    // createProfile would not accept such a path (keyPath is limited to KEYS_DIR),
+    // but a profile could remain from a former version — the export must skip it.
     profiles.importProfile(baseInput({ authType: 'key', keyPath: outside, password: undefined }));
     const backup = JSON.parse(buildExport({ includeSecrets: true }));
     expect(backup.keys).toEqual([]);

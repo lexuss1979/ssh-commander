@@ -3,10 +3,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
-// Модель эпика 22 (docs/settings-model-plan.md): env читается один раз при
-// первом старте (seed), дальше источник правды — settings.json. config и
-// settings читают env при загрузке модуля, поэтому каждая группа тестов
-// берёт свежий экземпляр модуля под свои env-значения (resetModules).
+// The epic 22 model (docs/settings-model-plan.md): env is read once at first
+// start (seed), afterwards the source of truth is settings.json. config and
+// settings read the env at module load, so each test group takes a fresh
+// module instance for its env values (resetModules).
 const dataDir = mkdtempSync(path.join(tmpdir(), 'sc-settings-'));
 process.env.DATA_DIR = dataDir;
 
@@ -29,7 +29,7 @@ afterAll(() => {
 });
 
 describe('seedSettingsFromEnv', () => {
-  it('env пароль+ключ → settings на диске (пароль хешем, провайдер по base)', async () => {
+  it('an env password+key → settings on disk (the password hashed, the provider by base)', async () => {
     cleanDir();
     process.env.APP_PASSWORD = 'seed-pass-123';
     process.env.AI_API_KEY = 'env-key';
@@ -48,12 +48,12 @@ describe('seedSettingsFromEnv', () => {
     expect(disk.aiApiBase).toBe('https://api.deepseek.com/v1');
     expect(disk.aiModel).toBe('deepseek-chat');
 
-    // Пароль работает через хеш, onboarding больше не нужен.
+    // The password works via the hash, onboarding is no longer needed.
     expect(settings.verifyPassword('seed-pass-123')).toBe(true);
     expect(settings.onboardingRequired()).toBe(false);
   });
 
-  it('повторный вызов (и seed при существующем settings) — no-op', async () => {
+  it('a repeated call (and a seed over existing settings) — a no-op', async () => {
     cleanDir();
     process.env.APP_PASSWORD = 'seed-pass-123';
     process.env.AI_API_KEY = 'env-key';
@@ -61,7 +61,7 @@ describe('seedSettingsFromEnv', () => {
 
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     settings.seedSettingsFromEnv();
-    // Ручная правка файла после seed'а — повторный seed её не затирает.
+    // A manual file edit after the seed — a repeated seed does not wipe it.
     settings.saveSettings({ ...settings.getSettings()!, aiApiKey: 'changed' });
     settings.seedSettingsFromEnv();
     log.mockRestore();
@@ -69,7 +69,7 @@ describe('seedSettingsFromEnv', () => {
     expect(onDisk().aiApiKey).toBe('changed');
   });
 
-  it('seed только с AI_API_KEY (без пароля) → файл без passwordHash, onboarding required', async () => {
+  it('a seed with AI_API_KEY only (no password) → a file without passwordHash, onboarding required', async () => {
     cleanDir();
     delete process.env.APP_PASSWORD;
     process.env.AI_API_KEY = 'only-key';
@@ -86,7 +86,7 @@ describe('seedSettingsFromEnv', () => {
     expect(settings.onboardingRequired()).toBe(true);
   });
 
-  it('seed без env (пароль и ключ пусты) → файла нет, onboarding required', async () => {
+  it('a seed without env (password and key empty) → no file, onboarding required', async () => {
     cleanDir();
     delete process.env.APP_PASSWORD;
     process.env.AI_API_KEY = '';
@@ -98,7 +98,7 @@ describe('seedSettingsFromEnv', () => {
     expect(settings.onboardingRequired()).toBe(true);
   });
 
-  it('битый settings.json — seed не перезаписывает файл и не блокирует старт', async () => {
+  it('a broken settings.json — the seed does not overwrite the file and does not block the start', async () => {
     cleanDir();
     writeFileSync(path.join(dataDir, 'settings.json'), '{not json');
     process.env.APP_PASSWORD = 'seed-pass-123';
@@ -108,7 +108,7 @@ describe('seedSettingsFromEnv', () => {
 
     expect(() => settings.seedSettingsFromEnv()).not.toThrow();
 
-    // Файл перенесён в *.corrupt-* и не пересоздан поверх битого.
+    // The file was moved to *.corrupt-* and not recreated over the broken one.
     const backups = readdirSync(dataDir).filter((f) => f.startsWith('settings.json.corrupt-'));
     expect(backups).toHaveLength(1);
     expect(readFileSync(path.join(dataDir, backups[0]), 'utf8')).toBe('{not json');
@@ -118,14 +118,14 @@ describe('seedSettingsFromEnv', () => {
   });
 });
 
-describe('хранилище settings.json', () => {
-  it('getSettings: файла нет → null', async () => {
+describe('the settings.json store', () => {
+  it('getSettings: no file → null', async () => {
     cleanDir();
     const settings = await freshSettings();
     expect(settings.getSettings()).toBeNull();
   });
 
-  it('saveSettings round-trip + атомарная запись (tmp не остаётся)', async () => {
+  it('saveSettings round-trip + an atomic write (no tmp left behind)', async () => {
     cleanDir();
     const settings = await freshSettings();
     settings.saveSettings({
@@ -154,24 +154,24 @@ describe('хранилище settings.json', () => {
     });
   });
 
-  it('права созданного файла — 0600 (в файле хеш пароля и ключ API)', async () => {
+  it('the created file mode is 0600 (the file holds the password hash and the API key)', async () => {
     cleanDir();
     const settings = await freshSettings();
-    // Windows-стат chmod не отражает — тот же класс пропуска, что в
-    // bootstrap.test.ts/keys.test.ts на Windows-машинах.
+    // The Windows stat does not reflect chmod — the same skip class as in
+    // bootstrap.test.ts/keys.test.ts on Windows machines.
     if (process.platform === 'win32') return;
     settings.saveSettings({ passwordHash: 'scrypt$aa$bb' });
     expect(statSync(path.join(dataDir, 'settings.json')).mode & 0o777).toBe(0o600);
   });
 });
 
-describe('хеш пароля', () => {
-  it('формат scrypt$<salt>$<hash>', async () => {
+describe('password hashing', () => {
+  it('the scrypt$<salt>$<hash> format', async () => {
     const settings = await freshSettings();
     expect(settings.hashPassword('secret-pass')).toMatch(/^scrypt\$[0-9a-f]{32}\$[0-9a-f]{128}$/);
   });
 
-  it('verifyPassword: без настроек → false даже при заданном env-пароле (фолбэка больше нет)', async () => {
+  it('verifyPassword: no settings → false even with the env password set (no fallback anymore)', async () => {
     cleanDir();
     process.env.APP_PASSWORD = 'env-pass-not-used';
     const settings = await freshSettings();
@@ -179,7 +179,7 @@ describe('хеш пароля', () => {
     expect(settings.verifyPassword('')).toBe(false);
   });
 
-  it('verifyPassword через settings-хеш (scrypt + timingSafeEqual)', async () => {
+  it('verifyPassword via the settings hash (scrypt + timingSafeEqual)', async () => {
     cleanDir();
     const settings = await freshSettings();
     settings.saveSettings({ passwordHash: settings.hashPassword('new-pass') });
@@ -187,7 +187,7 @@ describe('хеш пароля', () => {
     expect(settings.verifyPassword('wrong-pass')).toBe(false);
   });
 
-  it('битый/незнакомый формат хеша — fail-closed', async () => {
+  it('a broken/unfamiliar hash format — fail-closed', async () => {
     cleanDir();
     const settings = await freshSettings();
     settings.saveSettings({ passwordHash: 'plaintext' });
@@ -197,8 +197,8 @@ describe('хеш пароля', () => {
   });
 });
 
-describe('getAiSettings: только settings, дефолты — константы кода', () => {
-  it('OpenCode Go читается после перезагрузки настроек с собственными дефолтами', async () => {
+describe('getAiSettings: settings only, the defaults are code constants', () => {
+  it('OpenCode Go is read after a settings reload with its own defaults', async () => {
     cleanDir();
     const settings = await freshSettings();
     settings.saveSettings({ aiProvider: 'opencode-go', aiApiKey: 'go-key' });
@@ -210,7 +210,7 @@ describe('getAiSettings: только settings, дефолты — конста�
     expect(readdirSync(dataDir).some((name) => name.includes('.corrupt-'))).toBe(false);
   });
 
-  it('настроек нет → дефолты, provider null, ключ пуст (агент недоступен)', async () => {
+  it('no settings → defaults, provider null, an empty key (the agent is unavailable)', async () => {
     cleanDir();
     const settings = await freshSettings();
     expect(settings.getAiSettings()).toEqual({
@@ -221,7 +221,7 @@ describe('getAiSettings: только settings, дефолты — конста�
     });
   });
 
-  it('частично заполненные settings → мерж с константами', async () => {
+  it('partially filled settings → merged with the constants', async () => {
     cleanDir();
     const settings = await freshSettings();
     settings.saveSettings({ passwordHash: 'scrypt$aa$bb', aiApiKey: 'sk-settings' });
@@ -233,7 +233,7 @@ describe('getAiSettings: только settings, дефолты — конста�
     });
   });
 
-  it('полный AI-конфиг в settings → всё из settings, env не читается', async () => {
+  it('a full AI config in settings → everything from settings, the env is not read', async () => {
     cleanDir();
     process.env.AI_API_BASE = 'https://env.example/v1';
     process.env.AI_API_KEY = 'env-key';
@@ -269,7 +269,7 @@ describe('providerFromBase', () => {
   });
 });
 
-describe('updateSettings (эпик 23, routes/settings.ts)', () => {
+describe('updateSettings (epic 23, routes/settings.ts)', () => {
   const fullSettings = {
     passwordHash: 'scrypt$aa$bb',
     aiProvider: 'deepseek' as const,
@@ -278,7 +278,7 @@ describe('updateSettings (эпик 23, routes/settings.ts)', () => {
     aiModel: 'deepseek-chat',
   };
 
-  it('мерж поверх текущих: переданное поле меняется, остальные сохраняются', async () => {
+  it('a merge over the current values: the passed field changes, the rest are kept', async () => {
     cleanDir();
     const settings = await freshSettings();
     settings.saveSettings({ ...fullSettings });
@@ -288,7 +288,7 @@ describe('updateSettings (эпик 23, routes/settings.ts)', () => {
     expect(onDisk()).toEqual({ ...fullSettings, passwordHash: 'scrypt$cc$dd' });
   });
 
-  it('null у AI-поля удаляет ключ из объекта (очистка = агент недоступен)', async () => {
+  it('null for an AI field removes the key from the object (clearing = the agent is unavailable)', async () => {
     cleanDir();
     const settings = await freshSettings();
     settings.saveSettings({ ...fullSettings });
@@ -302,7 +302,7 @@ describe('updateSettings (эпик 23, routes/settings.ts)', () => {
 
     expect(settings.getSettings()).toEqual({ passwordHash: 'scrypt$aa$bb' });
     expect(onDisk()).toEqual({ passwordHash: 'scrypt$aa$bb' });
-    // Возврата к env нет: ключ пуст, пресет не выбран — агент недоступен.
+    // There is no way back to env: the key is empty, no preset — the agent is unavailable.
     expect(settings.getAiSettings()).toEqual({
       provider: null,
       apiKey: '',
@@ -311,7 +311,7 @@ describe('updateSettings (эпик 23, routes/settings.ts)', () => {
     });
   });
 
-  it('настроек нет — патч создаёт файл', async () => {
+  it('no settings — the patch creates the file', async () => {
     cleanDir();
     const settings = await freshSettings();
     settings.updateSettings({ aiApiKey: 'sk-seed' });
@@ -319,15 +319,15 @@ describe('updateSettings (эпик 23, routes/settings.ts)', () => {
   });
 });
 
-describe('триггер onboarding', () => {
-  it('есть passwordHash → false', async () => {
+describe('the onboarding trigger', () => {
+  it('a passwordHash present → false', async () => {
     cleanDir();
     const settings = await freshSettings();
     settings.saveSettings({ passwordHash: 'scrypt$aa$bb' });
     expect(settings.onboardingRequired()).toBe(false);
   });
 
-  it('нет passwordHash (только AI-поля) → true', async () => {
+  it('no passwordHash (AI fields only) → true', async () => {
     cleanDir();
     const settings = await freshSettings();
     settings.saveSettings({ aiApiKey: 'sk-1', aiProvider: 'deepseek' });
@@ -335,8 +335,8 @@ describe('триггер onboarding', () => {
   });
 });
 
-describe('corrupt-guard (свежий модуль)', () => {
-  it('битый JSON → *.corrupt-*, getSettings() === null, persist отказывается', async () => {
+describe('corrupt-guard (a fresh module)', () => {
+  it('broken JSON → *.corrupt-*, getSettings() === null, persist refuses', async () => {
     cleanDir();
     writeFileSync(path.join(dataDir, 'settings.json'), '{not json');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -349,12 +349,12 @@ describe('corrupt-guard (свежий модуль)', () => {
     expect(warn).toHaveBeenCalled();
 
     expect(() => fresh.saveSettings({ passwordHash: 'scrypt$aa$bb' })).toThrow(/corrupt/);
-    // Файл не пересоздан поверх битого.
+    // The file was not recreated over the broken one.
     expect(readdirSync(dataDir).filter((f) => f === 'settings.json')).toHaveLength(0);
     warn.mockRestore();
   });
 
-  it('zod-отказ (валидный JSON, неверная форма) — тот же corrupt-guard', async () => {
+  it('a zod rejection (valid JSON, wrong shape) — the same corrupt-guard', async () => {
     cleanDir();
     writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify({ passwordHash: 123 }));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

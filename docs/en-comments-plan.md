@@ -73,16 +73,16 @@
 
 | # | Файлы | Объём |
 |---|---|---|
-| T1 | `bootstrap.test.ts`, `disk-usage.test.ts` | ~4.7k |
-| T2 | `systemd.test.ts`, `client.test.ts` | ~3.5k |
-| T3 | `terminal-ws.test.ts`, `packages.test.ts`, `nginx.test.ts` | ~4.5k |
-| T4 | `multi-server.test.ts`, `suggest.test.ts`, `snippets.test.ts` | ~4k |
-| T5 | `settings-route.test.ts`, `web-search.test.ts`, `pricing.test.ts`, `settings.test.ts` | ~4.7k |
-| T6 | `security-audit.test.ts`, `packages-route.test.ts`, `setup-route.test.ts`, `processes.test.ts` | ~4.2k |
-| T7 | AI-мелочь: `agent-session-headers.test.ts`, `alerts-merge.test.ts`, `redact.test.ts`, `ai-strings.test.ts`, `i18n.test.ts`, `agent-usage.test.ts`, `plan.test.ts`, `ai-prompts.test.ts`, `ai-usage.test.ts`, `dialogues.test.ts`, `guard.test.ts`, `agent-lang.test.ts`, `messages.test.ts`, `memory.test.ts` | ~5.5k |
-| T8 | сервисы/роуты, часть 1: `helpers/fake-ssh2.ts`, `stream-limits.test.ts`, `exec-stream.test.ts`, `history.test.ts`, `alerts.test.ts`, `file-tail-route.test.ts`, `profiles.test.ts`, `cron.test.ts`, `file-tail.test.ts`, `metrics-history.test.ts`, `db-connections.test.ts`, `known-hosts.test.ts`, `tunnels.test.ts` | ~5.9k |
-| T9 | сервисы/роуты, часть 2: `db-query.test.ts`, `profiles-route.test.ts`, `profile-transfer.test.ts`, `alerts-route.test.ts`, `docker-logs-route.test.ts`, `cron-route.test.ts`, `origin.test.ts`, `metrics.test.ts`, `container-ports.test.ts`, `keys.test.ts`, `db-dump.test.ts`, `ports.test.ts`, `file-search.test.ts`, `overview.test.ts`, `db-discovery.test.ts` | ~2.4k |
-| T10 | ручные сценарии: `integration.manual.mjs`, `bootstrap.manual.mjs`, `db.manual.mjs`, `agent.manual.mjs`, `nginx.manual.mjs`, `multi-server.manual.mjs`, `security-audit.manual.ts`, `mock-openai-manual.mjs` | ~8.8k |
+| T1 ✅ | `bootstrap.test.ts`, `disk-usage.test.ts` | ~4.7k |
+| T2 ✅ | `systemd.test.ts`, `client.test.ts` | ~3.5k |
+| T3 ✅ | `terminal-ws.test.ts`, `packages.test.ts`, `nginx.test.ts` | ~4.5k |
+| T4 ✅ | `multi-server.test.ts`, `suggest.test.ts`, `snippets.test.ts` | ~4k |
+| T5 ✅ | `settings-route.test.ts`, `web-search.test.ts`, `pricing.test.ts`, `settings.test.ts` | ~4.7k |
+| T6 ✅ | `security-audit.test.ts`, `packages-route.test.ts`, `setup-route.test.ts`, `processes.test.ts` | ~4.2k |
+| T7 ✅ | AI-мелочь: `agent-session-headers.test.ts`, `alerts-merge.test.ts`, `redact.test.ts`, `ai-strings.test.ts`, `i18n.test.ts`, `agent-usage.test.ts`, `plan.test.ts`, `ai-prompts.test.ts`, `ai-usage.test.ts`, `dialogues.test.ts`, `guard.test.ts`, `agent-lang.test.ts`, `messages.test.ts`, `memory.test.ts` | ~5.5k |
+| T8 ✅ | сервисы/роуты, часть 1: `helpers/fake-ssh2.ts`, `stream-limits.test.ts`, `exec-stream.test.ts`, `history.test.ts`, `alerts.test.ts`, `file-tail-route.test.ts`, `profiles.test.ts`, `cron.test.ts`, `file-tail.test.ts`, `metrics-history.test.ts`, `db-connections.test.ts`, `known-hosts.test.ts`, `tunnels.test.ts` | ~5.9k |
+| T9 ✅ | сервисы/роуты, часть 2: `db-query.test.ts`, `profiles-route.test.ts`, `profile-transfer.test.ts`, `alerts-route.test.ts`, `docker-logs-route.test.ts`, `cron-route.test.ts`, `origin.test.ts`, `metrics.test.ts`, `container-ports.test.ts`, `keys.test.ts`, `db-dump.test.ts`, `ports.test.ts`, `file-search.test.ts`, `overview.test.ts`, `db-discovery.test.ts` | ~2.4k |
+| T10 ✅ | ручные сценарии: `integration.manual.mjs`, `bootstrap.manual.mjs`, `db.manual.mjs`, `agent.manual.mjs`, `nginx.manual.mjs`, `multi-server.manual.mjs`, `security-audit.manual.ts`, `mock-openai-manual.mjs` | ~8.8k |
 
 ## Финальные шаги
 

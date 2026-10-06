@@ -16,7 +16,7 @@ const base: Profile = {
   password: 'secret',
 };
 
-/** Каждый тест — свой id, чтобы кэш снапшота (2 с на профиль) не мешал. */
+/** Each test takes its own id so the snapshot cache (2 s per profile) does not interfere. */
 function profileOf(id: string): Profile {
   return { ...base, id };
 }
@@ -24,27 +24,27 @@ function profileOf(id: string): Profile {
 type ExecResult = { code: number; stdout: string; stderr: string };
 
 /**
- * Фейковый exec: раздаёт ответы по содержимому команды. `root` определяет,
- * что вернёт `id -u`.
+ * A fake exec: hands out answers by the command content. `root` decides
+ * what `id -u` returns.
  */
 function fakeExec(root: boolean) {
   mockedExec.mockImplementation(async (_profile: Profile, cmd: string): Promise<ExecResult> => {
     if (cmd.includes('id -u')) {
       return { code: 0, stdout: root ? '0 root' : '1000 test', stderr: '' };
     }
-    // spool-список пользователей с crontab
+    // the spool list of users with a crontab
     if (cmd.includes('sort -u')) {
       return { code: 0, stdout: 'deploy\nwww-data\n', stderr: '' };
     }
-    // чтение чужого crontab через -u
+    // reading someone else's crontab via -u
     if (cmd.includes('crontab -u')) {
       return { code: 0, stdout: '0 0 * * * /usr/bin/php /var/www/app/artisan queue:restart\n', stderr: '' };
     }
-    // свой crontab
+    // the own crontab
     if (cmd.includes('crontab -l')) {
       return { code: 0, stdout: '15 * * * * /usr/local/bin/healthcheck\n', stderr: '' };
     }
-    // системные источники (пустые — отдаём null/[])
+    // the system sources (empty — we return null/[])
     if (cmd.includes('/etc/crontab')) {
       return { code: 0, stdout: '', stderr: '' };
     }

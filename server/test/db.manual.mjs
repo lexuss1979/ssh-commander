@@ -1,21 +1,21 @@
-// Ручной интеграционный сценарий вкладки «Базы данных» (эпик 12, итерация 2:
-// подключения с явными креденшалами, пароль — первой строкой stdin).
+// Manual integration scenario of the "Databases" tab (epic 12, iteration 2:
+// connections with explicit credentials, the password as the first stdin line).
 //
-// Стенд (см. AGENTS.md, «Тестирование»): сервер ssh-commander запущен с
+// The stand (see AGENTS.md, "Testing"): the ssh-commander server is running with
 //   APP_HOST=127.0.0.1 APP_PORT=8091 APP_PASSWORD=test123
 //   DATA_DIR=<tmp> KEYS_DIR=<tmp>
-// и тестовый sshd (linuxserver/openssh-server) на 127.0.0.1:2222
-// (user test / test123), у которого есть docker CLI и доступ к docker-демону
-// (например, -v /var/run/docker.sock:/var/run/docker.sock). Сценарий сам
-// поднимает контейнеры postgres:16-alpine, postgres:16 (dash-образ — прошлый
-// blocker итерации 1 проявлялся именно на dash/busybox-шеллах) и mysql:8
-// через docker API приложения и удаляет их в конце.
+// and a test sshd (linuxserver/openssh-server) on 127.0.0.1:2222
+// (user test / test123) that has the docker CLI and access to the docker daemon
+// (e.g. -v /var/run/docker.sock:/var/run/docker.sock). The scenario itself
+// raises the postgres:16-alpine, postgres:16 (the dash image — the iteration 1
+// blocker showed up exactly on dash/busybox shells) and mysql:8 containers
+// through the app docker API and removes them at the end.
 //
-// Покрывает: discovery (подсказки формы), test-connection (верный/неверный
-// пароль — Access denied текстом как есть), сохранённые подключения,
-// overview (версия, базы), таблицы, SELECT, read-only SET (INSERT
-// блокируется), read-only OFF, синтаксическая ошибка (stderr + exit code),
-// дамп (gzip, разжимается), частичный update пароля, cleanup.
+// Covers: discovery (the hint shapes), test-connection (a correct/wrong
+// password — Access denied as-is text), saved connections,
+// overview (the version, the databases), tables, SELECT, the read-only SET
+// (INSERT blocked), read-only OFF, a syntax error (stderr + exit code),
+// a dump (gzip, unpacks), a partial password update, cleanup.
 const BASE = 'http://127.0.0.1:8091';
 
 function check(name, ok, detail = '') {
@@ -69,7 +69,7 @@ const profile = (
 ).body;
 const pid = profile.id;
 
-// --- Стенд: postgres (alpine + dash) + mysql через docker API приложения ---
+// --- The stand: postgres (alpine + dash) + mysql through the app docker API ---
 const CONTAINERS = [
   { image: 'postgres:16-alpine', name: 'sc-test-pg-alpine', env: ['POSTGRES_PASSWORD=pgpw'] },
   { image: 'postgres:16', name: 'sc-test-pg-dash', env: ['POSTGRES_PASSWORD=pgpw'] },
@@ -77,7 +77,7 @@ const CONTAINERS = [
 ];
 const NAMES = CONTAINERS.map((c) => c.name);
 
-// Убираем остатки прошлого прогона (rm -f, не ошибка, если их нет).
+// Remove the leftovers of the previous run (rm -f, not an error when missing).
 const stale = await (await req(`/api/docker/containers?profileId=${pid}`, {}, cookie)).body;
 for (const c of Array.isArray(stale) ? stale : []) {
   const names = String(c.Names ?? c.names ?? '');
@@ -95,7 +95,7 @@ for (const spec of CONTAINERS) {
   check(`docker run ${spec.image}`, run.ok, JSON.stringify(run.body).slice(0, 200));
 }
 
-// Ждём готовности СУБД: discovery должен увидеть все контейнеры.
+// Wait for the DBMS readiness: discovery must see all the containers.
 let suggestions = [];
 for (let i = 0; i < 30 && suggestions.length < CONTAINERS.length; i++) {
   await new Promise((r) => setTimeout(r, 2000));
@@ -115,13 +115,13 @@ const createdConnections = [];
 const makeConnection = async (payload) => {
   const res = await req('/api/db/connections', { method: 'POST', body: JSON.stringify(payload) }, cookie);
   check(`create connection ${payload.name}`, res.ok, JSON.stringify(res.body).slice(0, 200));
-  // Пароль наружу не отдаётся.
+  // The password is not returned outward.
   check(`connection ${payload.name} has no password in response`, res.ok && !('password' in (res.body ?? {})));
   if (res.ok) createdConnections.push(res.body.id);
   return res.ok ? res.body : null;
 };
 
-// --- Негативный путь ДО сохранения: неверный пароль виден в test ---------
+// --- The negative path BEFORE saving: a wrong password is visible in test ---------
 if (mySuggestion) {
   const bad = await req(
     '/api/db/connections/test',
@@ -145,7 +145,7 @@ if (mySuggestion) {
   );
 }
 
-// --- PostgreSQL: local trust — пароль любой/пустой, оба образа -----------
+// --- PostgreSQL: local trust — any/empty password, both images -----------
 for (const s of pgSuggestions) {
   const conn = await makeConnection({
     profileId: pid,
@@ -153,8 +153,8 @@ for (const s of pgSuggestions) {
     engine: 'postgres',
     target: { kind: 'container', containerId: s.id },
     username: 'postgres',
-    // PG official-образ: локальный сокет trust — пароль не нужен, но
-    // проверяем и непустой (передачу первой строкой stdin).
+    // The PG official image: the local socket is trust — no password needed, but
+    // we also check a non-empty one (the first stdin line transfer).
     password: 'pgpw',
     defaultDatabase: 'postgres',
   });
@@ -171,7 +171,7 @@ for (const s of pgSuggestions) {
         engine: 'postgres',
         target: conn.target,
         username: 'postgres',
-        password: '', // пустой в форме = проверяем сохранённый
+        password: '', // empty in the form = check the saved one
       }),
     },
     cookie,
@@ -191,7 +191,7 @@ for (const s of pgSuggestions) {
   const select = await q("SELECT 1 AS one, 'a,b\n\"c\"' AS two", true);
   check(`pg (${s.image}) SELECT parses CSV (quoted comma/newline)`, select.ok && JSON.stringify(select.body.rows) === JSON.stringify([['1', 'a,b\n"c"']]), JSON.stringify(select.body).slice(0, 300));
 
-  // Терминатор: psql молча отбрасывает statement без ';' — сервер дописывает его сам.
+  // The terminator: psql silently drops a statement without ';' — the server appends it itself.
   const noSemicolon = await q('SELECT 42 AS answer', true);
   check(`pg (${s.image}) SELECT without trailing ; executes`, noSemicolon.ok && JSON.stringify(noSemicolon.body.rows) === JSON.stringify([['42']]), JSON.stringify(noSemicolon.body).slice(0, 300));
 
@@ -214,7 +214,7 @@ for (const s of pgSuggestions) {
   const tables = await req(`/api/db/tables?profileId=${pid}&connectionId=${conn.id}&database=postgres`, {}, cookie);
   check(`pg (${s.image}) tables list works`, tables.ok && Array.isArray(tables.body.tables), JSON.stringify(tables.body).slice(0, 200));
 
-  // Дамп: пароль уходит первой строкой stdin, gzip-магия + разжимается.
+  // The dump: the password goes as the first stdin line, the gzip magic + it unpacks.
   const dump = await fetch(`${BASE}/api/db/dump?profileId=${pid}&connectionId=${conn.id}&database=postgres`, {
     headers: { cookie },
   });
@@ -225,12 +225,12 @@ for (const s of pgSuggestions) {
   try {
     dumpText = gunzipSync(buf).toString('utf8');
   } catch {
-    /* проверим ниже */
+    /* checked below */
   }
   check(`pg (${s.image}) dump gunzips and contains sc_manual_test`, dumpText.includes('sc_manual_test'), dumpText.slice(0, 80));
 
-  // Негативный путь: несуществующая база — ошибка, а не валидный пустой .sql.gz
-  // под 200 (exit code пайпа без pipefail — это код gzip, всегда успешный).
+  // The negative path: a nonexistent database — an error, not a valid empty .sql.gz
+  // under 200 (the pipe exit code without pipefail is the gzip code, always successful).
   const badDump = await fetch(`${BASE}/api/db/dump?profileId=${pid}&connectionId=${conn.id}&database=nosuchdb`, {
     headers: { cookie },
   });
@@ -239,7 +239,7 @@ for (const s of pgSuggestions) {
   try {
     badErr = JSON.parse(badBuf.toString('utf8')).error ?? '';
   } catch {
-    /* проверим статус ниже */
+    /* check the status below */
   }
   check(
     `pg (${s.image}) dump of missing db returns error, not empty archive`,
@@ -248,7 +248,7 @@ for (const s of pgSuggestions) {
   );
 }
 
-// --- MySQL: сохранённые креденшалы, частичный update пароля ---------------
+// --- MySQL: saved credentials, a partial password update ---------------
 if (mySuggestion) {
   const conn = await makeConnection({
     profileId: pid,
@@ -276,7 +276,7 @@ if (mySuggestion) {
     );
     check('mysql test with correct password', goodTest.ok, JSON.stringify(goodTest.body).slice(0, 200));
 
-    // mysql стартует дольше — ждём возможность сделать запрос.
+    // mysql starts slower — wait until a query is possible.
     let overview = null;
     for (let i = 0; i < 30; i++) {
       overview = await req(`/api/db/overview?profileId=${pid}&connectionId=${conn.id}`, {}, cookie);
@@ -307,8 +307,8 @@ if (mySuggestion) {
     const buf = Buffer.from(await dump.arrayBuffer());
     check('mysql dump is gzip', dump.ok && buf[0] === 0x1f && buf[1] === 0x8b, `status=${dump.status} bytes=${buf.length}`);
 
-    // Частичный update: пароль не передан — сохранён прежний; смена имени
-    // не ломает подключение.
+    // A partial update: the password was not passed — the previous one is kept; a rename
+    // does not break the connection.
     const upd = await req(
       `/api/db/connections/${conn.id}`,
       {
@@ -329,7 +329,7 @@ if (mySuggestion) {
   }
 }
 
-// Список наружу — без пароля и только своего профиля.
+// The list outward — without passwords and only of the own profile.
 const listRes = await req(`/api/db/connections?profileId=${pid}`, {}, cookie);
 check(
   'connection list has no passwords',

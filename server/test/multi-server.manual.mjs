@@ -1,14 +1,14 @@
-// Тест мульти-серверного режима AI-агента против мокового OpenAI-совместимого
-// endpoint'а (mock-openai-manual.mjs, порт 8199) и двух тестовых sshd
-// (sc-test-sshd-a на 2222, sc-test-sshd-b на 2223, hostname srv-a/srv-b):
-// 1) при подключении WS приходит событие servers (home=A, attached=[A]);
-// 2) list_servers (read-only) выполняется автоматически, в выводе оба профиля,
-//    у b connected=false;
-// 3) connect_server ждёт approve, в событии есть server='test-sshd-b';
-// 4) после approve приходит servers с двумя attached и tool_result ok;
-// 5) exec_readonly выполняется на b (server='test-sshd-b', вывод содержит srv-b);
-// 6) цикл завершается done без лимита шагов;
-// 7) диалог профиля A сохранён с extraProfileIds, включающим id профиля B.
+// The AI agent multi-server mode test against a mock OpenAI-compatible
+// endpoint (mock-openai-manual.mjs, port 8199) and two test sshd instances
+// (sc-test-sshd-a on 2222, sc-test-sshd-b on 2223, hostnames srv-a/srv-b):
+// 1) on the WS connect a servers event arrives (home=A, attached=[A]);
+// 2) list_servers (read-only) runs automatically, both profiles are in the
+//    output, b has connected=false;
+// 3) connect_server waits for approve, the event carries server='test-sshd-b';
+// 4) after the approve a servers event with two attached and a tool_result ok arrive;
+// 5) exec_readonly runs on b (server='test-sshd-b', the output contains srv-b);
+// 6) the loop finishes with done without the step limit;
+// 7) the dialogue of profile A is saved with extraProfileIds including the id of profile B.
 import WebSocket from 'ws';
 
 const BASE = 'http://127.0.0.1:8091';
@@ -101,7 +101,7 @@ await new Promise((resolve, reject) => {
   ws.once('error', reject);
 });
 
-// Начальное событие servers: домашний сервер A, подключён только он
+// The initial servers event: the home server A, only it is attached
 const serversInitial = await waitFor((msg) => msg.type === 'servers');
 check('initial servers event: home = A', serversInitial.home === pidA, `home=${serversInitial.home}`);
 check(
@@ -112,27 +112,27 @@ check(
 
 ws.send(JSON.stringify({ type: 'message', content: 'подключи второй сервер и проверь его hostname' }));
 
-// 1) list_servers — read-only, автоматически; в выводе оба профиля, b не подключён
+// 1) list_servers — read-only, automatic; both profiles in the output, b not attached
 const listResult = await waitFor((msg) => msg.type === 'tool_result' && msg.name === 'list_servers');
 check('list_servers ran automatically', listResult.status === 'ok', JSON.stringify(listResult).slice(0, 300));
 let listRows = [];
 try {
   listRows = JSON.parse(listResult.output ?? '[]');
 } catch {
-  /* вывод не JSON — зафейлится проверкой ниже */
+  /* the output is not JSON — the check below fails */
 }
 const rowA = listRows.find((r) => r.name === 'test-sshd-a');
 const rowB = listRows.find((r) => r.name === 'test-sshd-b');
 check('list_servers output contains both profiles', Boolean(rowA) && Boolean(rowB), JSON.stringify(listRows.map((r) => r.name)));
 check('list_servers: A connected=true, B connected=false', rowA?.connected === true && rowB?.connected === false, JSON.stringify(listRows));
 
-// 2) connect_server — мутирующий, ждёт approve; поле server — имя целевого профиля
+// 2) connect_server — mutating, waits for approve; the server field is the target profile name
 const pending = await waitFor((msg) => msg.type === 'tool_pending' && msg.name === 'connect_server');
 check('connect_server waits for approval', pending.server === 'test-sshd-b', `server=${pending.server}`);
 
 ws.send(JSON.stringify({ type: 'approve', callId: pending.callId }));
 
-// 3) после подключения — событие servers с двумя attached и tool_result ok
+// 3) after the connect — a servers event with two attached and a tool_result ok
 const serversTwo = await waitFor((msg) => msg.type === 'servers' && msg.attached?.length === 2);
 check(
   'servers event after connect: attached = [A, B]',
@@ -143,7 +143,7 @@ check(
 const connectResult = await waitFor((msg) => msg.type === 'tool_result' && msg.callId === pending.callId);
 check('connect_server result ok', connectResult.status === 'ok', String(connectResult.output ?? '').slice(0, 120));
 
-// 4) exec_readonly выполняется на сервере B
+// 4) exec_readonly runs on server B
 const execResult = await waitFor((msg) => msg.type === 'tool_result' && msg.name === 'exec_readonly');
 check('exec_readonly addressed to B', execResult.server === 'test-sshd-b', `server=${execResult.server}`);
 check(
@@ -152,13 +152,13 @@ check(
   String(execResult.output ?? '').slice(0, 120),
 );
 
-// 5) цикл завершился финальным ответом, не лимитом шагов
+// 5) the loop finished with the final response, not the step limit
 const done = await waitFor((msg) => msg.type === 'done');
 check('agent loop finished', done.note === undefined || done.note !== 'Достигнут лимит шагов', JSON.stringify(done));
 
 ws.close();
 
-// 6) диалог профиля A сохранён с extraProfileIds, включающим B
+// 6) the dialogue of profile A is saved with extraProfileIds including B
 const dialogues = await req(`/api/ai/dialogues?profileId=${pidA}`, {}, cookie);
 check('dialogue persisted', dialogues.dialogues.length > 0, JSON.stringify(dialogues.dialogues.map((d) => d.messageCount)));
 const saved = dialogues.dialogues[0];
@@ -169,7 +169,7 @@ check(
   JSON.stringify(full.dialogue.extraProfileIds),
 );
 
-// cleanup: диалоги и оба профиля
+// cleanup: the dialogues and both profiles
 for (const d of dialogues.dialogues) {
   await req(`/api/ai/dialogues/${d.id}`, { method: 'DELETE' }, cookie);
 }

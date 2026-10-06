@@ -42,12 +42,12 @@ describe('db-connections store', () => {
     expect(list).toHaveLength(1);
     expect(list[0].password).toBe('secret');
 
-    // Наружу — без пароля, но с признаком его наличия.
+    // Outward — without the password, but with the flag of its presence.
     const safe = store.toSafeDbConnection(created);
     expect((safe as Record<string, unknown>).password).toBeUndefined();
     expect(safe.hasPassword).toBe(true);
 
-    // Файл персистится атомарно (tmp-файла после записи не остаётся).
+    // The file is persisted atomically (no tmp file left after the write).
     const files = readdirSync(dataDir);
     expect(files).toContain('db-connections.json');
     expect(files.some((f) => f.startsWith('db-connections.json.tmp'))).toBe(false);
@@ -84,7 +84,7 @@ describe('db-connections store', () => {
     });
     expect(updated.name).toBe('renamed');
     expect(updated.username).toBe('root');
-    // Пароль не передан — сохранён прежний, как у профилей SSH.
+    // The password was not passed — the previous one is kept, as with the SSH profiles.
     expect(updated.password).toBe('secret');
     expect(updated.createdAt).toBe(conn.createdAt);
     expect(store.getDbConnection(conn.id)?.password).toBe('secret');
@@ -137,8 +137,8 @@ describe('db-connections store', () => {
     rmSync(path.join(dataDir, 'db-connections.json'), { force: true });
     writeFileSync(path.join(dataDir, 'db-connections.json'), '{not json');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    // Свежий экземпляр модуля: кэш в памяти от предыдущих тестов не должен
-    // маскировать битый файл (после рестарта процесса кэша нет).
+    // A fresh module instance: the in-memory cache from previous tests must not
+    // mask the broken file (after a process restart there is no cache).
     vi.resetModules();
     const fresh = await import('../src/services/db-connections.js');
 
@@ -150,7 +150,7 @@ describe('db-connections store', () => {
     expect(warn).toHaveBeenCalled();
 
     expect(() => fresh.createDbConnection(INPUT)).toThrow(/corrupt/);
-    // Файл хранилища не пересоздаётся, пока corrupt-флаг не снят рестартом.
+    // The store file is not recreated while the corrupt flag is only cleared by a restart.
     expect(readdirSync(dataDir).filter((f) => f === 'db-connections.json')).toHaveLength(0);
     warn.mockRestore();
   });

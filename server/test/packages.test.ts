@@ -36,7 +36,7 @@ function result(code: number | null, stdout: string, stderr = ''): ExecResult {
   return { code, stdout, stderr };
 }
 
-/** Мок exec: настраиваемое поведение по команде. */
+/** Mock exec: per-command configurable behavior. */
 function fakeExec(router: (command: string) => ExecResult) {
   const calls: string[] = [];
   const execFn: ExecFn = async (_p, command) => {
@@ -51,7 +51,7 @@ function fakeExec(router: (command: string) => ExecResult) {
 // ---------------------------------------------------------------------------
 
 describe('parseAptList', () => {
-  it('обычные строки: имя с +/-, suite с дефисом, i386, upgradable from', () => {
+  it('regular lines: a name with +/-, a suite with a hyphen, i386, upgradable from', () => {
     const raw = [
       'base-files/stable-security 12.4+deb12u7 amd64 [upgradable from: 12.4+deb12u5]',
       'libgcc-s1/stable 12.2.0-14+deb12u7 amd64 [upgradable from: 12.2.0-14+deb12u5]',
@@ -65,24 +65,24 @@ describe('parseAptList', () => {
     ]);
   });
 
-  it('без скобки [upgradable from:] → current null', () => {
+  it('no [upgradable from:] bracket → current null', () => {
     const out = parseAptList('nginx/stable,stable-security 1.22.1-9+deb12u3 amd64');
     expect(out[0]).toMatchObject({ name: 'nginx', current: null, available: '1.22.1-9+deb12u3', source: 'stable,stable-security' });
   });
 
-  it('заголовок Listing… и строки без / пропускаются; пустой вывод → []', () => {
+  it('the Listing… header and lines without / are skipped; empty output → []', () => {
     expect(parseAptList('Listing... Done\nbash/stable 5.2.15-2+b7 amd64 [upgradable from: 5.2.15-2+b2]')).toHaveLength(1);
     expect(parseAptList('Listing... Done')).toEqual([]);
     expect(parseAptList('')).toEqual([]);
   });
 
-  it('WARNING apt про нестабильный CLI приходит в stderr — stdout-парсер его не видит', () => {
+  it('the apt WARNING about the unstable CLI goes to stderr — the stdout parser does not see it', () => {
     const stdout = 'bash/stable 5.2.15-2+b7 amd64 [upgradable from: 5.2.15-2+b2]';
     const stderr =
       "WARNING: apt does not have a stable CLI interface. Use with caution in scripts.";
     const out = parseAptList(`${stdout}`);
     expect(out).toHaveLength(1);
-    // stderr не влияет на парсер stdout (на уровне сервиса он игнорируется).
+    // stderr does not affect the stdout parser (ignored at the service level).
     expect(stderr).toContain('WARNING');
     expect(out[0].name).toBe('bash');
   });
@@ -93,7 +93,7 @@ describe('parseAptList', () => {
 // ---------------------------------------------------------------------------
 
 describe('parseDnfCheckUpdate', () => {
-  it('обычные строки: name.arch version repo', () => {
+  it('regular lines: name.arch version repo', () => {
     const raw = ['bash.x86_64 5.2.15-2.fc39 updates', 'kernel.x86_64 6.5.6-200.fc39 updates'].join('\n');
     const out = parseDnfCheckUpdate(raw);
     expect(out).toEqual([
@@ -102,18 +102,18 @@ describe('parseDnfCheckUpdate', () => {
     ]);
   });
 
-  it('имена с точками сохраняются как есть; пустой вывод → []', () => {
+  it('names with dots are kept as is; empty output → []', () => {
     const out = parseDnfCheckUpdate('libstdc++.x86_64 13.2.1-7.fc39 updates');
     expect(out[0].name).toBe('libstdc++.x86_64');
     expect(parseDnfCheckUpdate('')).toEqual([]);
   });
 
-  it('строки короче 3 токенов пропускаются', () => {
+  it('lines shorter than 3 tokens are skipped', () => {
     const raw = ['bash.x86_64 5.2.15-2.fc39 updates', 'garbage line', 'single'].join('\n');
     expect(parseDnfCheckUpdate(raw)).toHaveLength(1);
   });
 
-  it('блок «Obsoleting Packages» не засчитывается в список обновлений', () => {
+  it('the "Obsoleting Packages" block does not count into the updates list', () => {
     const raw = [
       'bash.x86_64 5.2.15-2.fc39 updates',
       'kernel.x86_64 6.5.6-200.fc39 updates',
@@ -124,7 +124,7 @@ describe('parseDnfCheckUpdate', () => {
     expect(parseDnfCheckUpdate(raw)).toHaveLength(2);
   });
 
-  it('заголовок «Obsoleting Packages» останавливает парсинг и без обычных обновлений', () => {
+  it('the "Obsoleting Packages" header stops parsing even without regular updates', () => {
     const raw = ['Obsoleting Packages', 'oldpkg.x86_64 1.0-1 fedora'].join('\n');
     expect(parseDnfCheckUpdate(raw)).toEqual([]);
   });
@@ -135,29 +135,29 @@ describe('parseDnfCheckUpdate', () => {
 // ---------------------------------------------------------------------------
 
 describe('parseApkVersionLt', () => {
-  it('однострочные: name-version < version (справа только версия)', () => {
+  it('one-liners: name-version < version (the right side is the version only)', () => {
     const out = parseApkVersionLt('musl-1.2.4-r2 < 1.2.5-r0');
     expect(out).toEqual([{ name: 'musl', current: '1.2.4-r2', available: '1.2.5-r0', source: null }]);
   });
 
-  it('имя с дефисами: alpine-baselayout-3.4.3-r1 → alpine-baselayout / 3.4.3-r1', () => {
+  it('a name with hyphens: alpine-baselayout-3.4.3-r1 → alpine-baselayout / 3.4.3-r1', () => {
     const out = parseApkVersionLt('alpine-baselayout-3.4.3-r1 < 3.6.5-r0');
     expect(out[0]).toMatchObject({ name: 'alpine-baselayout', current: '3.4.3-r1', available: '3.6.5-r0' });
   });
 
-  it('версия без -r-суффикса', () => {
+  it('a version without an -r suffix', () => {
     const out = parseApkVersionLt('zlib-1.3 < 1.3.1');
     expect(out[0]).toMatchObject({ name: 'zlib', current: '1.3', available: '1.3.1' });
   });
 
-  it('многострочный перенос: строка без < — продолжение available предыдущей записи', () => {
+  it('a multi-line wrap: a line without < continues the available of the previous entry', () => {
     const raw = ['alpine-baselayout-3.4.3-r1 <', '  3.6.5-r0'].join('\n');
     const out = parseApkVersionLt(raw);
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ name: 'alpine-baselayout', current: '3.4.3-r1', available: '3.6.5-r0' });
   });
 
-  it('мусор до первой записи (WARNING про APKINDEX) пропускается', () => {
+  it('garbage before the first entry (an APKINDEX WARNING) is skipped', () => {
     const raw = ['WARNING: Ignoring APKINDEX.xyz.tar.gz: No such file or directory', 'musl-1.2.4-r2 < 1.2.5-r0'].join('\n');
     const out = parseApkVersionLt(raw);
     expect(out).toHaveLength(1);
@@ -166,40 +166,40 @@ describe('parseApkVersionLt', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Детект менеджера
+// Manager detection
 // ---------------------------------------------------------------------------
 
 describe('parsePmDetection', () => {
-  it('basename пути → менеджер', () => {
+  it('a path basename → manager', () => {
     expect(parsePmDetection('/usr/bin/apt-get\n')).toBe('apt');
     expect(parsePmDetection('/usr/bin/dnf')).toBe('dnf');
     expect(parsePmDetection('/sbin/apk')).toBe('apk');
     expect(parsePmDetection('/usr/bin/yum')).toBe('yum');
   });
 
-  it('пустой вывод / незнакомая первая строка → null', () => {
+  it('empty output / an unknown first line → null', () => {
     expect(parsePmDetection('')).toBeNull();
     expect(parsePmDetection('command not found')).toBeNull();
   });
 
-  it('detectPmCommand — статическая строка ||-цепочки', () => {
+  it('detectPmCommand — the static ||-chain string', () => {
     expect(detectPmCommand()).toBe('command -v apt-get || command -v dnf || command -v yum || command -v apk');
   });
 });
 
 // ---------------------------------------------------------------------------
-// Команды снимка и коды
+// Snapshot commands and exit codes
 // ---------------------------------------------------------------------------
 
 describe('listUpdatesCommand / isUpdatesExitCode / parseListCode', () => {
-  it('команды по менеджеру', () => {
+  it('commands per manager', () => {
     expect(listUpdatesCommand('apt')).toBe('apt list --upgradable');
     expect(listUpdatesCommand('dnf')).toBe('dnf -q check-update');
     expect(listUpdatesCommand('yum')).toBe('yum -q check-update');
     expect(listUpdatesCommand('apk')).toBe("apk version -l '<'");
   });
 
-  it('dnf/yum: 100 и 0 — ок (100 = есть обновления), 1 — нет; apt/apk: только 0', () => {
+  it('dnf/yum: 100 and 0 are ok (100 = updates exist), 1 — none; apt/apk: only 0', () => {
     expect(isUpdatesExitCode('dnf', 100)).toBe(true);
     expect(isUpdatesExitCode('dnf', 0)).toBe(true);
     expect(isUpdatesExitCode('dnf', 1)).toBe(false);
@@ -210,13 +210,13 @@ describe('listUpdatesCommand / isUpdatesExitCode / parseListCode', () => {
     expect(isUpdatesExitCode('apt', null)).toBe(false);
   });
 
-  it('parseListCode: маркер → число; маркера нет → null', () => {
+  it('parseListCode: the marker → a number; no marker → null', () => {
     expect(parseListCode('bash/stable 5.2 amd64\n@@LIST_CODE@@0\n')).toBe(0);
     expect(parseListCode('bash.x86_64 5.2 updates\n@@LIST_CODE@@100\n')).toBe(100);
     expect(parseListCode('bash/stable 5.2 amd64\n')).toBeNull();
   });
 
-  it('splitListSection отрезает текст по маркеру — код и reboot-секция не попадают в парсер', () => {
+  it('splitListSection cuts the text by the marker — the code and reboot section never reach the parser', () => {
     const raw = ['bash/stable 5.2 amd64 [upgradable from: 5.1]', '@@LIST_CODE@@0', '@@REBOOT@@', 'linux-image'].join('\n');
     expect(splitListSection(raw)).toBe('bash/stable 5.2 amd64 [upgradable from: 5.1]\n');
     expect(parseAptList(splitListSection(raw))).toHaveLength(1);
@@ -224,7 +224,7 @@ describe('listUpdatesCommand / isUpdatesExitCode / parseListCode', () => {
 });
 
 describe('rebootCheckSuffix / snapshotCommand / parseRebootSection', () => {
-  it('apt-суффикс печатает маркер только при существующем reboot-required и читает .pkgs', () => {
+  it('the apt suffix prints the marker only when reboot-required exists and reads .pkgs', () => {
     const suffix = rebootCheckSuffix('apt');
     expect(suffix).toContain('-f /var/run/reboot-required');
     expect(suffix).toContain('@@REBOOT@@');
@@ -232,36 +232,36 @@ describe('rebootCheckSuffix / snapshotCommand / parseRebootSection', () => {
     expect(suffix.startsWith('; ')).toBe(true);
   });
 
-  it('dnf-суффикс: needs-restarting -r с маркером кода', () => {
+  it('the dnf suffix: needs-restarting -r with a code marker', () => {
     const suffix = rebootCheckSuffix('dnf');
     expect(suffix).toContain('needs-restarting -r');
     expect(suffix).toContain('@@RESTART_CODE@@$?');
   });
 
-  it('apk — без суффикса', () => {
+  it('apk — no suffix', () => {
     expect(rebootCheckSuffix('apk')).toBe('');
   });
 
-  it('snapshotCommand склеивает список, маркер кода и reboot-суффикс встык', () => {
+  it('snapshotCommand joins the list, the code marker and the reboot suffix back to back', () => {
     const cmd = snapshotCommand('apt');
     expect(cmd).toBe(
       'apt list --upgradable; echo "@@LIST_CODE@@$?"; if [ -f /var/run/reboot-required ]; then echo \'@@REBOOT@@\'; cat /var/run/reboot-required.pkgs 2>/dev/null; fi',
     );
-    // Без разделителя между списком и echo получилась бы «…upgradableecho» — стык проверяется.
+    // Without a separator between the list and echo we would get "…upgradableecho" — the joint is checked.
     expect(cmd).not.toContain('upgradableecho');
     expect(cmd.startsWith('apt list --upgradable; echo')).toBe(true);
   });
 
-  it('parseRebootSection: маркера нет → {code: null, packages: []}', () => {
+  it('parseRebootSection: no marker → {code: null, packages: []}', () => {
     expect(parseRebootSection('bash/stable 5.2 amd64\n@@LIST_CODE@@0\n')).toEqual({ code: null, packages: [] });
   });
 
-  it('apt-секция: пакеты из .pkgs, кода нет', () => {
+  it('an apt section: packages from .pkgs, no code', () => {
     const raw = '@@REBOOT@@\nlinux-image-amd64\nopenssh-server\n';
     expect(parseRebootSection(raw)).toEqual({ code: null, packages: ['linux-image-amd64', 'openssh-server'] });
   });
 
-  it('dnf-секция: код @@RESTART_CODE@@1 и информационный вывод', () => {
+  it('a dnf section: the @@RESTART_CODE@@1 code and informational output', () => {
     const raw = '@@REBOOT@@\nCore libraries have been updated\n@@RESTART_CODE@@1\n';
     expect(parseRebootSection(raw)).toEqual({ code: 1, packages: ['Core libraries have been updated'] });
   });
@@ -272,7 +272,7 @@ describe('rebootCheckSuffix / snapshotCommand / parseRebootSection', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildApplyCommand', () => {
-  it('с sudo: прямая форма без sh -c для всех менеджеров', () => {
+  it('with sudo: the direct form without sh -c for all managers', () => {
     expect(buildApplyCommand('apt', true)).toBe(
       "sudo -S -p '' -- env DEBIAN_FRONTEND=noninteractive apt-get -y upgrade",
     );
@@ -284,7 +284,7 @@ describe('buildApplyCommand', () => {
     }
   });
 
-  it('без sudo — plain-команды; всё статично, пользовательский ввод не интерполируется', () => {
+  it('without sudo — plain commands; everything is static, no user input is interpolated', () => {
     expect(buildApplyCommand('apt', false)).toBe('env DEBIAN_FRONTEND=noninteractive apt-get -y upgrade');
     expect(buildApplyCommand('dnf', false)).toBe('dnf -y upgrade');
     expect(buildApplyCommand('yum', false)).toBe('yum -y upgrade');
@@ -297,7 +297,7 @@ describe('buildApplyCommand', () => {
 // ---------------------------------------------------------------------------
 
 describe('dedupeByName', () => {
-  it('первое вхождение выигрывает', () => {
+  it('the first occurrence wins', () => {
     const out = dedupeByName([
       { name: 'bash', current: '5.1', available: '5.2', source: 'stable' },
       { name: 'bash', current: '5.1', available: '5.3', source: 'stable-security' },
@@ -309,11 +309,11 @@ describe('dedupeByName', () => {
 });
 
 // ---------------------------------------------------------------------------
-// collectPackagesSnapshot: поток через мок exec, кэш 60 с
+// collectPackagesSnapshot: flow via a mocked exec, 60 s cache
 // ---------------------------------------------------------------------------
 
 describe('collectPackagesSnapshot', () => {
-  it('менеджер не найден → снимок-заглушка (не ошибка)', async () => {
+  it('manager not found → a placeholder snapshot (not an error)', async () => {
     const p1: Profile = { ...profile, id: 'pkgs-none' };
     const { execFn } = fakeExec(() => result(0, 'command not found\n'));
     const snap = await collectPackagesSnapshot(p1, { execFn });
@@ -323,7 +323,7 @@ describe('collectPackagesSnapshot', () => {
     expect(snap.rebootRequired).toBe(false);
   });
 
-  it('apt: список + reboot по маркеру + возраст индекса (SFTP недоступен → тихий null)', async () => {
+  it('apt: the list + reboot by marker + the index age (SFTP unavailable → a silent null)', async () => {
     const p1: Profile = { ...profile, id: 'pkgs-apt' };
     const { calls, execFn } = fakeExec((command) => {
       if (command === detectPmCommand()) return result(0, '/usr/bin/apt-get\n');
@@ -342,11 +342,11 @@ describe('collectPackagesSnapshot', () => {
     ]);
     expect(snap.rebootRequired).toBe(true);
     expect(snap.rebootPackages).toEqual(['linux-image-amd64']);
-    expect(snap.indexAgeMs).toBeNull(); // SFTP-stat в unit-окружении недоступен — тихий null
+    expect(snap.indexAgeMs).toBeNull(); // SFTP-stat is unavailable in the unit environment — a silent null
     expect(calls).toHaveLength(2);
   });
 
-  it('dnf: код 100 не трактуется ошибкой, список парсится', async () => {
+  it('dnf: exit code 100 is not treated as an error, the list parses', async () => {
     const p1: Profile = { ...profile, id: 'pkgs-dnf' };
     const { execFn } = fakeExec((command) => {
       if (command === detectPmCommand()) return result(0, '/usr/bin/dnf\n');
@@ -359,7 +359,7 @@ describe('collectPackagesSnapshot', () => {
     expect(snap.rebootRequired).toBe(false);
   });
 
-  it('dnf: needs-restarting с кодом 1 → rebootRequired true', async () => {
+  it('dnf: needs-restarting with code 1 → rebootRequired true', async () => {
     const p1: Profile = { ...profile, id: 'pkgs-dnf-reboot' };
     const { execFn } = fakeExec((command) => {
       if (command === detectPmCommand()) return result(0, '/usr/bin/dnf\n');
@@ -370,7 +370,7 @@ describe('collectPackagesSnapshot', () => {
     expect(snap.rebootPackages).toEqual(['Core libs updated']);
   });
 
-  it('код списка не проходит isUpdatesExitCode → ошибка со stderr', async () => {
+  it('the list code fails isUpdatesExitCode → an error with stderr', async () => {
     const p1: Profile = { ...profile, id: 'pkgs-err' };
     const { execFn } = fakeExec((command) => {
       if (command === detectPmCommand()) return result(0, '/usr/bin/apt-get\n');
@@ -379,7 +379,7 @@ describe('collectPackagesSnapshot', () => {
     await expect(collectPackagesSnapshot(p1, { execFn })).rejects.toThrow(/could not be found/);
   });
 
-  it('кэш 60 с: параллельные вызовы делят один exec; инвалидация сбрасывает', async () => {
+  it('a 60 s cache: parallel calls share one exec; invalidation resets it', async () => {
     const p1: Profile = { ...profile, id: 'cache-pkgs' };
     let execs = 0;
     const execFn: ExecFn = async (_p, command) => {
@@ -391,7 +391,7 @@ describe('collectPackagesSnapshot', () => {
     const b = collectPackagesSnapshot(p1, { execFn });
     expect(a).toBe(b);
     const snap = await a;
-    expect(execs).toBe(2); // детект + снимок, но без повторов между a и b
+    expect(execs).toBe(2); // detect + snapshot, but no repeats between a and b
     expect(snap.pm).toBe('apk');
     expect(snap.updates[0].name).toBe('musl');
     invalidatePackagesCache(p1.id);
@@ -400,7 +400,7 @@ describe('collectPackagesSnapshot', () => {
     await c;
   });
 
-  it('ошибочный промис удаляется из кэша — следующий вызов исполняет заново', async () => {
+  it('a failed promise is evicted from the cache — the next call executes again', async () => {
     const p1: Profile = { ...profile, id: 'cache-err-pkgs' };
     await expect(collectPackagesSnapshot(p1, { execFn: async () => { throw new Error('ssh down'); } })).rejects.toThrow(
       'ssh down',
@@ -418,7 +418,7 @@ describe('collectPackagesSnapshot', () => {
 });
 
 describe('detectPackageManager', () => {
-  it('свежий детект (не из кэша снимка)', async () => {
+  it('a fresh detection (not from the snapshot cache)', async () => {
     const { execFn, calls } = fakeExec(() => result(0, '/usr/bin/yum\n'));
     const pm = await detectPackageManager(profile, { execFn });
     expect(pm).toBe('yum');

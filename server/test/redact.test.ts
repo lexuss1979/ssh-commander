@@ -14,59 +14,59 @@ const PRIVATE_KEY = [
 ].join('\n');
 
 describe('redactSecrets', () => {
-  it('вырезает PEM-блок приватного ключа целиком', () => {
+  it('cuts out a whole private key PEM block', () => {
     const out = redactSecrets(`ключ:\n${PRIVATE_KEY}\nконец`);
     expect(out).not.toContain('b3BlbnNzaC1rZXktdjEA');
     expect(out).not.toContain('BEGIN OPENSSH PRIVATE KEY');
     expect(out).toContain('конец');
   });
 
-  it('вырезает оборванный PEM-блок (файл прочитан не до конца)', () => {
+  it('cuts out a truncated PEM block (the file was read incompletely)', () => {
     const cut = PRIVATE_KEY.split('\n').slice(0, 2).join('\n');
     const out = redactSecrets(`before\n${cut}`);
     expect(out).not.toContain('b3BlbnNzaC1rZXktdjEA');
     expect(out).toContain('before');
   });
 
-  it('вырезает значения по говорящему имени, сохраняя само имя', () => {
+  it('cuts out values by their telling name, keeping the name itself', () => {
     const out = redactSecrets('MARIADB_ROOT_PASSWORD=chpass123 DB_HOST=db');
     expect(out).toContain('MARIADB_ROOT_PASSWORD=');
     expect(out).not.toContain('chpass123');
     expect(out).toContain('DB_HOST=db');
   });
 
-  it('работает и для JSON-формы записи', () => {
+  it('also works for the JSON form of an assignment', () => {
     const out = redactSecrets('{"api_key": "abcdef123456", "port": 5432}');
     expect(out).not.toContain('abcdef123456');
     expect(out).toContain('"port": 5432');
   });
 
-  it('ловит токены известного вида без имени рядом', () => {
+  it('catches tokens of a known shape without a name nearby', () => {
     const out = redactSecrets('ключ sk-abcdefghijklmnopqrstuvwxyz012345 и AKIAIOSFODNN7EXAMPLE');
     expect(out).not.toContain('sk-abcdefghijklmnopqrstuvwxyz012345');
     expect(out).not.toContain('AKIAIOSFODNN7EXAMPLE');
   });
 
-  it('вырезает только пароль из URL с учётными данными', () => {
+  it('cuts out only the password from a URL with credentials', () => {
     const out = redactSecrets('postgres://appuser:s3cr3tpw@db.internal:5432/app');
     expect(out).not.toContain('s3cr3tpw');
     expect(out).toContain('appuser');
     expect(out).toContain('db.internal:5432/app');
   });
 
-  it('не трогает конфиги, где имя отделено пробелом (sshd_config)', () => {
+  it('leaves configs where the name is separated by a space untouched (sshd_config)', () => {
     const conf = 'PasswordAuthentication yes\nPermitRootLogin prohibit-password';
     expect(redactSecrets(conf)).toBe(conf);
   });
 
-  it('маркер локализован по языку сессии', () => {
+  it('the marker is localized by the session language', () => {
     expect(redactSecrets('TOKEN=abcdef', 'en')).toMatch(/secret hidden by the app/);
     expect(redactSecrets('TOKEN=abcdef', 'ru')).toMatch(/секрет скрыт приложением/);
   });
 });
 
 describe('redactDockerEnv', () => {
-  it('скрывает значения Env, оставляя имена переменных', () => {
+  it('hides the Env values, keeping the variable names', () => {
     const inspected = [
       {
         Name: '/app',
@@ -82,12 +82,12 @@ describe('redactDockerEnv', () => {
     expect(env[1]).toBe('NODE_ENV=production');
     expect(env[2]).toContain('LLM_API_KEY=');
     expect(env[2]).not.toContain('sk-verysecretvalue');
-    // Секрет под безобидным именем тоже скрыт: по значению угадать нельзя.
+    // A secret under an innocent name is hidden too: it cannot be guessed by value.
     expect(env[3]).not.toContain('hunter2');
     expect(out[0].Config.Image).toBe('app:latest');
   });
 
-  it('находит Env на любой глубине и не ломает остальную структуру', () => {
+  it('finds Env at any depth and does not break the rest of the structure', () => {
     const out = redactDockerEnv({ a: { b: { ContainerConfig: { Env: ['SECRET=x1'] } } }, n: 1 }) as {
       a: { b: { ContainerConfig: { Env: string[] } } };
       n: number;
@@ -98,7 +98,7 @@ describe('redactDockerEnv', () => {
 });
 
 describe('isSensitivePath / sensitivePathsIn', () => {
-  it('опознаёт файлы секретов', () => {
+  it('recognizes secret files', () => {
     for (const p of [
       '/srv/app/.env',
       '/srv/app/.env.production',
@@ -115,7 +115,7 @@ describe('isSensitivePath / sensitivePathsIn', () => {
     }
   });
 
-  it('не мешает обычным путям', () => {
+  it('does not interfere with regular paths', () => {
     for (const p of [
       '/var/log/syslog',
       '/etc/nginx/nginx.conf',
@@ -128,7 +128,7 @@ describe('isSensitivePath / sensitivePathsIn', () => {
     }
   });
 
-  it('находит путь к секрету среди аргументов команды', () => {
+  it('finds a secret path among the command arguments', () => {
     expect(sensitivePathsIn('cat /root/.ssh/id_rsa')).toEqual(['/root/.ssh/id_rsa']);
     expect(sensitivePathsIn('grep -r pass /srv/app/.env')).toEqual(['/srv/app/.env']);
     expect(sensitivePathsIn('tail -n 50 /var/log/syslog')).toEqual([]);

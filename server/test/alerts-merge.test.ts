@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-// Модуль клиента алертов — чистый TypeScript без React/DOM (localStorage
-// только в load/save), поэтому покрывается раннером сервера напрямую.
+// The alert client module — pure TypeScript without React/DOM (localStorage
+// only in load/save), so it is covered by the server runner directly.
 import {
   ALERT_CLEAR_DELTA,
   alertKey,
@@ -38,7 +38,7 @@ function active(kind: AlertRuleState['kind'], subject: string | undefined, since
 }
 
 describe('ALERT_CLEAR_DELTA / alertKey', () => {
-  it('дельты снятия по kind', () => {
+  it('the clear deltas per kind', () => {
     expect(ALERT_CLEAR_DELTA).toEqual({
       'server-down': 0,
       disk: 5,
@@ -47,14 +47,14 @@ describe('ALERT_CLEAR_DELTA / alertKey', () => {
     });
   });
 
-  it('ключ включает subject, без subject — пустой хвост', () => {
+  it('the key includes the subject, without a subject — an empty tail', () => {
     expect(alertKey({ profileId: 'a', kind: 'disk', subject: '/data' })).toBe('a:disk:/data');
     expect(alertKey({ profileId: 'a', kind: 'memory' })).toBe('a:memory:');
   });
 });
 
 describe('mergeAlertStates', () => {
-  it('новое активное правило → fired с since: now; неактивное — пропуск', () => {
+  it('a newly active rule → fired with since: now; an inactive one — skipped', () => {
     const now = 1000;
     const { next, fired, resolved } = mergeAlertStates(
       new Map(),
@@ -71,10 +71,10 @@ describe('mergeAlertStates', () => {
     expect(resolved).toEqual([]);
   });
 
-  it('гистерезис: inactive в зоне порог−дельта держится, message/value обновляются, since сохраняется', () => {
+  it('hysteresis: inactive within threshold−delta is held, message/value are updated, since is kept', () => {
     const prev = new Map([['p1:disk:/', active('disk', '/', 500)]]);
-    // 87 > 90 − 5 — держится; сервер теперь присылает message всегда,
-    // текст несёт текущую цифру.
+    // 87 > 90 − 5 — held; the server now always sends the message,
+    // the text carries the current figure.
     const { next, fired, resolved } = mergeAlertStates(
       prev,
       [rule({ kind: 'disk', subject: '/', active: false, value: 87, message: 'Диск «/» занят на 87.0%' })],
@@ -89,7 +89,7 @@ describe('mergeAlertStates', () => {
     expect(resolved).toEqual([]);
   });
 
-  it('снятие: value ≤ порога − дельта → resolved (граница включительно)', () => {
+  it('clearing: value ≤ threshold − delta → resolved (the boundary inclusive)', () => {
     const prev = new Map([['p1:disk:/', active('disk', '/', 500)]]);
     const { next, resolved } = mergeAlertStates(
       prev,
@@ -101,7 +101,7 @@ describe('mergeAlertStates', () => {
     expect(resolved[0].key).toBe('p1:disk:/');
   });
 
-  it('дельта 0 у server-down: снятие строго по переходу active', () => {
+  it('the delta 0 of server-down: cleared strictly by the active transition', () => {
     const down = active('server-down', undefined, 500);
     const held = mergeAlertStates(
       new Map([['p1:server-down:', down]]),
@@ -112,7 +112,7 @@ describe('mergeAlertStates', () => {
     expect(held.resolved).toHaveLength(1);
   });
 
-  it('активное правило остаётся активным (не пере-fired)', () => {
+  it('an active rule stays active (not re-fired)', () => {
     const prev = new Map([['p1:disk:/', active('disk', '/', 500)]]);
     const { next, fired } = mergeAlertStates(
       prev,
@@ -124,7 +124,7 @@ describe('mergeAlertStates', () => {
     expect(next.get('p1:disk:/')!.since).toBe(500);
   });
 
-  it('ключ, пропавший из ответа (профиль удалён, диск отмонтирован) → resolved молча', () => {
+  it('a key missing from the response (a profile removed, a disk unmounted) → resolved silently', () => {
     const prev = new Map([
       ['p1:disk:/', active('disk', '/', 500)],
       ['p1:load:', active('load', undefined, 700)],
@@ -138,7 +138,7 @@ describe('mergeAlertStates', () => {
     expect(resolved.map((a) => a.key)).toEqual(['p1:load:']);
   });
 
-  it('первая синхронизация (prev пуст) — активные просто кладутся в fired', () => {
+  it('the first sync (empty prev) — active rules simply land in fired', () => {
     const { fired } = mergeAlertStates(
       new Map(),
       [rule({ kind: 'disk', subject: '/', active: true, value: 91 })],
@@ -149,7 +149,7 @@ describe('mergeAlertStates', () => {
 });
 
 describe('loadAlertsSettings', () => {
-  it('без localStorage (Node) → дефолты, исключение проглатывается', () => {
+  it('without localStorage (Node) → the defaults, the exception is swallowed', () => {
     expect(loadAlertsSettings()).toEqual({
       enabled: true,
       disk: 90,

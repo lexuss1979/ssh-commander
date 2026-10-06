@@ -10,20 +10,20 @@ const history: ChatMessage[] = [
 ];
 
 describe('toolsForRequest', () => {
-  it('в режиме планирования инструменты не передаются в API вовсе', () => {
+  it('in planning mode the tools are not passed to the API at all', () => {
     // undefined → JSON.stringify опускает ключ tools из тела запроса.
     expect(toolsForRequest(true)).toBeUndefined();
     expect(JSON.stringify({ tools: toolsForRequest(true) })).toBe('{}');
   });
 
-  it('в обычном режиме возвращается полный набор инструментов', () => {
+  it('in the regular mode the full tool set is returned', () => {
     expect(toolsForRequest(false)).toEqual(getToolDefs('ru', false));
     expect(toolsForRequest(false)?.length).toBeGreaterThan(0);
   });
 });
 
 describe('buildPlanRequestMessages', () => {
-  it('дополняет системный промпт инструкцией планирования на языке сессии', () => {
+  it('appends the planning instruction in the session language to the system prompt', () => {
     const result = buildPlanRequestMessages(history, 'ru');
     expect(result[0].role).toBe('system');
     expect(result[0].content).toContain('Базовый системный промпт.');
@@ -31,27 +31,27 @@ describe('buildPlanRequestMessages', () => {
     expect(result[0].content).toContain('НИЧЕГО не выполняй');
   });
 
-  it('lang=en — английская инструкция, без кириллицы в дополнении', () => {
+  it('lang=en — the English instruction, no Cyrillic in the addition', () => {
     const result = buildPlanRequestMessages(history, 'en');
     expect(result[0].content).toContain(planModeInstruction('en'));
     expect(result[0].content).not.toContain(planModeInstruction('ru'));
-    // История пользователя — данные, не переводятся.
+    // The user history is data, it is not translated.
     expect(result[1]).toEqual(history[1]);
   });
 
-  it('сохраняет остальные сообщения без изменений', () => {
+  it('keeps the other messages unchanged', () => {
     const result = buildPlanRequestMessages(history, 'ru');
     expect(result).toHaveLength(history.length);
     expect(result[1]).toEqual(history[1]);
   });
 
-  it('не мутирует исходный массив сообщений', () => {
+  it('does not mutate the original message array', () => {
     const snapshot = JSON.stringify(history);
     buildPlanRequestMessages(history, 'ru');
     expect(JSON.stringify(history)).toBe(snapshot);
   });
 
-  it('история без системного сообщения возвращается как есть', () => {
+  it('a history without a system message is returned as is', () => {
     const noSystem: ChatMessage[] = [{ role: 'user', content: 'привет' }];
     expect(buildPlanRequestMessages(noSystem, 'ru')).toEqual(noSystem);
   });

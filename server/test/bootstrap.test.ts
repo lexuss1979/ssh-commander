@@ -41,8 +41,8 @@ import type { ExecResult, Profile } from '../src/types.js';
 const AUTH_FAILED = 'All configured authentication methods failed';
 
 // --------------------------------------------------------------------------
-// Мок SSH-сервера: скриптованные сессии; парольный/ключевой вход имитируется
-// флагами, exec отвечает по префиксам команд (те же билдеры, что в сервисе).
+// Mock SSH server: scripted sessions; password/key login is simulated via
+// flags, exec answers by command prefixes (the same builders as the service).
 // --------------------------------------------------------------------------
 
 class FakeSession implements BootstrapSshSession {
@@ -64,7 +64,7 @@ class FakeSession implements BootstrapSshSession {
     this.alive = false;
   }
 
-  /** Имитация обрыва сети: сессия мертва, хотя close() не вызывали. */
+  /** Simulates a network drop: the session is dead although close() was never called. */
   kill(): void {
     this.alive = false;
   }
@@ -76,7 +76,7 @@ class FakeSshServer {
   installEcho: 'added' | 'present' = 'added';
   hasMatch = false;
   dropinSupported = true;
-  /** Что отвечает `sshd -T` (в тестах с hardening — и до, и после правок). */
+  /** What `sshd -T` answers (in hardening tests — both before and after the edits). */
   sshdTOutput = ['port 22', 'passwordauthentication yes', 'kbdinteractiveauthentication yes'].join('\n');
   sshdTEffectiveAfter: Record<string, string> | null = null;
   sshdTFailsAfter = false;
@@ -115,7 +115,7 @@ class FakeSshServer {
         ? { code: 1, stdout: '', stderr: "/etc/ssh/sshd_config: Bad directive" }
         : ok('');
     }
-    if (cmd.startsWith('cp ') && cmd.includes(SSHD_MAIN_CONFIG)) return ok(''); // бэкап / восстановление
+    if (cmd.startsWith('cp ') && cmd.includes(SSHD_MAIN_CONFIG)) return ok(''); // backup / restore
     if (cmd.startsWith('cat ')) return ok(this.mainConfig);
     if (cmd.startsWith("printf '%s'")) return ok('');
     if (cmd.startsWith('rm -f ') && cmd.includes(SSHD_DROPIN_PATH)) return ok('');
@@ -143,7 +143,7 @@ class FakeSshServer {
     return base;
   }
 
-  /** После первой password-сессии пароль отклоняется (контрольная проверка). */
+  /** After the first password session the password is rejected (control check). */
   depsWithPasswordRejectedLater(keysDir: string): BootstrapDeps {
     const deps = this.deps(keysDir);
     const origConnect = deps.connect;
@@ -171,8 +171,8 @@ function input(overrides: Partial<BootstrapInput> = {}): BootstrapInput {
   };
 }
 
-describe('bootstrap: генерация ключа', () => {
-  it('ssh2 парсит сгенерированный приватный ключ (OpenSSH-формат)', () => {
+describe('bootstrap: key generation', () => {
+  it('ssh2 parses the generated private key (OpenSSH format)', () => {
     const { privateKeyPem } = generateKeyPair('prod-01');
     expect(privateKeyPem).toMatch(/^-----BEGIN OPENSSH PRIVATE KEY-----\n/);
     expect(privateKeyPem.endsWith('-----END OPENSSH PRIVATE KEY-----\n')).toBe(true);
@@ -181,14 +181,14 @@ describe('bootstrap: генерация ключа', () => {
     expect((parsed as { type: string }).type).toBe('ssh-ed25519');
   });
 
-  it('публичная строка — формат authorized_keys с комментарием профиля', () => {
+  it('public line is an authorized_keys entry with the profile comment', () => {
     const { publicKeyLine } = generateKeyPair('prod 01');
     expect(publicKeyLine).toMatch(/^ssh-ed25519 [A-Za-z0-9+/=]{68} ssh-commander@prod 01$/);
     expect(pubkeyBody(publicKeyLine)).toMatch(/^ssh-ed25519 [A-Za-z0-9+/=]{68}$/);
     expect(pubkeyBody(publicKeyLine)).not.toContain('ssh-commander@');
   });
 
-  it('две генерации дают разные пары; публичная строка парсится ssh2', () => {
+  it('two generations produce different pairs; the public line parses with ssh2', () => {
     const first = generateKeyPair('x');
     const second = generateKeyPair('x');
     expect(second.publicKeyLine).not.toBe(first.publicKeyLine);
@@ -198,7 +198,7 @@ describe('bootstrap: генерация ключа', () => {
     expect((pub as { type: string }).type).toBe('ssh-ed25519');
   });
 
-  it('buildKeyFileName: санитизация как у memory/, коллизия — числовой суффикс', () => {
+  it('buildKeyFileName: sanitization like memory/, collision gets a numeric suffix', () => {
     expect(buildKeyFileName([], 'prod-01')).toBe('prod-01.ed25519');
     expect(buildKeyFileName([], 'Мой сервер')).toBe('server.ed25519');
     expect(buildKeyFileName([], '../../etc')).toBe('etc.ed25519');
@@ -208,8 +208,8 @@ describe('bootstrap: генерация ключа', () => {
   });
 });
 
-describe('bootstrap: билдеры команд', () => {
-  it('buildInstallKeyCommand: umask/mkdir/chmod, grep -F по телу без комментария, append, restorecon', () => {
+describe('bootstrap: command builders', () => {
+  it('buildInstallKeyCommand: umask/mkdir/chmod, grep -F by key body without the comment, append, restorecon', () => {
     const body = 'ssh-ed25519 AAAAB3NzaC1yc2EAAAADAQABAAABAQhash';
     const line = `${body} ssh-commander@prod-01`;
     const cmd = buildInstallKeyCommand(body, line);
@@ -223,20 +223,20 @@ describe('bootstrap: билдеры команд', () => {
     expect(cmd).toContain('command -v restorecon >/dev/null 2>&1 && restorecon -R ~/.ssh; true');
   });
 
-  it('buildInstallKeyCommand экранирует кавычку в комментарии через shq', () => {
+  it('buildInstallKeyCommand escapes a quote in the comment via shq', () => {
     const line = 'ssh-ed25519 AAAA ssh-commander@O\'Brien';
     const cmd = buildInstallKeyCommand('ssh-ed25519 AAAA', line);
     expect(cmd).toContain(`'ssh-ed25519 AAAA ssh-commander@O'\\''Brien'`);
   });
 
-  it('buildRemoveKeyCommand: grep -Fv с защитой пустого результата', () => {
+  it('buildRemoveKeyCommand: grep -Fv with empty-result protection', () => {
     const cmd = buildRemoveKeyCommand('ssh-ed25519 AAAA');
     expect(cmd).toContain(`grep -Fv -- 'ssh-ed25519 AAAA' ~/.ssh/authorized_keys > ~/.ssh/authorized_keys.sc-tmp`);
     expect(cmd).toContain('if [ "$rc" -le 1 ]');
     expect(cmd).toContain('mv ~/.ssh/authorized_keys.sc-tmp ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys');
   });
 
-  it('drop-in: раннее имя 00-, обе директивы, заголовок, printf-запись', () => {
+  it('drop-in: early 00- name, both directives, header, printf write', () => {
     const directives = ['PasswordAuthentication', 'KbdInteractiveAuthentication'];
     expect(buildDropinContent(directives)).toEqual([
       '# Managed by ssh-commander: password SSH login disabled',
@@ -249,13 +249,13 @@ describe('bootstrap: билдеры команд', () => {
     expect(cmd).toContain('mkdir -p /etc/ssh/sshd_config.d');
   });
 
-  it('sshd: резолв бинаря, -t, -T c -C только при Match-блоках', () => {
+  it('sshd: binary resolution, -t, -T with -C only when Match blocks exist', () => {
     expect(buildSshdTestCommand()).toBe('SSHD=$(command -v sshd || echo /usr/sbin/sshd); "$SSHD" -t');
     expect(buildSshdTCommand(false, 'root')).toBe('SSHD=$(command -v sshd || echo /usr/sbin/sshd); "$SSHD" -T');
     expect(buildSshdTCommand(true, 'root')).toContain(`-C user='root',host=localhost,addr=127.0.0.1`);
   });
 
-  it('fallback-команды: бэкап с таймстампом, чтение, точная запись, восстановление', () => {
+  it('fallback commands: timestamped backup, read, exact write, restore', () => {
     expect(buildBackupConfigCommand(123)).toBe(
       `cp '/etc/ssh/sshd_config' '/etc/ssh/sshd_config.bak-ssh-commander-123'`,
     );
@@ -268,8 +268,8 @@ describe('bootstrap: билдеры команд', () => {
   });
 });
 
-describe('bootstrap: парсеры sshd -T и правка конфига', () => {
-  it('parseSshdT: ключи в нижнем регистре, мусор игнорируется', () => {
+describe('bootstrap: sshd -T parsers and config rewrite', () => {
+  it('parseSshdT: keys lowercased, garbage ignored', () => {
     const parsed = parseSshdT('Port 22\n  passwordauthentication  yes\n# comment\n\npermitrootlogin prohibit-password\n');
     expect(parsed.passwordauthentication).toBe('yes');
     expect(parsed.permitrootlogin).toBe('prohibit-password');
@@ -277,7 +277,7 @@ describe('bootstrap: парсеры sshd -T и правка конфига', () 
     expect(Object.keys(parsed)).not.toContain('# comment');
   });
 
-  it('detectSupportedDirectives: новый sshd, старый sshd, ничего', () => {
+  it('detectSupportedDirectives: new sshd, old sshd, nothing', () => {
     expect(detectSupportedDirectives({ passwordauthentication: 'yes', kbdinteractiveauthentication: 'yes' })).toEqual([
       'PasswordAuthentication',
       'KbdInteractiveAuthentication',
@@ -289,14 +289,14 @@ describe('bootstrap: парсеры sshd -T и правка конфига', () 
     expect(detectSupportedDirectives({ port: '22' })).toEqual([]);
   });
 
-  it('failedEffectiveDirectives: не ставшие no', () => {
+  it('failedEffectiveDirectives: directives that did not become no', () => {
     const parsed = { passwordauthentication: 'no', kbdinteractiveauthentication: 'yes' };
     expect(failedEffectiveDirectives(parsed, ['PasswordAuthentication', 'KbdInteractiveAuthentication'])).toEqual([
       'KbdInteractiveAuthentication',
     ]);
   });
 
-  it('rewriteSshdConfig: активные заменяются на месте, закомментированные не трогаются', () => {
+  it('rewriteSshdConfig: active lines replaced in place, commented ones untouched', () => {
     const out = rewriteSshdConfig(
       'Port 22\nPasswordAuthentication yes\n#KbdInteractiveAuthentication yes\n',
       ['PasswordAuthentication', 'KbdInteractiveAuthentication'],
@@ -307,7 +307,7 @@ describe('bootstrap: парсеры sshd -T и правка конфига', () 
     );
   });
 
-  it('rewriteSshdConfig: отсутствующие вставляются до первого Match, внутри Match не лезем', () => {
+  it('rewriteSshdConfig: missing directives inserted before the first Match, never inside it', () => {
     const out = rewriteSshdConfig(
       'Port 22\nMatch User admin\n    PasswordAuthentication no\n',
       ['PasswordAuthentication', 'KbdInteractiveAuthentication'],
@@ -315,11 +315,11 @@ describe('bootstrap: парсеры sshd -T и правка конфига', () 
     const lines = out.split('\n');
     expect(lines.indexOf('# ssh-commander: password SSH login disabled')).toBe(1);
     expect(lines.indexOf('Match User admin')).toBe(4);
-    // строка с отступом внутри Match — другой контекст, глобальную не заменяет
+    // the indented line inside Match is a different context; the global line is not replaced
     expect(lines).toContain('    PasswordAuthentication no');
   });
 
-  it('rewriteSshdConfig: без Match — вставка в конец, CRLF tolerated', () => {
+  it('rewriteSshdConfig: without Match — appended at the end, CRLF tolerated', () => {
     const out = rewriteSshdConfig('Port 22\r\nPermitRootLogin yes\r\n\r\n', ['PasswordAuthentication']);
     expect(out).toBe(
       'Port 22\nPermitRootLogin yes\n# ssh-commander: password SSH login disabled\nPasswordAuthentication no\n\n',
@@ -327,18 +327,18 @@ describe('bootstrap: парсеры sshd -T и правка конфига', () 
   });
 });
 
-describe('bootstrap: маппинг ошибок подключения', () => {
+describe('bootstrap: connect error mapping', () => {
   const ctx = { host: '203.0.113.10', port: 22, username: 'root' };
   const err = (message: string, code?: string) => Object.assign(new Error(message), { code });
 
-  it('сетевые ошибки', () => {
+  it('network errors', () => {
     expect(mapConnectError(err('connect ECONNREFUSED', 'ECONNREFUSED'), ctx, 'password').message).toContain('порт недоступен');
     expect(mapConnectError(err('getaddrinfo ENOTFOUND', 'ENOTFOUND'), ctx, 'password').message).toContain('не разрешается');
     expect(mapConnectError(err('No route', 'EHOSTUNREACH'), ctx, 'key').message).toContain('недоступен');
     expect(mapConnectError(err('Timed out while waiting for handshake', 'ETIMEDOUT'), ctx, 'password').message).toContain('Таймаут');
   });
 
-  it('отказ аутентификации различается по фазе и не раскрывает пароль', () => {
+  it('auth failure is distinguished by phase and does not leak the password', () => {
     const pw = mapConnectError(err(AUTH_FAILED), ctx, 'password');
     expect(pw.message).toContain('неверный пароль');
     expect(pw.message).toContain('PermitRootLogin prohibit-password');
@@ -346,12 +346,12 @@ describe('bootstrap: маппинг ошибок подключения', () => 
     expect(mapConnectError(err(AUTH_FAILED), ctx, 'key').message).toContain('сервер не принял ключ');
   });
 
-  it('прочее — как есть', () => {
+  it('anything else passes through as is', () => {
     expect(mapConnectError(err('Boom'), ctx, 'password').message).toContain('Boom');
   });
 });
 
-describe('bootstrap: оркестрация (мок ssh2-клиента)', () => {
+describe('bootstrap: orchestration (mock ssh2 client)', () => {
   let keysDir: string;
   let server: FakeSshServer;
 
@@ -368,14 +368,14 @@ describe('bootstrap: оркестрация (мок ssh2-клиента)', () =>
   const captureError = async (promise: Promise<unknown>): Promise<BootstrapError> => {
     try {
       await promise;
-      throw new Error('ожидали отказ');
+      throw new Error('expected a rejection');
     } catch (err) {
       expect(err).toBeInstanceOf(BootstrapError);
       return err as BootstrapError;
     }
   };
 
-  it('без hardening: шаги, подключения, профиль authType=key, файл ключа 0600', async () => {
+  it('without hardening: steps, connections, authType=key profile, key file 0600', async () => {
     const res = await bootstrapServer(input(), server.deps(keysDir));
     expect(stepNames(res.steps)).toEqual([
       'Генерация ключа ed25519[ok]',
@@ -390,21 +390,21 @@ describe('bootstrap: оркестрация (мок ssh2-клиента)', () =>
     expect(server.createdProfiles[0].authType).toBe('key');
     const keyPath = server.createdProfiles[0].keyPath as string;
     expect(keyPath).toBe(path.join(keysDir, 'fresh-vps.ed25519'));
-    // Права 0600 проверяем только на POSIX: Windows-стат не отражает chmod
-    // (тот же класс пропуска, что у keys.test.ts на Windows-машинах).
+    // The 0600 mode is checked on POSIX only: the Windows stat does not reflect chmod
+    // (the same skip class as keys.test.ts on Windows machines).
     if (process.platform !== 'win32') {
       expect(fs.statSync(keyPath).mode & 0o777).toBe(0o600);
     }
     expect(server.allCommands.find((c) => c.cmd.startsWith('umask 077'))!.cmd).toContain('ssh-commander@fresh-vps');
   });
 
-  it('идемпотентность: ключ уже стоит → шаг честно сообщает, дубль не пишется', async () => {
+  it('idempotency: key already installed → the step reports it honestly, no duplicate written', async () => {
     server.installEcho = 'present';
     const res = await bootstrapServer(input(), server.deps(keysDir));
     expect(res.steps.find((s) => s.name === 'Установка ключа на сервере')!.detail).toContain('уже был');
   });
 
-  it('неверный пароль: понятная ошибка, ключ не сохраняется, профиль не создаётся', async () => {
+  it('wrong password: clear error, key not saved, profile not created', async () => {
     server.passwordLoginWorks = false;
     const err = await captureError(bootstrapServer(input(), server.deps(keysDir)));
     expect(err.status).toBe(400);
@@ -415,7 +415,7 @@ describe('bootstrap: оркестрация (мок ssh2-клиента)', () =>
     expect(server.createdProfiles).toHaveLength(0);
   });
 
-  it('hardening (drop-in): полный порядок и контрольные проверки', async () => {
+  it('hardening (drop-in): full step order and control checks', async () => {
     server.sshdTEffectiveAfter = { passwordauthentication: 'no', kbdinteractiveauthentication: 'no' };
     const res = await bootstrapServer(input({ disablePasswordAuth: true }), server.depsWithPasswordRejectedLater(keysDir));
     expect(stepNames(res.steps)).toEqual([
@@ -433,22 +433,22 @@ describe('bootstrap: оркестрация (мок ssh2-клиента)', () =>
       'Контроль: парольный вход[ok]',
       'Создание профиля[ok]',
     ]);
-    // sshd не трогается, пока вход ключом не доказан: подключение с ключом
-    // происходит раньше первой правки конфига
+    // sshd is not touched until key login is proven: the connection with the key
+    // happens before the first config edit
     const commands = server.allCommands.map((c) => c.cmd);
     const dropinIdx = commands.findIndex((c) => c.startsWith('umask 022'));
     expect(dropinIdx).toBeGreaterThan(-1);
     expect(server.connects.findIndex((c) => c.privateKey)).toBeLessThanOrEqual(1);
-    // 3 SSH-подключения + контрольная password-попытка (отклонена)
+    // 3 SSH connections + a control password attempt (rejected)
     expect(server.connects).toHaveLength(4);
-    // reload пришёл после зелёного -t
+    // reload came after a green -t
     expect(commands.findIndex((c) => c.includes('"$SSHD" -t'))).toBeLessThan(
       commands.findIndex((c) => c.startsWith('systemctl reload')),
     );
     expect(res.profile.authType).toBe('key');
   });
 
-  it('hardening: старый sshd — ChallengeResponseAuthentication вместо KbdInteractive', async () => {
+  it('hardening: old sshd — ChallengeResponseAuthentication instead of KbdInteractive', async () => {
     server.sshdTOutput = 'passwordauthentication yes\nchallengeresponseauthentication yes\n';
     server.sshdTEffectiveAfter = { passwordauthentication: 'no', challengeresponseauthentication: 'no' };
     const res = await bootstrapServer(input({ disablePasswordAuth: true }), server.depsWithPasswordRejectedLater(keysDir));
@@ -459,7 +459,7 @@ describe('bootstrap: оркестрация (мок ssh2-клиента)', () =>
     expect(res.steps.find((s) => s.name === 'Отключение парольного входа')!.detail).toContain('ChallengeResponseAuthentication');
   });
 
-  it('hardening fallback без sshd_config.d: бэкап → cat → локальная правка → запись', async () => {
+  it('hardening fallback without sshd_config.d: backup → cat → local rewrite → write', async () => {
     server.dropinSupported = false;
     server.sshdTEffectiveAfter = { passwordauthentication: 'no', kbdinteractiveauthentication: 'no' };
     const res = await bootstrapServer(input({ disablePasswordAuth: true }), server.depsWithPasswordRejectedLater(keysDir));
@@ -477,7 +477,7 @@ describe('bootstrap: оркестрация (мок ssh2-клиента)', () =>
     expect(res.steps.find((s) => s.name === 'Отключение парольного входа')!.detail).toContain('бэкап');
   });
 
-  it('пароль всё ещё пускает после hardening → честный warn, без отката', async () => {
+  it('password still gets in after hardening → honest warn, no rollback', async () => {
     server.sshdTEffectiveAfter = { passwordauthentication: 'no', kbdinteractiveauthentication: 'no' };
     const res = await bootstrapServer(input({ disablePasswordAuth: true }), server.deps(keysDir));
     const pwStep = res.steps.find((s) => s.name === 'Контроль: парольный вход')!;
@@ -487,24 +487,24 @@ describe('bootstrap: оркестрация (мок ssh2-клиента)', () =>
     expect(server.createdProfiles).toHaveLength(1);
   });
 
-  it('эффективный конфиг не применился → откат, чистка ключа, ошибка', async () => {
+  it('effective config did not apply → rollback, key cleanup, error', async () => {
     server.sshdTEffectiveAfter = { passwordauthentication: 'yes', kbdinteractiveauthentication: 'no' };
     const err = await captureError(bootstrapServer(input({ disablePasswordAuth: true }), server.deps(keysDir)));
     expect(err.message).toContain('Hardening не применился');
     expect(err.message).toContain('PasswordAuthentication=yes');
-    // откат: удаление drop-in + повторный reload
+    // rollback: drop-in removal + another reload
     const rollback = server.allCommands.find((c) => c.cmd.startsWith(`rm -f '${SSHD_DROPIN_PATH}'`));
     expect(rollback).toBeTruthy();
     expect(rollback!.cmd).toBe(buildRollbackDropinCommand());
-    expect(rollback!.kind).toBe('password'); // живая password-сессия пережила reload
+    expect(rollback!.kind).toBe('password'); // the live password session survived the reload
     expect(err.steps.some((s) => s.name === 'Откат изменений sshd' && s.status === 'warn')).toBe(true);
-    // чистка: строка ключа удалена, локальный файл удалён, профиля нет
+    // cleanup: key line removed, local file removed, no profile
     expect(server.allCommands.some((c) => c.cmd.startsWith('grep -Fv --'))).toBe(true);
     expect(fs.readdirSync(keysDir)).toEqual([]);
     expect(server.createdProfiles).toHaveLength(0);
   });
 
-  it('красный sshd -t → откат и ошибка с выводом (409)', async () => {
+  it('failing sshd -t → rollback and an error with the output (409)', async () => {
     server.sshdTEffectiveAfter = { passwordauthentication: 'no', kbdinteractiveauthentication: 'no' };
     const origDispatch = server.dispatch.bind(server);
     server.dispatch = (cmd: string, session: FakeSession) => {
@@ -518,7 +518,7 @@ describe('bootstrap: оркестрация (мок ssh2-клиента)', () =>
     expect(server.allCommands.some((c) => c.cmd.startsWith(`rm -f '${SSHD_DROPIN_PATH}'`))).toBe(true);
   });
 
-  it('оборванная password-сессия после reload → откат и чистка через key-сессию', async () => {
+  it('password session dropped after reload → rollback and cleanup via the key session', async () => {
     server.killPasswordSessionsAfterReload = true;
     server.sshdTEffectiveAfter = { passwordauthentication: 'no', kbdinteractiveauthentication: 'no' };
     const err = await captureError(bootstrapServer(input({ disablePasswordAuth: true }), server.deps(keysDir)));
@@ -530,7 +530,7 @@ describe('bootstrap: оркестрация (мок ssh2-клиента)', () =>
     expect(server.allCommands.find((c) => c.cmd.startsWith('grep -Fv --'))!.kind).toBe('key');
   });
 
-  it('hardening ок, но createProfile упал: ключ сохраняется, откат не делается, подсказка в ошибке', async () => {
+  it('hardening ok but createProfile failed: the key is kept, no rollback, hint in the error', async () => {
     server.sshdTEffectiveAfter = { passwordauthentication: 'no', kbdinteractiveauthentication: 'no' };
     server.createProfileError = 'profiles store was corrupt at startup';
     const err = await captureError(bootstrapServer(input({ disablePasswordAuth: true }), server.deps(keysDir)));
@@ -542,7 +542,7 @@ describe('bootstrap: оркестрация (мок ssh2-клиента)', () =>
     expect(server.allCommands.some((c) => c.cmd.startsWith(`rm -f '${SSHD_DROPIN_PATH}'`))).toBe(false);
   });
 
-  it('hardening для не-root отклоняется до любых подключений', async () => {
+  it('hardening for non-root is rejected before any connections', async () => {
     const err = await captureError(
       bootstrapServer(input({ username: 'deploy', disablePasswordAuth: true }), server.deps(keysDir)),
     );

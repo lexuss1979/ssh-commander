@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// AI-конфиг читается только из settings.json (эпик 22: env-моки больше не
-// работают) — пишем настройки через saveSettings в изолированный data-каталог.
+// The AI config is read from settings.json only (epic 22: env mocks no longer
+// work) — write settings via saveSettings into an isolated data directory.
 process.env.AI_TEMPERATURE = '0.2';
 const dataDir = mkdtempSync(path.join(tmpdir(), 'sc-client-'));
 process.env.DATA_DIR = dataDir;
@@ -54,7 +54,7 @@ function dataLine(payload: unknown): string {
 }
 
 describe('parseTokenUsage', () => {
-  it('маппит OpenAI-usage: prompt/cached/completion/reasoning', () => {
+  it('maps OpenAI usage: prompt/cached/completion/reasoning', () => {
     const usage = client.parseTokenUsage({
       usage: {
         prompt_tokens: 100,
@@ -71,7 +71,7 @@ describe('parseTokenUsage', () => {
     });
   });
 
-  it('без usage → undefined; без валидных чисел → undefined', () => {
+  it('no usage → undefined; no valid numbers → undefined', () => {
     expect(client.parseTokenUsage({})).toBeUndefined();
     expect(client.parseTokenUsage({ usage: null })).toBeUndefined();
     expect(
@@ -79,7 +79,7 @@ describe('parseTokenUsage', () => {
     ).toBeUndefined();
   });
 
-  it('мусор в числах (строка/отрицательное/NaN) — поле опускается', () => {
+  it('garbage in numbers (string/negative/NaN) — the field is omitted', () => {
     const usage = client.parseTokenUsage({
       usage: {
         prompt_tokens: 100,
@@ -91,7 +91,7 @@ describe('parseTokenUsage', () => {
     expect(usage).toEqual({ promptTokens: 100 });
   });
 
-  it('инварианты: cached ⊂ prompt, reasoning ⊂ completion — кламп', () => {
+  it('invariants: cached ⊂ prompt, reasoning ⊂ completion — clamped', () => {
     const usage = client.parseTokenUsage({
       usage: {
         prompt_tokens: 100,
@@ -104,7 +104,7 @@ describe('parseTokenUsage', () => {
     expect(usage?.reasoningTokens).toBe(50);
   });
 
-  it('DeepSeek: prompt_cache_hit_tokens — fallback для cachedTokens', () => {
+  it('DeepSeek: prompt_cache_hit_tokens — a fallback for cachedTokens', () => {
     const usage = client.parseTokenUsage({
       usage: {
         prompt_tokens: 100,
@@ -113,7 +113,7 @@ describe('parseTokenUsage', () => {
       },
     });
     expect(usage).toEqual({ promptTokens: 100, cachedTokens: 30, completionTokens: 50 });
-    // Явный prompt_tokens_details.cached_tokens приоритетнее.
+    // Explicit prompt_tokens_details.cached_tokens takes priority.
     const both = client.parseTokenUsage({
       usage: {
         prompt_tokens: 100,
@@ -126,8 +126,8 @@ describe('parseTokenUsage', () => {
   });
 });
 
-describe('streamChatCompletion — захват usage (docs/ai-costs-plan.md, решение 1)', () => {
-  it('SSE: usage читается из финального чанка {choices: [], usage}', async () => {
+describe('streamChatCompletion — usage capture (docs/ai-costs-plan.md, decision 1)', () => {
+  it('SSE: usage is read from the final {choices: [], usage} chunk', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       sseResponse([
         dataLine({ choices: [{ delta: { content: 'Привет' } }] }),
@@ -157,7 +157,7 @@ describe('streamChatCompletion — захват usage (docs/ai-costs-plan.md, р
     });
   });
 
-  it('SSE: usage отсутствует → usage undefined (провайдер без include_usage)', async () => {
+  it('SSE: no usage → usage undefined (a provider without include_usage)', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -171,7 +171,7 @@ describe('streamChatCompletion — захват usage (docs/ai-costs-plan.md, р
     expect(usage).toBeUndefined();
   });
 
-  it('SSE: usage-чанк с мусором не ломает стрим и не даёт usage', async () => {
+  it('SSE: a garbage usage chunk does not break the stream and yields no usage', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -189,7 +189,7 @@ describe('streamChatCompletion — захват usage (docs/ai-costs-plan.md, р
     expect(result.usage).toBeUndefined();
   });
 
-  it('non-stream fallback: верхнеуровневый usage пробрасывается', async () => {
+  it('non-stream fallback: top-level usage is passed through', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -206,7 +206,7 @@ describe('streamChatCompletion — захват usage (docs/ai-costs-plan.md, р
     expect(usage).toEqual({ promptTokens: 10, completionTokens: 5 });
   });
 
-  it('non-stream без usage → usage undefined', async () => {
+  it('non-stream without usage → usage undefined', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -219,7 +219,7 @@ describe('streamChatCompletion — захват usage (docs/ai-costs-plan.md, р
     expect(result.usage).toBeUndefined();
   });
 
-  it('тело запроса содержит stream_options.include_usage', async () => {
+  it('the request body contains stream_options.include_usage', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -230,13 +230,13 @@ describe('streamChatCompletion — захват usage (docs/ai-costs-plan.md, р
     const [url, init] = fetchMockArgs();
     expect(url).toBe('http://mock-api/chat/completions');
     const body = JSON.parse(init.body as string);
-    // base и модель — из settings.json (env больше не источник).
+    // base and model come from settings.json (env is no longer a source).
     expect(body.model).toBe('test-model');
     expect(body.stream_options).toEqual({ include_usage: true });
   });
 });
 
-describe('streamChatCompletion — ошибки внутри HTTP 200', () => {
+describe('streamChatCompletion — errors inside HTTP 200', () => {
   it.each([
     dataLine({ error: { code: 'inference_failed', message: 'Upstream failed' } }),
     'event: error\n' + dataLine({ error: { type: 'inference_failed', message: 'Upstream failed' } }),
@@ -244,7 +244,7 @@ describe('streamChatCompletion — ошибки внутри HTTP 200', () => {
     'event: error\ndata: "inference_failed: Upstream failed"\n\n',
     'event: error\ndata: {"error":\ndata: {"code":"inference_failed","message":"Upstream failed"}}\n\n',
     dataLine({ type: 'error', code: 'inference_failed', message: 'Upstream failed' }).trimEnd(),
-  ])('сообщает ошибку провайдера вместо пустого ответа: %s', async (frame) => {
+  ])('reports the provider error instead of an empty response: %s', async (frame) => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([frame])));
     await expect(client.streamChatCompletion({ messages: [{ role: 'user', content: 'hi' }] }))
       .rejects.toThrow('Ошибка AI API: inference_failed: Upstream failed');
@@ -253,7 +253,7 @@ describe('streamChatCompletion — ошибки внутри HTTP 200', () => {
   it.each([
     ['ru', 'Ошибка AI API: Провайдер сообщил об ошибке без описания.'],
     ['en', 'AI API error: The provider reported an error without details.'],
-  ] as const)('event: error без описания локализован (%s)', async (lang, expected) => {
+  ] as const)('event: error without details is localized (%s)', async (lang, expected) => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse(['event: error\ndata: {}\n\n'])));
     await expect(client.streamChatCompletion({ messages: [{ role: 'user', content: 'hi' }], lang }))
       .rejects.toThrow(expected);
@@ -263,19 +263,19 @@ describe('streamChatCompletion — ошибки внутри HTTP 200', () => {
     '',
     'data: [DONE]\n\n',
     dataLine({ choices: [{ delta: { reasoning_content: 'скрытое рассуждение' } }] }) + 'data: [DONE]\n\n',
-  ])('пустой поток или только reasoning не считаются успешным ответом', async (frame) => {
+  ])('an empty stream or reasoning-only does not count as a successful response', async (frame) => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([frame])));
     await expect(client.streamChatCompletion({ messages: [{ role: 'user', content: 'hi' }] }))
       .rejects.toThrow('AI API завершил ответ без текста и вызовов инструментов');
   });
 
-  it('JSON-ответ с error при HTTP 200 сохраняет описание ошибки', async () => {
+  it('a JSON response with error at HTTP 200 keeps the error description', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ error: { message: 'inference_failed' } })));
     await expect(client.streamChatCompletion({ messages: [{ role: 'user', content: 'hi' }] }))
       .rejects.toThrow('Ошибка AI API: inference_failed');
   });
 
-  it('пустое сообщение в JSON-ответе не считается успешным', async () => {
+  it('an empty message in a JSON response is not a success', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       choices: [{ message: { role: 'assistant', content: null } }],
     })));
@@ -283,7 +283,7 @@ describe('streamChatCompletion — ошибки внутри HTTP 200', () => {
       .rejects.toThrow('The AI API completed the response without text or tool calls');
   });
 
-  it('ошибка после частичного текста не глушится и не вызывает onToolCalls', async () => {
+  it('an error after partial text is not swallowed and does not call onToolCalls', async () => {
     const onToken = vi.fn();
     const onToolCalls = vi.fn();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([
@@ -296,7 +296,7 @@ describe('streamChatCompletion — ошибки внутри HTTP 200', () => {
     expect(onToolCalls).not.toHaveBeenCalled();
   });
 
-  it('ошибка провайдера не отражает API-ключ в UI', async () => {
+  it('a provider error does not reflect the API key in the UI', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([
       dataLine({ error: { message: 'bad key test-key' } }),
     ])));
@@ -305,15 +305,15 @@ describe('streamChatCompletion — ошибки внутри HTTP 200', () => {
   });
 });
 
-describe('streamChatCompletion — границы SSE', () => {
-  it('сохраняет ответ при закрытии без последнего перевода строки и на границах чанков', async () => {
+describe('streamChatCompletion — SSE edge cases', () => {
+  it('keeps the response when the stream ends without the final newline and across chunk boundaries', async () => {
     const frame = dataLine({ choices: [{ delta: { content: 'готово' } }] }).trimEnd();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([frame.slice(0, 17), frame.slice(17)])));
     expect((await client.streamChatCompletion({ messages: [{ role: 'user', content: 'hi' }] })).message.content)
       .toBe('готово');
   });
 
-  it('пропускает битый JSON, но сохраняет следующий корректный ответ', async () => {
+  it('skips broken JSON but keeps the next valid response', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([
       'data: {broken\n\n', dataLine({ choices: [{ delta: { content: 'ok' } }] }),
     ])));
@@ -321,7 +321,7 @@ describe('streamChatCompletion — границы SSE', () => {
       .toBe('ok');
   });
 
-  it('ответ только с вызовом инструмента допустим, аргументы собираются из чанков', async () => {
+  it('a tool-call-only response is valid, arguments are assembled from chunks', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([
       dataLine({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call-1', function: { name: 'read_memory', arguments: '{' } }] } }] }),
       dataLine({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '}' } }] } }] }),
@@ -336,7 +336,7 @@ describe('streamChatCompletion — границы SSE', () => {
     expect(onToolCalls).toHaveBeenCalledWith(result.message.tool_calls);
   });
 
-  it('[DONE] завершает чтение, даже если провайдер не закрыл соединение', async () => {
+  it('[DONE] finishes reading even if the provider did not close the connection', async () => {
     const cancel = vi.fn();
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -354,14 +354,14 @@ describe('streamChatCompletion — границы SSE', () => {
   });
 });
 
-describe('streamChatCompletion — заголовки сессии провайдера', () => {
+describe('streamChatCompletion — provider session headers', () => {
   it.each([
     ['opencode-go', 'http://mock-api', true],
     ['custom', 'https://opencode.ai/zen/go/v1', true],
     ['custom', 'http://mock-api', false],
     ['deepseek', 'https://api.deepseek.com/v1', false],
     ['openai', 'https://api.openai.com/v1', false],
-  ] as const)('%s: удаление name из сообщений для Go = %s', async (aiProvider, aiApiBase, stripName) => {
+  ] as const)('%s: stripping name from messages for Go = %s', async (aiProvider, aiApiBase, stripName) => {
     saveSettings({ ...defaultSettings, aiProvider, aiApiBase });
     const call = { id: 'memory-call', type: 'function' as const, function: { name: 'read_memory', arguments: '{}' } };
     const messages: import('../src/ai/client.js').ChatMessage[] = [
@@ -385,7 +385,7 @@ describe('streamChatCompletion — заголовки сессии провай�
     expect(messages).toEqual(original);
   });
 
-  it.each(['SSE', 'JSON'] as const)('%s: передаёт ID диалога и собственный User-Agent', async (format) => {
+  it.each(['SSE', 'JSON'] as const)('%s: passes the dialogue ID and its own User-Agent', async (format) => {
     saveSettings({ ...defaultSettings, aiProvider: 'opencode-go' });
     const response = format === 'SSE'
       ? sseResponse([dataLine({ choices: [{ delta: { content: 'ok' } }] }), 'data: [DONE]\n\n'])
@@ -399,14 +399,14 @@ describe('streamChatCompletion — заголовки сессии провай�
 
     const headers = new Headers(fetchMockArgs()[1].headers);
     expect(headers.get('x-opencode-session')).toBe('dialogue-123');
-    // Версия в собственном User-Agent необязательна.
+    // The version in the own User-Agent is optional.
     expect(headers.get('user-agent')).toMatch(/^ssh-commander(?:\/\S+)?$/);
     expect(headers.get('authorization')).toBe('Bearer test-key');
     expect(headers.get('content-type')).toBe('application/json');
     expect(result.message.content).toBe('ok');
   });
 
-  it.each([undefined, ''])('без ID (%s) не отправляет пустой заголовок сессии', async (sessionId) => {
+  it.each([undefined, ''])('without an ID (%s) no empty session header is sent', async (sessionId) => {
     saveSettings({ ...defaultSettings, aiProvider: 'opencode-go' });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       choices: [{ message: { role: 'assistant', content: 'ok' } }],
@@ -430,7 +430,7 @@ describe('streamChatCompletion — заголовки сессии провай�
     ['custom', 'http://mock-api', false],
     ['deepseek', 'https://api.deepseek.com/v1', false],
     ['openai', 'https://api.openai.com/v1', false],
-  ] as const)('%s (%s): заголовок Go включён = %s', async (aiProvider, aiApiBase, enabled) => {
+  ] as const)('%s (%s): Go header enabled = %s', async (aiProvider, aiApiBase, enabled) => {
     saveSettings({ ...defaultSettings, aiProvider, aiApiBase });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       choices: [{ message: { role: 'assistant', content: 'ok' } }],
@@ -446,7 +446,7 @@ function fetchMockArgs(): [string, RequestInit] {
   return call;
 }
 
-describe('streamChatCompletion — Responses для моделей Go', () => {
+describe('streamChatCompletion — Responses for Go models', () => {
   const model = 'gpt-6-luna';
   const apiBase = 'http://mock-api';
   const reasoning = { type: 'reasoning' as const, id: 'rs-1', summary: [] as [], encrypted_content: 'encrypted-test-context' };
@@ -482,7 +482,7 @@ describe('streamChatCompletion — Responses для моделей Go', () => {
     }
   });
 
-  it('переводит историю, параллельные вызовы и результаты, не мутируя исходные сообщения', async () => {
+  it('translates history, parallel calls and results without mutating the original messages', async () => {
     const messages: import('../src/ai/client.js').ChatMessage[] = [
       { role: 'system', content: 'system' }, { role: 'user', content: 'request', name: 'user' },
       { role: 'assistant', content: 'checking', responsesContext: { model, apiBase, items: [reasoning] }, tool_calls: [
@@ -515,7 +515,7 @@ describe('streamChatCompletion — Responses для моделей Go', () => {
     expect(messages).toEqual(original);
   });
 
-  it('планирование — без tools и tool_choice', async () => {
+  it('planning — without tools and tool_choice', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(completed())));
     await client.streamChatCompletion({ messages: [{ role: 'user', content: 'plan' }] });
     const body = JSON.parse(fetchMockArgs()[1].body as string);
@@ -523,7 +523,7 @@ describe('streamChatCompletion — Responses для моделей Go', () => {
     expect(body).not.toHaveProperty('tool_choice');
   });
 
-  it('стримит текст и получает usage и зашифрованный контекст из финального события', async () => {
+  it('streams text and takes usage and the encrypted context from the final event', async () => {
     const onToken = vi.fn();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([
       dataLine({ type: 'response.reasoning_summary_text.delta', delta: 'НЕ ПОКАЗЫВАТЬ' }),
@@ -539,7 +539,7 @@ describe('streamChatCompletion — Responses для моделей Go', () => {
     expect(result.usage).toEqual({ promptTokens: 20, cachedTokens: 4, completionTokens: 10, reasoningTokens: 7 });
   });
 
-  it('завершённые function_call используют call_id, аргументы не дублируются из delta', async () => {
+  it('completed function_calls use call_id, arguments are not duplicated from delta', async () => {
     const onToolCalls = vi.fn();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([
       dataLine({ type: 'response.output_item.added', output_index: 1, item: { ...callItem, arguments: '' } }),
@@ -564,7 +564,7 @@ describe('streamChatCompletion — Responses для моделей Go', () => {
     [dataLine({ type: 'response.output_item.added', item: callItem }) + 'data: [DONE]\n\n', 'прервался'],
     [completionEvent([]), 'без текста'],
     [completionEvent([{ ...callItem, call_id: undefined }]), 'некорректный вызов инструмента'],
-  ])('не исполняет инструменты и сообщает ошибку для неуспешного потока', async (frame, expected) => {
+  ])('does not execute tools and reports an error for an unsuccessful stream', async (frame, expected) => {
     const onToolCalls = vi.fn();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([frame])));
     await expect(client.streamChatCompletion({ messages: [{ role: 'user', content: 'hi' }], onToolCalls }))
@@ -572,7 +572,7 @@ describe('streamChatCompletion — Responses для моделей Go', () => {
     expect(onToolCalls).not.toHaveBeenCalled();
   });
 
-  it('response.completed завершает чтение без закрытия соединения', async () => {
+  it('response.completed finishes reading without closing the connection', async () => {
     const cancel = vi.fn();
     const stream = new ReadableStream<Uint8Array>({
       start(controller) { controller.enqueue(new TextEncoder().encode(completionEvent())); }, cancel,
@@ -582,7 +582,7 @@ describe('streamChatCompletion — Responses для моделей Go', () => {
     expect(cancel).toHaveBeenCalledOnce();
   });
 
-  it('JSON: отказ модели виден как текст, reasoning summary не сохраняется', async () => {
+  it('JSON: a model refusal is visible as text, the reasoning summary is not kept', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(completed([
       { ...reasoning, summary: [{ type: 'summary_text', text: 'НЕ ПОКАЗЫВАТЬ' }] },
       { type: 'message', content: [{ type: 'refusal', refusal: 'Cannot comply' }] },
@@ -596,7 +596,7 @@ describe('streamChatCompletion — Responses для моделей Go', () => {
   it.each([
     ['gpt-5.6-luna', apiBase],
     [model, 'http://other-api'],
-  ])('не отправляет зашифрованный контекст другой модели или базе', async (contextModel, contextBase) => {
+  ])('does not send the encrypted context to another model or base', async (contextModel, contextBase) => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(completed())));
     await client.streamChatCompletion({ messages: [{ role: 'assistant', content: 'old', responsesContext: {
       model: contextModel, apiBase: contextBase, items: [reasoning],
@@ -604,7 +604,7 @@ describe('streamChatCompletion — Responses для моделей Go', () => {
     expect(JSON.parse(fetchMockArgs()[1].body as string).input).toEqual([{ role: 'assistant', content: 'old' }]);
   });
 
-  it('не отправляет метаданные Responses в Chat Completions при смене модели', async () => {
+  it('does not send Responses metadata to Chat Completions when the model changes', async () => {
     saveSettings(defaultSettings);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ choices: [{ message: { role: 'assistant', content: 'OK' } }] })));
     await client.streamChatCompletion({ messages: [{ role: 'assistant', content: 'old', responsesContext: { model, apiBase, items: [reasoning] } }] });

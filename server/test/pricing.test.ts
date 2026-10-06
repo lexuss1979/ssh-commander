@@ -12,17 +12,17 @@ afterAll(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-// Значения из DEFAULT_PRICES для проверки формулы: gpt-4.1-mini
-// { input: 0.4, cachedInput: 0.2, output: 1.6 } (USD за 1M токенов).
-describe('computeCostUsd — формула (docs/ai-costs-plan.md, решение 2)', () => {
-  it('базовый расчёт: вход и выход по ценам модели', () => {
-    // 1M входных + 100K выходных = 0.4 + 0.16 = 0.56
+// Values from DEFAULT_PRICES to check the formula: gpt-4.1-mini
+// { input: 0.4, cachedInput: 0.2, output: 1.6 } (USD per 1M tokens).
+describe('computeCostUsd — the formula (docs/ai-costs-plan.md, decision 2)', () => {
+  it('basic computation: input and output at the model prices', () => {
+    // 1M input + 100K output = 0.4 + 0.16 = 0.56
     expect(pricing.computeCostUsd('gpt-4.1-mini', { promptTokens: 1_000_000, completionTokens: 100_000 }))
       .toBeCloseTo(0.56, 6);
   });
 
-  it('кэш-токены вычитаются из входных и считаются по cachedInput', () => {
-    // prompt 1M, из них cached 400K: (1M−400K)·0.4 + 400K·0.2 + 0 = 0.24 + 0.08 = 0.32
+  it('cached tokens are subtracted from the input and priced at cachedInput', () => {
+    // prompt 1M, of which cached 400K: (1M−400K)·0.4 + 400K·0.2 + 0 = 0.24 + 0.08 = 0.32
     expect(
       pricing.computeCostUsd('gpt-4.1-mini', {
         promptTokens: 1_000_000,
@@ -32,10 +32,10 @@ describe('computeCostUsd — формула (docs/ai-costs-plan.md, решени
     ).toBeCloseTo(0.32, 6);
   });
 
-  it('без cachedInput у модели кэш-токены считаются по обычной цене input', () => {
-    // deepseek-chat: { input: 0.27, cachedInput: 0.07, output: 1.1 } — есть cachedInput.
-    // Возьмём модель без cachedInput? Все дефолтные её имеют — проверим через оверрайд
-    // в отдельном тесте. Здесь: cachedInput присутствует и применяется.
+  it('without cachedInput for the model, cached tokens are priced at the regular input price', () => {
+    // deepseek-chat: { input: 0.27, cachedInput: 0.07, output: 1.1 } — has cachedInput.
+    // Take a model without cachedInput? All defaults have it — checked via an override
+    // in a separate test. Here: cachedInput is present and applied.
     expect(
       pricing.computeCostUsd('deepseek-chat', {
         promptTokens: 1_000_000,
@@ -45,44 +45,44 @@ describe('computeCostUsd — формула (docs/ai-costs-plan.md, решени
     ).toBeCloseTo(0.5 * 0.27 + 0.5 * 0.07, 6); // 0.135 + 0.035 = 0.17
   });
 
-  it('reasoning НЕ добавляется к сумме — входит в completion_tokens (инвариант)', () => {
+  it('reasoning is NOT added to the total — it is inside completion_tokens (invariant)', () => {
     const withReasoning = pricing.computeCostUsd('gpt-4.1-mini', {
       promptTokens: 1000,
       completionTokens: 2000,
     });
-    // reasoning_tokens=1000 не должен увеличить сумму: выход уже содержит их.
+    // reasoning_tokens=1000 must not increase the total: the output already contains them.
     const same = pricing.computeCostUsd('gpt-4.1-mini', {
       promptTokens: 1000,
       completionTokens: 2000,
     });
     expect(withReasoning).toBe(same);
-    // Проверка на числах: 1000·0.4/1M + 2000·1.6/1M = 0.0004 + 0.0032 = 0.0036
+    // A numeric check: 1000·0.4/1M + 2000·1.6/1M = 0.0004 + 0.0032 = 0.0036
     expect(withReasoning).toBeCloseTo(0.0036, 9);
   });
 
-  it('поисковые запросы — отдельным слагаемым только при webSearchPerRequestUsd', () => {
-    // Без тарифа поиска (дефолтная gpt-4.1-mini) поиск считается по токенам —
-    // тариф DeepSeek: серверный web_search оплачивается токенами, отдельной
-    // цены за запрос нет. Слагаемое поиска добавляет только оверрайд (ниже).
+  it('search requests are a separate term only with webSearchPerRequestUsd', () => {
+    // Without a search rate (the default gpt-4.1-mini) the search is priced by tokens —
+    // the DeepSeek rate: the server-side web_search is paid in tokens, there is no
+    // separate per-request price. The search term is added by an override only (below).
     const cost = pricing.computeCostUsd('gpt-4.1-mini', {
       promptTokens: 1000,
       completionTokens: 2000,
       searchRequests: 2,
     });
-    expect(cost).toBeCloseTo(0.0036, 9); // только токены: 0.0004 + 0.0032
+    expect(cost).toBeCloseTo(0.0036, 9); // tokens only: 0.0004 + 0.0032
   });
 
-  it('deepseek-v4-flash протарифицирован (off-peak DeepSeek V4)', () => {
+  it('deepseek-v4-flash is priced (off-peak DeepSeek V4)', () => {
     expect(pricing.DEFAULT_PRICES['deepseek-v4-flash']).toEqual({
       input: 0.22,
       cachedInput: 0.007,
       output: 0.66,
     });
-    // 1M входных (cache-miss) + 400K выходных = 0.22 + 0.264 = 0.484
+    // 1M input (cache-miss) + 400K output = 0.22 + 0.264 = 0.484
     expect(
       pricing.computeCostUsd('deepseek-v4-flash', { promptTokens: 1_000_000, completionTokens: 400_000 }),
     ).toBeCloseTo(0.484, 6);
-    // Кэш-хиты по cachedInput: (600K·0.22 + 400K·0.007)/1M = 0.132 + 0.0028
+    // Cache hits at cachedInput: (600K·0.22 + 400K·0.007)/1M = 0.132 + 0.0028
     expect(
       pricing.computeCostUsd('deepseek-v4-flash', {
         promptTokens: 1_000_000,
@@ -92,18 +92,18 @@ describe('computeCostUsd — формула (docs/ai-costs-plan.md, решени
     ).toBeCloseTo(0.1348, 6);
   });
 
-  it('неизвестная модель → null (unpriced), даже при ненулевых токенах', () => {
+  it('an unknown model → null (unpriced), even with non-zero tokens', () => {
     expect(pricing.computeCostUsd('claude-opus-4-5', { promptTokens: 100, completionTokens: 100 }))
       .toBeNull();
     expect(pricing.computeCostUsd('gpt-5', { promptTokens: 100, completionTokens: 100 })).toBeNull();
   });
 
-  it('нулевые токены → 0 (протарифицированная модель)', () => {
+  it('zero tokens → 0 (a priced model)', () => {
     expect(pricing.computeCostUsd('gpt-4.1-mini', {})).toBe(0);
   });
 
-  it('мусор в токенах (отрицательные/строки) трактуется как 0', () => {
-    // Тип не позволяет, но runtime-защита nonneg() должна не падать:
+  it('garbage in tokens (negatives/strings) is treated as 0', () => {
+    // The type does not allow it, but the nonneg() runtime guard must not crash:
     const result = pricing.computeCostUsd('gpt-4.1-mini', {
       promptTokens: -5 as unknown as number,
       cachedTokens: 'x' as unknown as number,
@@ -113,13 +113,13 @@ describe('computeCostUsd — формула (docs/ai-costs-plan.md, решени
   });
 });
 
-describe('loadPrices — оверрайд data/ai-prices.json', () => {
-  it('без файла — дефолты', () => {
+describe('loadPrices — the data/ai-prices.json override', () => {
+  it('no file — defaults', () => {
     expect(pricing.loadPrices()['gpt-4.1-mini']).toEqual({ input: 0.4, cachedInput: 0.2, output: 1.6 });
     expect(pricing.loadPrices()['deepseek-chat']).toBeDefined();
   });
 
-  it('мерж по имени модели: запись файла полностью заменяет дефолтную', () => {
+  it('merged by model name: a file entry fully replaces the default one', () => {
     writeFileSync(
       path.join(dataDir, 'ai-prices.json'),
       JSON.stringify({
@@ -136,15 +136,15 @@ describe('loadPrices — оверрайд data/ai-prices.json', () => {
       output: 2.0,
       webSearchPerRequestUsd: 0.03,
     });
-    // Новая модель из файла — теперь протарифицирована.
+    // A new model from the file — now priced.
     expect(pricing.computeCostUsd('my-custom-model', { promptTokens: 1_000_000, completionTokens: 500_000 }))
       .toBeCloseTo(1.0 + 1.0, 6);
-    // Прочие дефолты не тронуты.
+    // Other defaults are untouched.
     expect(prices['deepseek-chat']).toBeDefined();
   });
 
-  it('cachedInput из оверрайда участвует в формуле', () => {
-    // my-custom-model без cachedInput: кэш считается по input (1.0).
+  it('cachedInput from the override participates in the formula', () => {
+    // my-custom-model without cachedInput: the cache is priced at input (1.0).
     expect(
       pricing.computeCostUsd('my-custom-model', {
         promptTokens: 1_000_000,
@@ -154,30 +154,30 @@ describe('loadPrices — оверрайд data/ai-prices.json', () => {
     ).toBeCloseTo(1.0, 6); // (1M−300K)·1 + 300K·1 = 1.0
   });
 
-  it('поисковые запросы по тарифу из оверрайда', () => {
-    // gpt-4.1-mini из оверрайда: webSearchPerRequestUsd 0.03.
+  it('search requests priced at the override rate', () => {
+    // gpt-4.1-mini from the override: webSearchPerRequestUsd 0.03.
     const cost = pricing.computeCostUsd('gpt-4.1-mini', {
       promptTokens: 1000,
       cachedTokens: 0,
       completionTokens: 2000,
       searchRequests: 2,
     });
-    // токены: 1000·0.5/1M + 2000·2/1M = 0.0005 + 0.004 = 0.0045; поиск: 2·0.03 = 0.06
+    // tokens: 1000·0.5/1M + 2000·2/1M = 0.0005 + 0.004 = 0.0045; search: 2·0.03 = 0.06
     expect(cost).toBeCloseTo(0.0045 + 0.06, 9);
   });
 
-  it('битый файл цен → warn + дефолты (без corrupt-блокировки: это справочник)', () => {
+  it('a broken prices file → warn + defaults (no corrupt-blocking: it is a reference table)', () => {
     writeFileSync(path.join(dataDir, 'ai-prices.json'), '{not json');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const prices = pricing.loadPrices();
     expect(warn).toHaveBeenCalled();
     expect(prices['gpt-4.1-mini']).toEqual({ input: 0.4, cachedInput: 0.2, output: 1.6 });
-    // Файл НЕ переименовывается в *.corrupt-* (в отличие от пользовательских сторов).
+    // The file is NOT renamed to *.corrupt-* (unlike the user stores).
     expect(readFileSync(path.join(dataDir, 'ai-prices.json'), 'utf8')).toBe('{not json');
     warn.mockRestore();
   });
 
-  it('невалидная схема файла (отрицательная цена) → warn + дефолты', () => {
+  it('an invalid file schema (a negative price) → warn + defaults', () => {
     writeFileSync(
       path.join(dataDir, 'ai-prices.json'),
       JSON.stringify({ models: { 'gpt-4.1-mini': { input: -1, output: 1 } } }),

@@ -7,7 +7,7 @@ import {
 import { annotateHostListeners } from '../src/routes/ports.js';
 import type { PortListener } from '../src/services/ports.js';
 
-// docker inspect — опубликованные порты IPv4 (0.0.0.0:8080 → 80/tcp).
+// docker inspect — published IPv4 ports (0.0.0.0:8080 → 80/tcp).
 const INSPECT_WEB = {
   Id: 'abc123',
   Name: '/web',
@@ -23,7 +23,7 @@ const INSPECT_WEB = {
   },
 };
 
-// docker inspect — exposed без публикации (5432/tcp: null).
+// docker inspect — exposed without publishing (5432/tcp: null).
 const INSPECT_DB = {
   Id: 'def456',
   Name: '/postgres',
@@ -38,7 +38,7 @@ const INSPECT_DB = {
   },
 };
 
-// docker inspect — host-network (порты уже в основной таблице ss).
+// docker inspect — host-network (the ports are already in the main ss table).
 const INSPECT_HOST = {
   Id: 'ghi789',
   Name: '/hostnet',
@@ -51,7 +51,7 @@ const INSPECT_HOST = {
   },
 };
 
-// docker inspect — публикация на конкретный интерфейс.
+// docker inspect — a publication on a specific interface.
 const INSPECT_IFACE = {
   Id: 'jkl012',
   Name: '/iface-app',
@@ -66,7 +66,7 @@ const INSPECT_IFACE = {
   },
 };
 
-// docker inspect — несколько портов, IPv6.
+// docker inspect — several ports, IPv6.
 const INSPECT_MULTI = {
   Id: 'mno345',
   Name: '/multi',
@@ -199,7 +199,7 @@ describe('annotateHostListeners', () => {
 
     annotateHostListeners(listeners, containers);
 
-    expect(listeners[0].container).toBeUndefined(); // sshd — не контейнер
+    expect(listeners[0].container).toBeUndefined(); // sshd is not a container
     expect(listeners[1].container).toEqual({ id: 'abc123', name: 'web' });
     expect(listeners[2].container).toEqual({ id: 'abc123', name: 'web' });
   });
@@ -242,7 +242,7 @@ describe('annotateHostListeners', () => {
     ];
 
     annotateHostListeners(listeners, containers);
-    expect(listeners[0].container).toBeUndefined(); // tcp не матчится с udp
+    expect(listeners[0].container).toBeUndefined(); // tcp does not match udp
     expect(listeners[1].container).toEqual({ id: 'u', name: 'udp-svc' });
   });
 
@@ -264,7 +264,7 @@ describe('annotateHostListeners', () => {
     ];
 
     annotateHostListeners(listeners, containers);
-    expect(listeners[0].container).toBeUndefined(); // 127.0.0.1 не матчится с 192.168.1.5
+    expect(listeners[0].container).toBeUndefined(); // 127.0.0.1 does not match 192.168.1.5
     expect(listeners[1].container).toEqual({ id: 'c1', name: 'iface-app' });
   });
 

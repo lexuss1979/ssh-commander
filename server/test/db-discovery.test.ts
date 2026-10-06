@@ -159,7 +159,7 @@ describe('toDbSuggestion', () => {
     expect(s.suggestedDatabase).toBe('shop');
   });
 
-  it('mysql without MYSQL_DATABASE: no database suggestion — MySQL не создаёт схему с именем пользователя', () => {
+  it('mysql without MYSQL_DATABASE: no database suggestion — MySQL does not create a schema named after the user', () => {
     const s = toDbSuggestion(inspectFixture({
       Name: '/my',
       Config: { Image: 'mysql:8', Env: ['MYSQL_ROOT_PASSWORD=x', 'MYSQL_USER=app', 'MYSQL_PASSWORD=y'] },

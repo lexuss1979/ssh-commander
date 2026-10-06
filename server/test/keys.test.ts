@@ -59,12 +59,12 @@ describe('key import', () => {
     expect(entry.name).toBe('id_rsa');
     expect(entry.path).toBe(path.join(dir, 'id_rsa'));
     expect(fs.readFileSync(entry.path, 'utf8')).toBe(OPENSSH_KEY);
-    // Права 0600 проверяем только на POSIX: Windows-стат chmod не отражает
-    // (тот же класс пропуска, что у bootstrap.test.ts).
+    // The 0600 mode is checked on POSIX only: the Windows stat does not reflect chmod
+    // (the same skip class as bootstrap.test.ts).
     if (process.platform !== 'win32') {
       expect(fs.statSync(entry.path).mode & 0o777).toBe(0o600);
     }
-    // Временных файлов после записи не остаётся.
+    // No temporary files left after the write.
     expect(fs.readdirSync(dir)).toEqual(['id_rsa']);
   });
 

@@ -17,7 +17,7 @@ afterAll(() => {
 });
 
 describe('dialogues store', () => {
-  it('сохраняет зашифрованный контекст Responses после перезагрузки хранилища', async () => {
+  it('keeps the encrypted Responses context across a store reload', async () => {
     const d = store.createDialogue(uniqueProfile());
     const context = {
       model: 'gpt-6-luna', apiBase: 'https://opencode.ai/zen/go/v1',
@@ -27,7 +27,7 @@ describe('dialogues store', () => {
     vi.resetModules();
     const reloaded = await import('../src/ai/dialogues.js');
     expect(reloaded.getDialogue(d.id)?.messages[0].responsesContext).toEqual(context);
-    // Удаляем через исходный экземпляр, чтобы его кэш не восстановил тестовый диалог.
+    // We delete via the original instance so its cache does not restore the test dialogue.
     store.deleteDialogue(d.id);
   });
 
@@ -120,21 +120,21 @@ describe('dialogues store', () => {
 
     store.attachProfileToDialogue(d.id, extraA);
     store.attachProfileToDialogue(d.id, extraB);
-    // Повторное подключение идемпотентно, домашний не дублируется в extra.
+    // A repeated attach is idempotent, the home one is not duplicated in extra.
     store.attachProfileToDialogue(d.id, extraA);
     store.attachProfileToDialogue(d.id, profileId);
     let got = store.getDialogue(d.id);
     expect(got?.extraProfileIds).toEqual([extraA, extraB]);
-    // Сводка списка тоже отдаёт extraProfileIds (бейдж «+N серверов»).
+    // The list summary also carries extraProfileIds (the "+N servers" badge).
     expect(store.listDialogues(profileId)[0].extraProfileIds).toEqual([extraA, extraB]);
-    // Сохранение сообщений поле не затирает.
+    // Saving messages does not wipe the field.
     store.saveDialogueMessages(d.id, [{ role: 'user', content: 'вопрос' }]);
     expect(store.getDialogue(d.id)?.extraProfileIds).toEqual([extraA, extraB]);
 
     store.detachProfileFromDialogue(d.id, extraA);
     got = store.getDialogue(d.id);
     expect(got?.extraProfileIds).toEqual([extraB]);
-    // Отцепление отсутствующего — no-op, ошибки нет.
+    // Detaching a missing one — a no-op, no error.
     store.detachProfileFromDialogue(d.id, extraA);
     expect(store.getDialogue(d.id)?.extraProfileIds).toEqual([extraB]);
     store.deleteDialogue(d.id);

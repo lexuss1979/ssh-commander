@@ -6,7 +6,7 @@ import type { WebSocket } from 'ws';
 import type { ChatMessage } from '../src/ai/client.js';
 import type { Profile } from '../src/types.js';
 
-// Реальные AgentSession и HTTP-клиент; подменяется только внешний провайдер.
+// Real AgentSession and HTTP client; only the external provider is stubbed.
 const dataDir = mkdtempSync(path.join(tmpdir(), 'sc-agent-session-'));
 vi.stubEnv('DATA_DIR', dataDir);
 const { AgentSession } = await import('../src/ai/agent.js');
@@ -35,7 +35,7 @@ beforeEach(() => {
     const headers = new Headers(init.headers);
     const body = JSON.parse(init.body as string) as RequestBody;
     requests.push({ headers, body });
-    // Мок воспроизводит контракт OpenCode Go: без заголовков запрос отклонён.
+    // The mock reproduces the OpenCode Go contract: without the headers the request is rejected.
     const valid = headers.get('x-opencode-session') && /^ssh-commander(?:\/\S+)?$/.test(headers.get('user-agent') ?? '')
       && body.messages.every((message) => !Object.hasOwn(message, 'name'));
     return new Response(JSON.stringify(valid
@@ -81,7 +81,7 @@ async function sendMessage(
   }, { timeout: 3000 });
 }
 
-describe('агент — стабильная сессия OpenCode Go', () => {
+describe('agent — a stable OpenCode Go session', () => {
   const reasoning = { type: 'reasoning' as const, id: 'rs-test', summary: [] as [], encrypted_content: 'test-encrypted' };
 
   function mockResponses(outputs: unknown[][]) {
@@ -100,7 +100,7 @@ describe('агент — стабильная сессия OpenCode Go', () => {
     return requests;
   }
 
-  it('Responses: инструменты, reasoning и сохранённый диалог продолжаются с тем же ID', async () => {
+  it('Responses: tools, reasoning and the saved dialogue continue with the same ID', async () => {
     const captured = mockResponses([[
       reasoning, { type: 'function_call', id: 'fc-test', call_id: 'memory-call', name: 'read_memory', arguments: '{}' },
     ]]);
@@ -119,7 +119,7 @@ describe('агент — стабильная сессия OpenCode Go', () => {
     expect(captured.map((r) => r.headers.get('x-opencode-session'))).toEqual(Array(3).fill(original.session.dialogueId));
   });
 
-  it('Responses: план без инструментов, выполнение после approve_plan с инструментами', async () => {
+  it('Responses: a plan without tools, execution after approve_plan with tools', async () => {
     const captured = mockResponses([]);
     const target = makeSession();
     await sendMessage(target, { type: 'message', content: 'составь план', planMode: true });
@@ -131,7 +131,7 @@ describe('агент — стабильная сессия OpenCode Go', () => {
     expect(captured[1].body.tools?.length).toBeGreaterThan(0);
   });
 
-  it('Responses: изменяющий инструмент ждёт решения пользователя и соблюдает reject', async () => {
+  it('Responses: a mutating tool waits for the user decision and honors reject', async () => {
     const captured = mockResponses([[
       { type: 'function_call', call_id: 'write-call', name: 'write_memory', arguments: '{"content":"must not be written"}' },
     ]]);
@@ -151,7 +151,7 @@ describe('агент — стабильная сессия OpenCode Go', () => {
   it.each([
     'data: {"error":{"code":"inference_failed","message":"Upstream failed"}}\n\n',
     'data: [DONE]\n\n',
-  ])('ошибка или пустой SSE-ответ видны в UI и не сохраняются как пустой ответ', async (frame) => {
+  ])('an error or an empty SSE response is visible in the UI and not saved as an empty response', async (frame) => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(frame, {
       status: 200, headers: { 'content-type': 'text/event-stream' },
     })));
@@ -166,7 +166,7 @@ describe('агент — стабильная сессия OpenCode Go', () => {
     expect(getDialogue(target.session.dialogueId)?.messages.filter((m) => m.role === 'assistant')).toEqual([]);
   });
 
-  it('сохраняет ID на шагах инструментов и при следующем сообщении', async () => {
+  it('keeps the ID across tool steps and the next message', async () => {
     const target = makeSession();
     replies.push({
       role: 'assistant', content: null,
@@ -196,7 +196,7 @@ describe('агент — стабильная сессия OpenCode Go', () => {
     expect(requests[3].body.messages.every((message) => !Object.hasOwn(message, 'name'))).toBe(true);
   });
 
-  it('использует один ID для плана и его выполнения', async () => {
+  it('uses one ID for the plan and its execution', async () => {
     const target = makeSession();
     await sendMessage(target, { type: 'message', content: 'составь план', planMode: true });
     expect(target.sent.some((m) => m.type === 'plan_ready')).toBe(true);
@@ -210,7 +210,7 @@ describe('агент — стабильная сессия OpenCode Go', () => {
     ]);
   });
 
-  it('восстанавливает ID сохранённого диалога, а новому даёт другой', async () => {
+  it('restores the ID of a saved dialogue and gives a new one to a fresh dialogue', async () => {
     const original = makeSession();
     await sendMessage(original, { type: 'message', content: 'первый запрос' });
     original.session.stop();

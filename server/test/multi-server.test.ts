@@ -9,8 +9,8 @@ import type { Dialogue } from '../src/ai/dialogues.js';
 const dataDir = mkdtempSync(path.join(tmpdir(), 'sc-multi-server-'));
 process.env.DATA_DIR = dataDir;
 
-// security_audit дёргает SSH — подменяем, чтобы проверить маршрутизацию
-// профиля и per-server sudo-паролей без реальных подключений.
+// security_audit touches SSH — stub it to check profile routing and per-server
+// sudo passwords without real connections.
 vi.mock('../src/services/security-audit.js', () => ({
   runSecurityAudit: vi.fn(
     async (profile: { id: string }, opts: { privileged?: boolean; sudoPassword?: string }) =>
@@ -40,7 +40,7 @@ const second: Profile = {
   dockerCommand: 'docker',
 };
 
-// Диалог в старом формате — без поля extraProfileIds (обратная совместимость).
+// A dialogue in the old format — without the extraProfileIds field (backward compatibility).
 const legacyDialogue = {
   id: 'legacy1',
   profileId: home.id,
@@ -52,7 +52,7 @@ const legacyDialogue = {
   updatedAt: 1,
 };
 
-// Хранилища сидируются до первого обращения: load() читает файлы лениво.
+// The stores are seeded before the first access: load() reads the files lazily.
 writeFileSync(path.join(dataDir, 'profiles.json'), JSON.stringify({ profiles: [home, second] }, null, 2));
 writeFileSync(path.join(dataDir, 'ai-dialogues.json'), JSON.stringify({ dialogues: [legacyDialogue] }, null, 2));
 
@@ -61,8 +61,8 @@ const dialogues = await import('../src/ai/dialogues.js');
 const memory = await import('../src/ai/memory.js');
 
 type ToolResult = { status: 'ok' | 'error'; output: string; truncated: boolean };
-// runTool — приватный; в unit-тестах вызываем напрямую (approve проверяется
-// в цикле runLoop, а не внутри runTool).
+// runTool is private; unit tests call it directly (approve is checked in the
+// runLoop, not inside runTool).
 type SessionInternals = {
   runTool(name: string, args: Record<string, unknown>): Promise<ToolResult>;
 };
@@ -89,27 +89,27 @@ afterAll(() => {
 });
 
 describe('resolveServer', () => {
-  it('без имени резолвится в домашний профиль', () => {
+  it('without a name resolves to the home profile', () => {
     const { session } = makeSession();
     expect(session.resolveServer()).toEqual({ profile: expect.objectContaining({ id: home.id }) });
     expect(session.resolveServer('   ')).toEqual({ profile: expect.objectContaining({ id: home.id }) });
   });
 
-  it('матчит имя подключённого сервера точно и без учёта регистра', () => {
+  it('matches a connected server name exactly and case-insensitively', () => {
     const { session } = makeSession();
     session.attachServerById(second.id);
     expect(session.resolveServer('Second')).toEqual({ profile: expect.objectContaining({ id: second.id }) });
     expect(session.resolveServer('second')).toEqual({ profile: expect.objectContaining({ id: second.id }) });
   });
 
-  it('неизвестное имя — ошибка с перечнем подключённых серверов', () => {
+  it('an unknown name — an error listing the connected servers', () => {
     const { session } = makeSession();
     const result = session.resolveServer('nope');
     expect('error' in result && result.error).toContain('Неизвестный сервер «nope»');
     expect('error' in result && result.error).toContain(home.name);
   });
 
-  it('известный, но не подключённый — ошибка с подсказкой про connect_server', () => {
+  it('a known but unattached server — an error with a connect_server hint', () => {
     const { session } = makeSession();
     const result = session.resolveServer('Second');
     expect('error' in result && result.error).toContain('не подключён к диалогу');
@@ -117,11 +117,11 @@ describe('resolveServer', () => {
   });
 });
 
-describe('attach/detach сервера через сессию', () => {
-  it('attach: профиль попадает в диалог и в событие servers', () => {
+describe('attach/detach via the session', () => {
+  it('attach: the profile lands in the dialogue and in the servers event', () => {
     const { session, sent } = makeSession();
     expect(session.attachServerById(second.id)).toEqual({ ok: true });
-    // Повторный attach — идемпотентно.
+    // A repeated attach is idempotent.
     expect(session.attachServerById(second.id)).toEqual({ ok: true });
     expect(dialogues.getDialogue(session.dialogueId)?.extraProfileIds).toEqual([second.id]);
     const events = sent.filter((m) => m.type === 'servers');
@@ -136,22 +136,22 @@ describe('attach/detach сервера через сессию', () => {
     });
   });
 
-  it('attach несуществующего профиля — ошибка', () => {
+  it('attaching a nonexistent profile — an error', () => {
     const { session } = makeSession();
     const result = session.attachServerById('ghost');
     expect(result.ok).toBe(false);
   });
 
-  it('домашний сервер отцепить нельзя', () => {
+  it('the home server cannot be detached', () => {
     const { session, sent } = makeSession();
     const result = session.detachServerById(home.id);
     expect(result).toEqual({ ok: false, error: expect.stringContaining('Домашний') });
-    // Через WS-сообщение клиент получает error-фрейм.
+    // Via a WS message the client receives an error frame.
     session.handleClientMessage({ type: 'detach_server', profileId: home.id });
     expect(sent.some((m) => m.type === 'error' && String(m.message).includes('Домашний'))).toBe(true);
   });
 
-  it('detach убирает профиль из диалога и шлёт servers', () => {
+  it('detach removes the profile from the dialogue and sends servers', () => {
     const { session, sent } = makeSession();
     session.attachServerById(second.id);
     expect(session.detachServerById(second.id)).toEqual({ ok: true });
@@ -162,7 +162,7 @@ describe('attach/detach сервера через сессию', () => {
 });
 
 describe('connect_server', () => {
-  it('подключает сервер, возвращает его память и шлёт servers', async () => {
+  it('connects the server, returns its memory and sends servers', async () => {
     memory.writeMemory(second.id, '# Заметки второго сервера');
     const { session, sent } = makeSession();
     const result = await runTool(session, 'connect_server', { server: 'Second' });
@@ -175,7 +175,7 @@ describe('connect_server', () => {
     expect(sent.some((m) => m.type === 'servers')).toBe(true);
   });
 
-  it('неизвестное имя — ошибка с перечнем всех профилей', async () => {
+  it('an unknown name — an error listing all profiles', async () => {
     const { session } = makeSession();
     const result = await runTool(session, 'connect_server', { server: 'nope' });
     expect(result.status).toBe('error');
@@ -183,7 +183,7 @@ describe('connect_server', () => {
     expect(result.output).toContain(second.name);
   });
 
-  it('повторное подключение (и домашнего) — «уже подключён»', async () => {
+  it('re-connecting (including the home one) — "already attached"', async () => {
     const { session } = makeSession();
     const first = await runTool(session, 'connect_server', { server: 'second' });
     expect(first.status).toBe('ok');
@@ -196,7 +196,7 @@ describe('connect_server', () => {
 });
 
 describe('list_servers', () => {
-  it('возвращает все профили без секретов и с флагом connected', async () => {
+  it('returns all profiles without secrets and with the connected flag', async () => {
     const { session } = makeSession();
     session.attachServerById(second.id);
     const result = await runTool(session, 'list_servers');
@@ -216,8 +216,8 @@ describe('list_servers', () => {
   });
 });
 
-describe('маршрутизация памяти по server', () => {
-  it('read_memory читает память указанного сервера', async () => {
+describe('memory routing by server', () => {
+  it('read_memory reads the memory of the given server', async () => {
     memory.writeMemory(second.id, '# Память второго');
     const { session } = makeSession();
     session.attachServerById(second.id);
@@ -227,7 +227,7 @@ describe('маршрутизация памяти по server', () => {
     expect(onHome.output).toContain('MEMORY.md пока нет');
   });
 
-  it('write_memory пишет в память указанного сервера', async () => {
+  it('write_memory writes to the memory of the given server', async () => {
     const { session } = makeSession();
     session.attachServerById(second.id);
     const result = await runTool(session, 'write_memory', { server: 'second', content: 'новая запись' });
@@ -235,7 +235,7 @@ describe('маршрутизация памяти по server', () => {
     expect(memory.readMemory(second.id)).toBe('новая запись');
   });
 
-  it('ошибка резолва сервера — обычный tool_result, не исключение', async () => {
+  it('a server resolve error — a regular tool_result, not an exception', async () => {
     const { session } = makeSession();
     const unknown = await runTool(session, 'read_memory', { server: 'nope' });
     expect(unknown.status).toBe('error');
@@ -246,8 +246,8 @@ describe('маршрутизация памяти по server', () => {
   });
 });
 
-describe('sudo-пароли по серверам', () => {
-  it('пароль одного сервера не течёт на другой', async () => {
+describe('sudo passwords per server', () => {
+  it('one server password does not leak to another', async () => {
     const { session } = makeSession();
     session.attachServerById(second.id);
     session.handleClientMessage({ type: 'sudo_credentials', password: 'pw-home' });
@@ -263,7 +263,7 @@ describe('sudo-пароли по серверам', () => {
     expect(onSecond.output).toContain('sudo=pw-second');
   });
 
-  it('stop() очищает все пароли', async () => {
+  it('stop() clears all passwords', async () => {
     const { session } = makeSession();
     session.handleClientMessage({ type: 'sudo_credentials', password: 'pw-home' });
     session.stop();
@@ -272,7 +272,7 @@ describe('sudo-пароли по серверам', () => {
     expect(result.output).toContain('sudo=none');
   });
 
-  it('detach сервера удаляет его sudo-пароль', async () => {
+  it('detaching a server removes its sudo password', async () => {
     const { session } = makeSession();
     session.attachServerById(second.id);
     session.handleClientMessage({ type: 'sudo_credentials', password: 'pw-second', profileId: second.id });
@@ -283,8 +283,8 @@ describe('sudo-пароли по серверам', () => {
   });
 });
 
-describe('обратная совместимость диалогов', () => {
-  it('старый JSON без extraProfileIds читается, поле появляется при attach', () => {
+describe('dialogue backward compatibility', () => {
+  it('old JSON without extraProfileIds reads, the field appears on attach', () => {
     const legacy = dialogues.getDialogue(legacyDialogue.id);
     expect(legacy).toBeDefined();
     expect(legacy?.extraProfileIds).toBeUndefined();
@@ -293,13 +293,13 @@ describe('обратная совместимость диалогов', () => {
     dialogues.detachProfileFromDialogue(legacyDialogue.id, second.id);
   });
 
-  it('сессия подгружает extraProfileIds диалога, несуществующие пропускает', () => {
+  it('the session picks up the dialogue extraProfileIds, skipping nonexistent ones', () => {
     dialogues.attachProfileToDialogue(legacyDialogue.id, second.id);
     dialogues.attachProfileToDialogue(legacyDialogue.id, 'ghost-id');
     const dialogue = dialogues.getDialogue(legacyDialogue.id);
     const { session } = makeSession(dialogue);
     expect(session.dialogueId).toBe(legacyDialogue.id);
-    // Сервер из extraProfileIds доступен сразу, без connect_server.
+    // A server from extraProfileIds is available immediately, without connect_server.
     expect(session.resolveServer('Second')).toEqual({ profile: expect.objectContaining({ id: second.id }) });
     dialogues.detachProfileFromDialogue(legacyDialogue.id, second.id);
     dialogues.detachProfileFromDialogue(legacyDialogue.id, 'ghost-id');

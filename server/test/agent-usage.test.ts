@@ -5,12 +5,12 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import type { WebSocket } from 'ws';
 import type { Profile } from '../src/types.js';
 
-// Сессия агента создаётся через динамический импорт ниже (нужен DATA_DIR).
+// The agent session is created via the dynamic import below (DATA_DIR is needed).
 const dataDir = mkdtempSync(path.join(tmpdir(), 'sc-agent-usage-'));
 process.env.DATA_DIR = dataDir;
 
-// Клиент и поиск — без сети: streamChatCompletion возвращает message + usage,
-// searchWeb — ok + usage (проверяем запись в журнал, а не сам HTTP).
+// The client and the search are network-free: streamChatCompletion returns a message + usage,
+// searchWeb — ok + usage (we check the journal record, not the HTTP itself).
 vi.mock('../src/ai/client.js', () => ({
   streamChatCompletion: vi.fn(async () => ({
     message: { role: 'assistant', content: 'ответ', tool_calls: [] },
@@ -92,8 +92,8 @@ afterAll(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-describe('agent: запись usage (docs/ai-costs-plan.md, решения 3, 5, 6, 8)', () => {
-  it('runLoop: chat-вызов пишется в журнал, WS-событие usage с итогами диалога', async () => {
+describe('agent: usage recording (docs/ai-costs-plan.md, decisions 3, 5, 6, 8)', () => {
+  it('runLoop: the chat call is recorded into the journal, the WS usage event carries the dialogue totals', async () => {
     const { session, sent } = makeSession();
     session.handleClientMessage({ type: 'message', content: 'привет' });
 
@@ -111,14 +111,14 @@ describe('agent: запись usage (docs/ai-costs-plan.md, решения 3, 5,
       completionTokens: 500,
       reasoningTokens: 50,
     });
-    // gpt-4.1-mini протарифицирован дефолтами: (1000−200)·0.4 + 200·0.2 + 500·1.6 = $0.00116
+    // gpt-4.1-mini is priced by the defaults: (1000−200)·0.4 + 200·0.2 + 500·1.6 = $0.00116
     expect(records[0].costUsd).toBeCloseTo(0.00116, 9);
 
     const usageEvent = sent.find((m) => m.type === 'usage');
     expect(usageEvent?.totals).toMatchObject({ calls: 1, costUsd: 0.00116, unpricedCalls: 0 });
   });
 
-  it('runPlan: шаг планирования пишется как kind=plan', async () => {
+  it('runPlan: the planning step is recorded as kind=plan', async () => {
     const { session, sent } = makeSession();
     session.handleClientMessage({ type: 'message', content: 'составь план', planMode: true });
 
@@ -131,7 +131,7 @@ describe('agent: запись usage (docs/ai-costs-plan.md, решения 3, 5,
     expect(sent.filter((m) => m.type === 'usage')).toHaveLength(1);
   });
 
-  it('runTool web_search: kind=web_search с searchRequests, цена по токенам DeepSeek V4', async () => {
+  it('runTool web_search: kind=web_search with searchRequests, priced by the DeepSeek V4 tokens', async () => {
     const { session, sent } = makeSession();
     const result = await runTool(session, 'web_search', { query: 'версия nginx' });
     expect(result.status).toBe('ok');
@@ -144,21 +144,21 @@ describe('agent: запись usage (docs/ai-costs-plan.md, решения 3, 5,
       completionTokens: 400,
       searchRequests: 2,
     });
-    // deepseek-v4-flash протарифицирован (off-peak): (8000·0.22 + 400·0.66)/1M = 0.002024;
-    // отдельного тарифа за поисковый запрос нет — поиск оплачивается токенами.
+    // deepseek-v4-flash is priced (off-peak): (8000·0.22 + 400·0.66)/1M = 0.002024;
+    // there is no separate search-request rate — the search is paid in tokens.
     expect(records[0].costUsd).toBeCloseTo(0.002024, 9);
 
-    // Итоги диалога кумулятивные (chat + plan из предыдущих тестов + этот
-    // web_search): все записи протарифицированы, unpricedCalls = 0.
+    // The dialogue totals are cumulative (chat + plan from the previous tests + this
+    // web_search): every record is priced, unpricedCalls = 0.
     const usageEvent = sent.find((m) => m.type === 'usage');
     expect(usageEvent?.totals).toMatchObject({ calls: 3, unpricedCalls: 0 });
     expect((usageEvent?.totals as { costUsd: number }).costUsd).toBeCloseTo(0.004344, 9);
   });
 
-  it('usageTotalsByDialogue агрегирует chat + web_search одного диалога', async () => {
+  it('usageTotalsByDialogue aggregates chat + web_search of one dialogue', async () => {
     const totals = usageStore.usageTotalsByDialogue().get(dialogueSeed.id);
     expect(totals).toBeDefined();
-    expect(totals?.calls).toBe(3); // chat + plan + web_search из предыдущих тестов
+    expect(totals?.calls).toBe(3); // chat + plan + web_search from the previous tests
     expect(totals?.promptTokens).toBe(1000 + 1000 + 8000);
     expect(totals?.unpricedCalls).toBe(0);
   });

@@ -21,11 +21,11 @@ import {
 import type { ExecResult, Profile } from '../src/types.js';
 
 describe('buildDuCommand', () => {
-  it('собирает du -x -d 1 -k с -- перед путём', () => {
+  it('builds du -x -d 1 -k with -- before the path', () => {
     expect(buildDuCommand('/var')).toBe("du -x -d 1 -k -- '/var'");
   });
 
-  it('shq-экранирует путь (пробелы, кавычки, ведущий дефис)', () => {
+  it('shq-escapes the path (spaces, quotes, leading dash)', () => {
     expect(buildDuCommand('/mnt/my data')).toBe("du -x -d 1 -k -- '/mnt/my data'");
     expect(buildDuCommand("/var/it's")).toBe("du -x -d 1 -k -- '/var/it'\\''s'");
     expect(buildDuCommand('/-weird')).toBe("du -x -d 1 -k -- '/-weird'");
@@ -33,47 +33,47 @@ describe('buildDuCommand', () => {
 });
 
 describe('buildTopFilesCommand / buildTopFilesStatCommand', () => {
-  it('интерполирует limit и строит пайплайн find|sort|head', () => {
+  it('interpolates limit and builds the find|sort|head pipeline', () => {
     expect(buildTopFilesCommand('/var', 25)).toBe(
       "find '/var' -xdev -type f -printf '%s\\t%p\\n' | sort -rn | head -n 25",
     );
   });
 
-  it('фолбэк stat использует -exec stat с литеральным табом в формате', () => {
+  it('stat fallback uses -exec stat with a literal tab in the format', () => {
     const cmd = buildTopFilesStatCommand('/var', 10);
     expect(cmd).toBe(
       "find '/var' -xdev -type f -exec stat -c '%s\t%n' {} + | sort -rn | head -n 10",
     );
-    // Внутри одинарных кавычек — настоящий таб (0x09), а не два символа \t:
-    // GNU stat разворачивает escape-последовательность, BusyBox — нет.
+    // Inside single quotes — a real tab (0x09), not the two characters \t:
+    // GNU stat expands escape sequences, BusyBox does not.
     expect(cmd).toContain("'%s\t%n'");
     expect(cmd).not.toContain("'%s\\t%n'");
   });
 });
 
 describe('normalizeDiskPath', () => {
-  it('схлопывает // и снимает хвостовой /', () => {
+  it('collapses // and strips the trailing /', () => {
     expect(normalizeDiskPath('  //var//lib/  ')).toBe('/var/lib');
     expect(normalizeDiskPath('/var///lib//')).toBe('/var/lib');
   });
 
-  it('корень остаётся корнем', () => {
+  it('root stays root', () => {
     expect(normalizeDiskPath('/')).toBe('/');
     expect(normalizeDiskPath('///')).toBe('/');
   });
 
-  it('не-абсолютный путь возвращается как есть (валидирует assertNavigablePath)', () => {
+  it('a non-absolute path is returned as is (validated by assertNavigablePath)', () => {
     expect(normalizeDiskPath('var/lib')).toBe('var/lib');
   });
 });
 
 describe('assertNavigablePath', () => {
-  it('принимает абсолютные пути, включая корень', () => {
+  it('accepts absolute paths, including the root', () => {
     expect(assertNavigablePath('/')).toBe('/');
     expect(assertNavigablePath('/var/log')).toBe('/var/log');
   });
 
-  it('отвергает не-абсолютный путь и сегменты ..', () => {
+  it('rejects non-absolute paths and .. segments', () => {
     expect(() => assertNavigablePath('var')).toThrow(DiskUsageError);
     expect(() => assertNavigablePath('../etc')).toThrow(DiskUsageError);
     expect(() => assertNavigablePath('/var/../etc')).toThrow(DiskUsageError);
@@ -82,15 +82,15 @@ describe('assertNavigablePath', () => {
 });
 
 describe('parseDuKb', () => {
-  // GNU и BusyBox du печатают сам каталог последней строкой (post-order),
-  // после детей; парсер ищет его по пути, а не по позиции.
+  // GNU and BusyBox du print the directory itself as the last line (post-order),
+  // after its children; the parser looks it up by path, not by position.
   const OUTPUT = [
     '4096\t/var/log',
     '3072\t/var/cache',
     '10240\t/var',
   ].join('\n');
 
-  it('находит суммарную строку по пути и собирает детей', () => {
+  it('finds the total line by path and collects children', () => {
     const { totalKb, children } = parseDuKb(OUTPUT, '/var');
     expect(totalKb).toBe(10240);
     expect(children).toEqual([
@@ -99,18 +99,18 @@ describe('parseDuKb', () => {
     ]);
   });
 
-  it('терпим к путям с пробелами (разделитель — первый таб)', () => {
+  it('tolerates paths with spaces (separator is the first tab)', () => {
     const { totalKb, children } = parseDuKb('512\t/var/log with spaces\n1024\t/var', '/var');
     expect(totalKb).toBe(1024);
     expect(children).toEqual([{ path: '/var/log with spaces', kb: 512 }]);
   });
 
-  it('пропускает чужие пути (не начинающиеся с basePath + /)', () => {
+  it('skips foreign paths (not starting with basePath + /)', () => {
     const { children } = parseDuKb('8\t/etc/passwd\n4\t/var/tmp\n9\t/var', '/var');
     expect(children).toEqual([{ path: '/var/tmp', kb: 4 }]);
   });
 
-  it('для корня детьми становятся все абсолютные пути, кроме самого корня', () => {
+  it('for the root, children are all absolute paths except the root itself', () => {
     const { totalKb, children } = parseDuKb('4\t/etc\n6\t/var\n12\t/', '/');
     expect(totalKb).toBe(12);
     expect(children).toEqual([
@@ -119,7 +119,7 @@ describe('parseDuKb', () => {
     ]);
   });
 
-  it('отбрасывает мусор и обрезанный хвост без таба', () => {
+  it('drops garbage and a truncated tail without a tab', () => {
     const { totalKb, children } = parseDuKb(
       'du: cannot read directory\n4096\t/var/log\n10240',
       '/var',
@@ -128,14 +128,14 @@ describe('parseDuKb', () => {
     expect(children).toEqual([{ path: '/var/log', kb: 4096 }]);
   });
 
-  it('отсутствие суммарной строки → totalKb null (признак обрезанного вывода)', () => {
+  it('missing total line → totalKb null (a sign of truncated output)', () => {
     const { totalKb } = parseDuKb('4096\t/var/log\n3072\t/var/cache', '/var');
     expect(totalKb).toBeNull();
   });
 });
 
 describe('toDuSnapshot', () => {
-  it('сортирует по убыванию, считает доли и directBytes = total − Σ детей', () => {
+  it('sorts descending, computes shares and directBytes = total − Σ children', () => {
     const snap = toDuSnapshot('/var', 10, [
       { path: '/var/cache', kb: 3 },
       { path: '/var/log', kb: 4 },
@@ -148,23 +148,23 @@ describe('toDuSnapshot', () => {
     expect(snap.children[0]).toMatchObject({ path: '/var/log', bytes: 4 * 1024, pctOfParent: 40 });
   });
 
-  it('округляет pct до 1 знака', () => {
+  it('rounds pct to 1 decimal', () => {
     const snap = toDuSnapshot('/var', 3, [{ path: '/var/log', kb: 1 }]);
     expect(snap.children[0].pctOfParent).toBe(33.3);
   });
 
-  it('clamp directBytes ≥ 0 при расхождении (незакрытые удалённые файлы и т.п.)', () => {
+  it('clamps directBytes ≥ 0 on a mismatch (unclosed deleted files etc.)', () => {
     const snap = toDuSnapshot('/var', 5, [{ path: '/var/log', kb: 7 }]);
     expect(snap.directBytes).toBe(0);
   });
 
-  it('пустой список детей — directBytes равен total', () => {
+  it('empty children list — directBytes equals total', () => {
     const snap = toDuSnapshot('/var', 8, []);
     expect(snap.directBytes).toBe(8 * 1024);
     expect(snap.children).toEqual([]);
   });
 
-  it('totalKb null при непустых детях — деградация: сумма по детям, truncated', () => {
+  it('totalKb null with non-empty children — degradation: sum over children, truncated', () => {
     const snap = toDuSnapshot('/var', null, [
       { path: '/var/log', kb: 4 },
       { path: '/var/cache', kb: 6 },
@@ -172,17 +172,17 @@ describe('toDuSnapshot', () => {
     expect(snap.totalBytes).toBe(10 * 1024);
     expect(snap.directBytes).toBe(0);
     expect(snap.truncated).toBe(true);
-    // доли считаются от суммы по детям — суммарная строка потерялась
+    // shares are computed from the sum over children — the total line was lost
     expect(snap.children[0]).toMatchObject({ path: '/var/cache', bytes: 6 * 1024, pctOfParent: 60 });
   });
 
-  it('totalKb null без детей — ошибка', () => {
+  it('totalKb null without children — error', () => {
     expect(() => toDuSnapshot('/var', null, [])).toThrow(DiskUsageError);
   });
 });
 
 describe('parseFindOutput', () => {
-  it('парсит строки размер\\tпуть и сортирует по убыванию', () => {
+  it('parses size\\tpath lines and sorts descending', () => {
     const files = parseFindOutput('2048\t/big file\n1024\t/a\n4096\t/zzz\n');
     expect(files).toEqual([
       { path: '/zzz', bytes: 4096 },
@@ -191,14 +191,14 @@ describe('parseFindOutput', () => {
     ]);
   });
 
-  it('отбрасывает неполную хвостовую строку и мусор', () => {
+  it('drops an incomplete tail line and garbage', () => {
     const files = parseFindOutput('1024\t/a\n512\nmусор\n');
     expect(files).toEqual([{ path: '/a', bytes: 1024 }]);
   });
 });
 
 describe('countUnreadable', () => {
-  it('считает строки отказа доступа и игнорирует посторонний stderr', () => {
+  it('counts permission-denied lines and ignores unrelated stderr', () => {
     const stderr = [
       "du: cannot read directory '/root': Permission denied",
       "du: cannot access '/root/.cache': Operation not permitted",
@@ -208,13 +208,13 @@ describe('countUnreadable', () => {
     expect(countUnreadable(stderr)).toBe(2);
   });
 
-  it('пустой stderr — 0', () => {
+  it('empty stderr — 0', () => {
     expect(countUnreadable('')).toBe(0);
   });
 });
 
 describe('needsStatFallback', () => {
-  it('ловит формулировки отказа find у GNU, BusyBox и BSD', () => {
+  it('catches find failure wordings of GNU, BusyBox and BSD', () => {
     expect(needsStatFallback('find: unrecognized: -printf')).toBe(true);
     expect(needsStatFallback("find: unknown predicate `-printf'")).toBe(true);
     expect(needsStatFallback('find: -printf: unknown primary or operator')).toBe(true);
@@ -222,7 +222,7 @@ describe('needsStatFallback', () => {
     expect(needsStatFallback('find: option not supported')).toBe(true);
   });
 
-  it('не срабатывает на пустом и постороннем stderr', () => {
+  it('does not fire on empty or unrelated stderr', () => {
     expect(needsStatFallback('')).toBe(false);
     expect(needsStatFallback('Permission denied')).toBe(false);
     expect(needsStatFallback('find: bad option')).toBe(false);
@@ -230,14 +230,14 @@ describe('needsStatFallback', () => {
 });
 
 describe('clampAgentLimit', () => {
-  it('дефолт 10 для отсутствующего, мусора, нуля и отрицательных', () => {
+  it('default 10 for missing, garbage, zero and negative values', () => {
     expect(clampAgentLimit(undefined)).toBe(AGENT_DEFAULT_LIMIT);
     expect(clampAgentLimit('abc')).toBe(AGENT_DEFAULT_LIMIT);
     expect(clampAgentLimit(0)).toBe(AGENT_DEFAULT_LIMIT);
     expect(clampAgentLimit(-5)).toBe(AGENT_DEFAULT_LIMIT);
   });
 
-  it('пропускает целые в диапазоне и клампит сверху', () => {
+  it('passes integers in range and clamps above it', () => {
     expect(clampAgentLimit('5')).toBe(5);
     expect(clampAgentLimit(50)).toBe(50);
     expect(clampAgentLimit(51)).toBe(AGENT_MAX_LIMIT);
@@ -247,9 +247,9 @@ describe('clampAgentLimit', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Исполнительный слой: deps-инъекция (паттерн systemd.test.ts) — мок exec и
-// предпроверки, реального SSH нет. Кэш du глобальный на файл — пути тестов
-// уникальны.
+// Executor layer: deps injection (the systemd.test.ts pattern) — mocked exec
+// and prechecks, no real SSH. The du cache is global per file — test paths
+// are unique.
 // ---------------------------------------------------------------------------
 
 const profile = { id: 'p1' } as Profile;
@@ -258,7 +258,7 @@ const noopPrecheck = async (): Promise<void> => {};
 const okExec = (stdout: string, stderr = ''): ExecFn =>
   async (): Promise<ExecResult> => ({ code: 0, stdout, stderr });
 
-/** Поочередно отдаёт результаты, на исчерпании повторяет последний. */
+/** Hands out results in turn; repeats the last one when exhausted. */
 function fakeExec(results: Array<() => Promise<ExecResult>>): { calls: string[]; execFn: ExecFn } {
   const calls: string[] = [];
   let i = 0;
@@ -271,8 +271,8 @@ function fakeExec(results: Array<() => Promise<ExecResult>>): { calls: string[];
   return { calls, execFn };
 }
 
-describe('diskUsageSnapshot — исполнение', () => {
-  it('собирает снапшот из вывода du и считает incomplete по stderr', async () => {
+describe('diskUsageSnapshot — execution', () => {
+  it('builds the snapshot from du output and counts incomplete from stderr', async () => {
     const snap = await diskUsageSnapshot(profile, '/snap-1', {
       precheckFn: noopPrecheck,
       execFn: okExec(
@@ -286,7 +286,7 @@ describe('diskUsageSnapshot — исполнение', () => {
     expect(snap.truncated).toBe(false);
   });
 
-  it('обрезанный вывод (нет суммарной строки) → деградация truncated', async () => {
+  it('truncated output (no total line) → truncated degradation', async () => {
     const snap = await diskUsageSnapshot(profile, '/trunc-1', {
       precheckFn: noopPrecheck,
       execFn: okExec('4096\t/trunc-1/log\n3072\t/trunc-1/cache'),
@@ -296,7 +296,7 @@ describe('diskUsageSnapshot — исполнение', () => {
     expect(snap.directBytes).toBe(0);
   });
 
-  it('ненулевой код du → DiskUsageError со stderr', async () => {
+  it('non-zero du exit code → DiskUsageError with stderr', async () => {
     await expect(
       diskUsageSnapshot(profile, '/err-1', {
         precheckFn: noopPrecheck,
@@ -305,7 +305,7 @@ describe('diskUsageSnapshot — исполнение', () => {
     ).rejects.toThrow('No such file');
   });
 
-  it('таймаут exec → DiskUsageError с русским текстом (не 502 «Сервер недоступен»)', async () => {
+  it('exec timeout → DiskUsageError with the Russian text (not a 502 "server unavailable")', async () => {
     await expect(
       diskUsageSnapshot(profile, '/timeout-1', {
         precheckFn: noopPrecheck,
@@ -316,7 +316,7 @@ describe('diskUsageSnapshot — исполнение', () => {
     ).rejects.toThrow('Превышено время ожидания (60 с)');
   });
 
-  it('транспортная ошибка пробрасывается как есть (не DiskUsageError → маршрут 502)', async () => {
+  it('transport error is rethrown as is (not DiskUsageError → the route returns 502)', async () => {
     const err = await diskUsageSnapshot(profile, '/transport-1', {
       precheckFn: noopPrecheck,
       execFn: async () => {
@@ -327,7 +327,7 @@ describe('diskUsageSnapshot — исполнение', () => {
     expect(String((err as Error).message)).toContain('SSH error');
   });
 
-  it('ошибка предпроверки — пользовательская (400)', async () => {
+  it('precheck error is a user error (400)', async () => {
     await expect(
       diskUsageSnapshot(profile, '/notdir-1', {
         precheckFn: async () => {
@@ -338,7 +338,7 @@ describe('diskUsageSnapshot — исполнение', () => {
     ).rejects.toThrow('Это не директория');
   });
 
-  it('skipPrecheck пропускает предпроверку (агент: одна проверка на два вызова)', async () => {
+  it('skipPrecheck skips the precheck (agent: one check for two calls)', async () => {
     let prechecked = 0;
     const deps = {
       precheckFn: async (): Promise<void> => {
@@ -350,7 +350,7 @@ describe('diskUsageSnapshot — исполнение', () => {
     expect(prechecked).toBe(0);
   });
 
-  it('кэш 2 с: параллельные вызовы одного пути делят один exec', async () => {
+  it('2 s cache: parallel calls for one path share a single exec', async () => {
     let calls = 0;
     const deps = {
       precheckFn: noopPrecheck,
@@ -367,7 +367,7 @@ describe('diskUsageSnapshot — исполнение', () => {
     expect(a.totalBytes).toBe(b.totalBytes);
   });
 
-  it('ошибочный промис удаляется из кэша — следующий вызов пробует снова', async () => {
+  it('a failed promise is evicted from the cache — the next call retries', async () => {
     let calls = 0;
     const execFn: ExecFn = async () => {
       calls += 1;
@@ -383,8 +383,8 @@ describe('diskUsageSnapshot — исполнение', () => {
   });
 });
 
-describe('topFiles — фолбэк-матрица', () => {
-  it('незнакомая опция -printf → повтор stat-вариантом, результат из второго exec', async () => {
+describe('topFiles — fallback matrix', () => {
+  it('unknown -printf option → retried with the stat variant, result from the second exec', async () => {
     const { calls, execFn } = fakeExec([
       async () => ({ code: 0, stdout: '', stderr: 'find: unrecognized: -printf' }),
       async () => ({ code: 0, stdout: '1048576\t/var/big.bin\n', stderr: '' }),
@@ -396,7 +396,7 @@ describe('topFiles — фолбэк-матрица', () => {
     expect(out.incomplete).toBeNull();
   });
 
-  it('пустой stdout с отказами доступа — НЕ фолбэк (штатный пустой каталог, без лишнего обхода)', async () => {
+  it('empty stdout with permission denials — NOT a fallback (a normally empty directory, no extra traversal)', async () => {
     const { calls, execFn } = fakeExec([
       async () => ({
         code: 0,
@@ -410,7 +410,7 @@ describe('topFiles — фолбэк-матрица', () => {
     expect(out.incomplete).toEqual({ unreadable: 1 });
   });
 
-  it('пустой stdout с посторонним stderr — фолбэк (второй признак провала find)', async () => {
+  it('empty stdout with unrelated stderr — fallback (the second sign of find failure)', async () => {
     const { calls, execFn } = fakeExec([
       async () => ({ code: 0, stdout: '', stderr: 'find: something weird happened' }),
       async () => ({ code: 0, stdout: '512\t/x\n', stderr: '' }),
@@ -420,21 +420,21 @@ describe('topFiles — фолбэк-матрица', () => {
     expect(out.files).toEqual([{ path: '/x', bytes: 512 }]);
   });
 
-  it('stat-фолбэк тоже не знает опцию → понятная ошибка про режим «Файлы»', async () => {
+  it('the stat fallback also does not know the option → a clear error about the "Files" mode', async () => {
     const execFn: ExecFn = async () => ({ code: 0, stdout: '', stderr: 'find: unrecognized: -printf' });
     await expect(topFiles(profile, '/var', 10, { precheckFn: noopPrecheck, execFn })).rejects.toThrow(
       'режим «Файлы» недоступен на этом сервере',
     );
   });
 
-  it('ненулевой код find → DiskUsageError со stderr', async () => {
+  it('non-zero find exit code → DiskUsageError with stderr', async () => {
     const execFn: ExecFn = async () => ({ code: 2, stdout: '', stderr: 'find: no such file' });
     await expect(topFiles(profile, '/var', 10, { precheckFn: noopPrecheck, execFn })).rejects.toThrow(
       'find: no such file',
     );
   });
 
-  it('таймаут find → DiskUsageError с русским текстом', async () => {
+  it('find timeout → DiskUsageError with the Russian text', async () => {
     const execFn: ExecFn = async () => {
       throw new Error('Command timed out after 60000ms');
     };

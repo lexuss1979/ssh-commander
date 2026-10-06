@@ -5,8 +5,8 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 const dataDir = mkdtempSync(path.join(tmpdir(), 'sc-profiles-'));
 process.env.DATA_DIR = dataDir;
-// Путь к ключу проверяется на принадлежность KEYS_DIR (services/keys.ts),
-// поэтому у теста свой каталог ключей.
+// The key path is checked to belong to KEYS_DIR (services/keys.ts),
+// so the test has its own keys directory.
 const keysDir = mkdtempSync(path.join(tmpdir(), 'sc-profiles-keys-'));
 process.env.KEYS_DIR = keysDir;
 const KEY_PATH = path.join(keysDir, 'id_rsa');
@@ -131,32 +131,32 @@ describe('profiles store', () => {
 });
 
 describe('normalizeLogPaths', () => {
-  it('принимает валидные абсолютные пути', () => {
+  it('accepts valid absolute paths', () => {
     expect(profiles.normalizeLogPaths(['/var/log/syslog', '/var/log/nginx/error.log'])).toEqual([
       '/var/log/syslog',
       '/var/log/nginx/error.log',
     ]);
   });
 
-  it('trim, пустые отбрасываются, дедуп с сохранением порядка', () => {
+  it('trims, drops empties, dedups keeping the order', () => {
     expect(
       profiles.normalizeLogPaths(['  /var/log/a  ', '', '   ', '/var/log/a', '/var/log/b']),
     ).toEqual(['/var/log/a', '/var/log/b']);
   });
 
-  it('не-абсолютный путь — исключение с перечнем плохих строк', () => {
+  it('a non-absolute path — an exception listing the bad lines', () => {
     expect(() => profiles.normalizeLogPaths(['var/log/a'])).toThrow(/var\/log\/a/);
     expect(() => profiles.normalizeLogPaths(['/ok', 'relative/path'])).toThrow(/relative\/path/);
   });
 
-  it('сегмент .. — исключение', () => {
+  it('a .. segment — an exception', () => {
     expect(() => profiles.normalizeLogPaths(['/var/log/../../etc/passwd'])).toThrow(/\.\./);
     expect(() => profiles.normalizeLogPaths(['/var/..'])).toThrow(/\.\./);
   });
 });
 
 describe('profile logPaths', () => {
-  it('updateProfile без logPaths сохраняет существующие пины', () => {
+  it('updateProfile without logPaths keeps the existing pins', () => {
     const p = profiles.createProfile(
       baseInput({ logPaths: ['/var/log/syslog', '/var/log/auth.log'] }),
     );
@@ -165,7 +165,7 @@ describe('profile logPaths', () => {
     profiles.deleteProfile(p.id);
   });
 
-  it('updateProfileLogPaths заменяет список', () => {
+  it('updateProfileLogPaths replaces the list', () => {
     const p = profiles.createProfile(baseInput({ logPaths: ['/var/log/old.log'] }));
     const updated = profiles.updateProfileLogPaths(p.id, [
       '  /var/log/new.log  ',
@@ -173,19 +173,19 @@ describe('profile logPaths', () => {
       '/var/log/other.log',
     ]);
     expect(updated.logPaths).toEqual(['/var/log/new.log', '/var/log/other.log']);
-    // замена, а не слияние
+    // a replacement, not a merge
     expect(updated.logPaths).not.toContain('/var/log/old.log');
     profiles.deleteProfile(p.id);
   });
 
-  it('updateProfileLogPaths отклоняет мусор и неизвестный профиль', () => {
+  it('updateProfileLogPaths rejects garbage and an unknown profile', () => {
     const p = profiles.createProfile(baseInput());
     expect(() => profiles.updateProfileLogPaths(p.id, ['not-absolute'])).toThrow(/Некорректные пути/);
     expect(() => profiles.updateProfileLogPaths('no-such-id', ['/a'])).toThrow(/not found/);
     profiles.deleteProfile(p.id);
   });
 
-  it('createProfile прогоняет logPaths через normalizeLogPaths', () => {
+  it('createProfile runs logPaths through normalizeLogPaths', () => {
     const p = profiles.createProfile(baseInput({ logPaths: ['  /var/log/a  ', '/var/log/a'] }));
     expect(p.logPaths).toEqual(['/var/log/a']);
     expect(() => profiles.createProfile(baseInput({ logPaths: ['relative/path'] }))).toThrow(
@@ -193,7 +193,7 @@ describe('profile logPaths', () => {
     );
   });
 
-  it('updateProfile прогоняет logPaths через normalizeLogPaths', () => {
+  it('updateProfile runs logPaths through normalizeLogPaths', () => {
     const p = profiles.createProfile(baseInput());
     expect(() => profiles.updateProfile(p.id, baseInput({ logPaths: ['/ok', 'oops'] }))).toThrow(
       /Некорректные пути/,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-// Ядро i18n и словари — чистый TypeScript без React/DOM, покрываются
-// раннером сервера напрямую (прецедент — alerts-merge.test.ts).
+// The i18n core and dictionaries — pure TypeScript without React/DOM, covered
+// by the server runner directly (the precedent — alerts-merge.test.ts).
 import {
   detectLang,
   localeOf,
@@ -16,18 +16,18 @@ function placeholders(s: string): string[] {
   return [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
 }
 
-describe('паритет словарей ru/en', () => {
-  it('множества ключей равны', () => {
+describe('the ru/en dictionary parity', () => {
+  it('the key sets are equal', () => {
     expect(Object.keys(en).sort()).toEqual(Object.keys(ru).sort());
   });
 
-  it('типы значений совпадают (строка vs функция)', () => {
+  it('the value types match (string vs function)', () => {
     for (const key of Object.keys(ru) as Array<keyof typeof ru>) {
       expect(typeof en[key], key).toBe(typeof ru[key]);
     }
   });
 
-  it('плейсхолдеры {name} строковых значений совпадают', () => {
+  it('the {name} placeholders of the string values match', () => {
     for (const key of Object.keys(ru) as Array<keyof typeof ru>) {
       const rv = ru[key];
       const ev = en[key];
@@ -37,7 +37,7 @@ describe('паритет словарей ru/en', () => {
     }
   });
 
-  it('ни одно строковое значение en не содержит кириллицы', () => {
+  it('no en string value contains Cyrillic', () => {
     for (const key of Object.keys(en) as Array<keyof typeof en>) {
       const v = en[key];
       if (typeof v === 'string') expect(v, key).not.toMatch(/\p{Script=Cyrillic}/u);
@@ -46,16 +46,16 @@ describe('паритет словарей ru/en', () => {
 });
 
 describe('translate', () => {
-  it('подставляет именованные плейсхолдеры', () => {
+  it('substitutes named placeholders', () => {
     expect(translate('ru', 'common.language')).toBe('Язык');
     expect(translate('en', 'common.language')).toBe('Language');
   });
 
-  it('неизвестный плейсхолдер остаётся как есть', () => {
+  it('an unknown placeholder stays as is', () => {
     expect(translate('en', 'common.errorRequest', { stray: 1 })).toBe('Request failed');
   });
 
-  it('функции-значения вызываются с аргументом', () => {
+  it('function values are called with the argument', () => {
     expect(translate('ru', 'time.hoursAgo', 1)).toBe('1 час назад');
     expect(translate('ru', 'time.hoursAgo', 3)).toBe('3 часа назад');
     expect(translate('ru', 'time.hoursAgo', 11)).toBe('11 часов назад');
@@ -79,12 +79,12 @@ describe('plural (ru)', () => {
 });
 
 describe('detectLang', () => {
-  it('сохранённый выбор приоритетнее локали браузера', () => {
+  it('the saved choice takes priority over the browser locale', () => {
     expect(detectLang('en', 'ru-RU')).toBe('en');
     expect(detectLang('ru', 'en-US')).toBe('ru');
   });
 
-  it('без сохранённого — по navigator.language', () => {
+  it('without a saved one — by navigator.language', () => {
     expect(detectLang(null, 'ru-RU')).toBe('ru');
     expect(detectLang(null, 'ru')).toBe('ru');
     expect(detectLang(null, 'en-US')).toBe('en');
@@ -92,7 +92,7 @@ describe('detectLang', () => {
     expect(detectLang(null, undefined)).toBe('en');
   });
 
-  it('мусор в сохранённом значении игнорируется', () => {
+  it('garbage in the saved value is ignored', () => {
     expect(detectLang('fr', 'ru-RU')).toBe('ru');
   });
 });
@@ -104,8 +104,8 @@ describe('localeOf', () => {
   });
 });
 
-describe('модульный активный язык (не-React доступ)', () => {
-  it('t()/activeLocale() читают setActiveLang', () => {
+describe('the module-level active language (non-React access)', () => {
+  it('t()/activeLocale() read setActiveLang', () => {
     setActiveLang('ru');
     expect(t('common.loading')).toBe('Загрузка…');
     expect(activeLocale()).toBe('ru-RU');
