@@ -4,7 +4,7 @@ import type { AiProvider } from './ai-providers';
 
 export class ApiError extends Error {
   status: number;
-  /** Тело ошибочного ответа (например, {error, steps} у bootstrap). */
+  /** Body of an error response (e.g. {error, steps} for bootstrap). */
   body?: unknown;
 
   constructor(status: number, message: string, body?: unknown) {
@@ -14,22 +14,23 @@ export class ApiError extends Error {
   }
 }
 
-// Первичная настройка (onboarding, docs/settings-model-plan.md): пароль и
-// опциональный AI-конфиг задаются в UI при первом запуске, до первого входа.
+// First-run setup (onboarding, docs/settings-model-plan.md): the password and
+// an optional AI config are set in the UI on first launch, before the first login.
 
 export interface SetupStatus {
   required: boolean;
 }
 
-/** Публичный статус onboarding: «пароль не настроен» — показать экран настройки. */
+/** Public onboarding status: "no password configured" — show the setup screen. */
 export function fetchSetupStatus(): Promise<SetupStatus> {
   return api<SetupStatus>('/api/setup/status');
 }
 
 /**
- * Одноразовый POST: пароль + опциональный AI-конфиг. AI-поля (включая
- * aiProvider/aiModel — обязательны при ключе) уходят только с непустым ключом,
- * иначе посеянные env'ом AI-поля затирались бы пустой формой. Ответ — авто-вход.
+ * One-shot POST: password + optional AI config. The AI fields (including
+ * aiProvider/aiModel — required with a key) are only sent with a non-empty key,
+ * otherwise AI fields seeded from env would be wiped by an empty form. A
+ * successful response means auto-login.
  */
 export function submitSetup(input: {
   password: string;
@@ -41,18 +42,18 @@ export function submitSetup(input: {
   return api('/api/setup', { method: 'POST', body: JSON.stringify(input) });
 }
 
-// Страница «Настройки» (эпик 23): смена пароля и AI-конфига после первого
-// запуска. Ключ API сервер наружу не отдаёт — только факт «задан».
+// The "Settings" page (epic 23): password and AI config changes after the
+// first launch. The server never returns the API key — only the fact that it is set.
 
-/** Маскированный AI-статус (ответ GET/PUT /api/settings). */
+/** Masked AI status (the GET/PUT /api/settings response). */
 export interface AiSettingsStatus {
-  /** null — пресет не выбран (ключ не задан). */
+  /** null — no provider preset selected (no key set). */
   provider: AiProvider | null;
-  /** Ключ задан; само значение наружу не возвращается никогда. */
+  /** The key is set; its value is never returned to the client. */
   apiKeySet: boolean;
   apiBase: string;
   model: string;
-  /** Честный статус веб-поиска, включая env-оверрайд для не-DeepSeek. */
+  /** Honest web-search status, including the env override for non-DeepSeek. */
   searchAvailable: boolean;
 }
 
@@ -65,10 +66,10 @@ export function fetchSettings(): Promise<SettingsStatus> {
 }
 
 /**
- * PUT /api/settings: смена пароля — парой currentPassword+newPassword;
- * смена модели — aiModel без ключа; замена прочего AI-конфига — целиком;
- * ключ write-only, aiApiKey: null —
- * очистка ключа (агент недоступен). Ответ — обновлённый GET-статус.
+ * PUT /api/settings: password change — the currentPassword+newPassword pair;
+ * model change — aiModel alone (the stored key is kept); the rest of the AI
+ * config is replaced all at once; the key is write-only, aiApiKey: null
+ * clears the key (agent unavailable). The response is the updated GET status.
  */
 export function updateSettings(input: {
   currentPassword?: string;
@@ -81,8 +82,8 @@ export function updateSettings(input: {
   return api<SettingsStatus>('/api/settings', { method: 'PUT', body: JSON.stringify(input) });
 }
 
-// Глобальный обработчик 401: App подписывается, чтобы при истёкшей сессии
-// вернуть пользователя на страницу логина с любой страницы.
+// Global 401 handler: App subscribes so that an expired session sends the
+// user back to the login page from any page.
 let unauthorizedHandler: (() => void) | null = null;
 
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
@@ -110,7 +111,7 @@ export async function api<T>(path: string, opts: RequestInit = {}): Promise<T> {
     }
     throw new ApiError(res.status, message, body);
   }
-  // 204 или успешный ответ с пустым телом — res.json() бросил бы SyntaxError.
+  // 204 or a successful response with an empty body — res.json() would throw a SyntaxError.
   const text = await res.text();
   return (text ? JSON.parse(text) : undefined) as T;
 }
@@ -159,7 +160,7 @@ export interface ProfilesImportSummary {
   needSecrets: string[];
 }
 
-/** Экспорт профилей в файл бэкапа (секреты — только с includeSecrets). */
+/** Export profiles to a backup file (secrets only with includeSecrets). */
 export async function exportProfilesBackup(opts: {
   passphrase?: string;
   includeSecrets: boolean;
@@ -184,7 +185,7 @@ export async function exportProfilesBackup(opts: {
   return res.blob();
 }
 
-/** Импорт бэкапа профилей; для зашифрованного файла нужен passphrase. */
+/** Import a profiles backup; a passphrase is required for an encrypted file. */
 export function importProfilesBackup(
   backup: string,
   passphrase?: string,
@@ -195,23 +196,24 @@ export function importProfilesBackup(
   });
 }
 
-/** Один шаг отчёта bootstrap («Новый сервер (root + пароль)»). */
+/** One step of the bootstrap report ("New server (root + password)"). */
 export interface BootstrapStep {
   name: string;
   status: 'ok' | 'warn' | 'error';
   detail: string;
 }
 
-/** Ответ POST /api/profiles/bootstrap; при ошибке — {error, steps} в ApiError.body. */
+/** The POST /api/profiles/bootstrap response; on error — {error, steps} in ApiError.body. */
 export interface BootstrapResult {
   profile: Profile;
   steps: BootstrapStep[];
 }
 
 /**
- * Bootstrap свежего сервера: генерирует отдельный ключ, ставит его на сервер,
- * опционально закрывает парольный вход SSH и создаёт профиль authType=key.
- * Просьба живёт десятки секунд — живого прогресса нет, отчёт приходит в конце.
+ * Bootstrap a fresh server: generates a dedicated key, installs it on the
+ * server, optionally disables SSH password login and creates an authType=key
+ * profile. The request takes tens of seconds — no live progress, the report
+ * arrives at the end.
  */
 export function bootstrapServer(input: {
   name: string;
@@ -227,7 +229,7 @@ export function bootstrapServer(input: {
   });
 }
 
-/** Импорт приватного ключа в хранилище keys/ (сохраняется с правами 0600). */
+/** Import a private key into the keys/ store (saved with 0600 permissions). */
 export async function importKey(name: string, content: string, overwrite = false): Promise<KeyEntry> {
   const params = new URLSearchParams({ name });
   if (overwrite) params.set('overwrite', '1');
@@ -292,7 +294,7 @@ export interface OverviewServerEntry {
   username: string;
   ok: boolean;
   error?: string;
-  /** Внешний (публичный) IP сервера; отсутствует, если определить не удалось. */
+  /** External (public) server IP; absent when it could not be determined. */
   externalIp?: string;
   metrics?: ServerMetrics;
   docker?: { containersTotal: number; containersRunning: number };
@@ -303,12 +305,12 @@ export interface OverviewResponse {
   servers: OverviewServerEntry[];
 }
 
-/** Сводный снимок по всем профилям (вкладка «Серверы»). */
+/** Aggregated snapshot across all profiles (the "Servers" tab). */
 export function fetchOverview(): Promise<OverviewResponse> {
   return api<OverviewResponse>('/api/overview');
 }
 
-/** Состояния правил алертов всех профилей (эпик 20). Поверх кэша overview. */
+/** Alert rule states for all profiles (epic 20). On top of the overview cache. */
 export function fetchAlerts(t: { disk: number; mem: number; load: number }): Promise<AlertsResponse> {
   const params = new URLSearchParams({
     disk: String(t.disk),
@@ -318,9 +320,9 @@ export function fetchAlerts(t: { disk: number; mem: number; load: number }): Pro
   return api<AlertsResponse>(`/api/alerts?${params}`);
 }
 
-/** Сэмпл истории нагрузки: лёгкий срез снимка метрик. */
+/** A load-history sample: a light slice of the metrics snapshot. */
 export interface HistorySample {
-  /** Момент снимка (мс, серверное время ssh-commander). */
+  /** Snapshot moment (ms, ssh-commander server time). */
   t: number;
   cpu: number | null;
   memPct: number | null;
@@ -339,12 +341,12 @@ export interface BulkMetricsHistoryResponse {
   profiles: Array<{ id: string; samples: HistorySample[] }>;
 }
 
-/** История нагрузки одного профиля — графики на вкладке «Обзор». */
+/** Load history of one profile — charts on the "Overview" tab. */
 export function fetchMetricsHistory(profileId: string): Promise<MetricsHistoryResponse> {
   return api<MetricsHistoryResponse>(`/api/metrics-history?profileId=${encodeURIComponent(profileId)}`);
 }
 
-/** История нагрузки всех профилей — спарклайны на экране «Серверы». */
+/** Load history of all profiles — sparklines on the "Servers" screen. */
 export function fetchBulkMetricsHistory(): Promise<BulkMetricsHistoryResponse> {
   return api<BulkMetricsHistoryResponse>('/api/metrics-history');
 }
@@ -355,9 +357,9 @@ export interface PortListener {
   port: number;
   pid: number | null;
   process: string | null;
-  /** public — слушает наружу, loopback — только 127.x/::1, interface — конкретный IP. */
+  /** public — listens on external interfaces, loopback — 127.x/::1 only, interface — a specific IP. */
   scope: 'public' | 'loopback' | 'interface';
-  /** Аннотация: слушатель принадлежит docker-контейнеру (опубликованный порт). */
+  /** Annotation: the listener belongs to a docker container (published port). */
   container?: { id: string; name: string };
 }
 
@@ -379,16 +381,16 @@ export interface ContainerPortEntry {
 export interface PortsSnapshot {
   timestamp: number;
   ports: PortListener[];
-  /** Порты контейнеров (null/undefined — docker недоступен, деградация). */
+  /** Container ports (null/undefined — docker unavailable, degraded). */
   containers?: ContainerPortEntry[];
 }
 
-/** Прослушиваемые порты сервера (вкладка «Порты»). */
+/** Server listening ports (the "Ports" tab). */
 export function fetchPorts(profileId: string): Promise<PortsSnapshot> {
   return api<PortsSnapshot>(`/api/ports?profileId=${encodeURIComponent(profileId)}`);
 }
 
-// SSH-туннели
+// SSH tunnels
 export interface Tunnel {
   id: string;
   profileId: string;
@@ -424,19 +426,19 @@ export function deleteTunnel(id: string): Promise<void> {
   return api<void>(`/api/tunnels/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
-// Cron-задачи
+// Cron jobs
 export interface CronEntry {
-  /** Номер строки в файле (0-based) — ключ для мутаций пользовательского crontab. */
+  /** Line number in the file (0-based) — the key for user crontab mutations. */
   index: number;
-  /** Исходная строка файла как есть. */
+  /** The original file line as is. */
   raw: string;
-  /** false — задача закомментирована. */
+  /** false — the job is commented out. */
   enabled: boolean;
   schedule: string;
   command: string;
-  /** Пользователь из колонки системного формата (/etc/crontab, /etc/cron.d). */
+  /** User from the column of the system format (/etc/crontab, /etc/cron.d). */
   user?: string;
-  /** Человекочитаемое описание расписания. */
+  /** Human-readable schedule description. */
   human: string;
 }
 
@@ -449,23 +451,23 @@ export interface ParsedCrontab {
 export interface CronSnapshot {
   timestamp: number;
   username: string;
-  /** SSH-пользователь, чей crontab можно мутировать (владелец сессии). */
+  /** The SSH user whose crontab can be mutated (the session owner). */
   currentUser: string;
-  /** true, когда `username === currentUser` — crontab можно править; иначе read-only. */
+  /** true when `username === currentUser` — the crontab is editable; otherwise read-only. */
   editable: boolean;
   userCrontab: (ParsedCrontab & { raw: string }) | null;
   systemCrontab: ParsedCrontab | null;
   cronD: { file: string; entries: CronEntry[] }[];
 }
 
-/** Cron-задачи сервера (вкладка «Cron»). `user` — персональный crontab конкретного пользователя (read-only). */
+/** Server cron jobs (the "Cron" tab). `user` — a specific user's personal crontab (read-only). */
 export function fetchCron(profileId: string, user?: string): Promise<CronSnapshot> {
   const params = new URLSearchParams({ profileId });
   if (user) params.set('user', user);
   return api<CronSnapshot>(`/api/cron?${params.toString()}`);
 }
 
-/** Список пользователей для селектора; пустой, когда чтение чужих crontab невозможно (не root). */
+/** Users for the selector; empty when reading other users' crontabs is impossible (not root). */
 export async function fetchCronUsers(profileId: string): Promise<string[]> {
   const res = await api<{ users: string[] }>(`/api/cron/users?profileId=${encodeURIComponent(profileId)}`);
   return res.users;
@@ -514,11 +516,11 @@ export function toggleCronEntry(
   );
 }
 
-// Вкладка «Nginx» (docs/nginx-plan.md)
+// The "Nginx" tab (docs/nginx-plan.md)
 export interface NginxListen {
-  /** Адрес без порта: '' (все интерфейсы), конкретный IP, '[::]' для IPv6. */
+  /** Address without the port: '' (all interfaces), a specific IP, '[::]' for IPv6. */
   addr: string;
-  /** Порт; null — unix-сокет. */
+  /** Port; null — a unix socket. */
   port: number | null;
   /** listen ... ssl. */
   ssl: boolean;
@@ -526,29 +528,29 @@ export interface NginxListen {
   defaultServer: boolean;
 }
 
-/** Куда «смотрит» сайт: proxy_pass, root или не распознано. */
+/** What the site "serves": proxy_pass, root, or unrecognized. */
 export interface NginxTarget {
   kind: 'proxy' | 'static' | 'unknown';
   value: string;
 }
 
 /**
- * Сертификат сайта: распарсен локально (notAfter ISO, daysLeft — целых дней,
- * может быть отрицательным) либо файл недоступен/не разобран (error).
+ * The site certificate: parsed locally (notAfter ISO, daysLeft — whole days,
+ * can be negative) or the file is unreadable/unparseable (error).
  */
 export type NginxCert =
   | { path: string; notAfter: string; daysLeft: number }
   | { path: string; error: string };
 
-/** Сайт (server-блок) в снапшоте. */
+/** A site (server block) in the snapshot. */
 export interface NginxSite {
-  /** Файл из маркера `# configuration file <путь>:`; '' — не определён. */
+  /** File from the `# configuration file <path>:` marker; '' — undetermined. */
   file: string;
   serverNames: string[];
   isDefault: boolean;
   listens: NginxListen[];
   target: NginxTarget;
-  /** Число верхнеуровневых location-блоков. */
+  /** The number of top-level location blocks. */
   locationsCount: number;
   cert: NginxCert | null;
 }
@@ -558,7 +560,7 @@ export interface NginxConfigTest {
   output: string;
 }
 
-/** Один источник в снапшоте: бинарь хоста или контейнер. */
+/** One source in the snapshot: the host binary or a container. */
 export interface NginxSourceSnapshot {
   type: 'native' | 'container';
   containerId?: string;
@@ -566,7 +568,7 @@ export interface NginxSourceSnapshot {
   version: string | null;
   configTest: NginxConfigTest;
   sites: NginxSite[];
-  /** Источник целиком не прочитался (nginx -T упал) — причина. */
+  /** The source could not be read at all (nginx -T failed) — the reason. */
   error?: string;
 }
 
@@ -575,24 +577,24 @@ export interface NginxSnapshot {
   sources: NginxSourceSnapshot[];
 }
 
-/** Сайты сервера (вкладка «Nginx»), polling 5 с при видимой вкладке. */
+/** Server sites (the "Nginx" tab), 5 s polling while the tab is visible. */
 export function fetchNginx(profileId: string): Promise<NginxSnapshot> {
   return api<NginxSnapshot>(`/api/nginx?profileId=${encodeURIComponent(profileId)}`);
 }
 
-/** Ключ источника для test/reload: 'native' | 'container:<id>'. */
+/** Source key for test/reload: 'native' | 'container:<id>'. */
 export function nginxSourceKey(source: NginxSourceSnapshot): string {
   return source.type === 'native' ? 'native' : `container:${source.containerId}`;
 }
 
-/** Содержимое одного конфиг-файла источника (кнопка «Открыть»). */
+/** Contents of one config file of the source (the "Open" button). */
 export function fetchNginxConfig(profileId: string, source: string, path: string): Promise<{ content: string }> {
   const params = new URLSearchParams({ profileId, source, path });
   return api<{ content: string }>(`/api/nginx/config?${params.toString()}`);
 }
 
-/** `nginx -t` по источнику: `{ok, output}` (вывод — stderr + stdout).
- * profileId — в query, как у остальных мутаций (конвенция cron). */
+/** `nginx -t` on a source: `{ok, output}` (output — stderr + stdout).
+ * profileId — in the query, like the other mutations (the cron convention). */
 export function testNginx(profileId: string, source: string): Promise<NginxConfigTest> {
   return api<NginxConfigTest>(`/api/nginx/test?profileId=${encodeURIComponent(profileId)}`, {
     method: 'POST',
@@ -601,9 +603,10 @@ export function testNginx(profileId: string, source: string): Promise<NginxConfi
 }
 
 /**
- * Reload с guard'ом: 409 при красном `nginx -t` — тело `{error, output}`.
- * output (вывод теста) пробрасывается в ApiError, чтобы UI показал его
- * mono-блоком. profileId — в query, как у остальных мутаций (конвенция cron).
+ * Reload with a guard: 409 when `nginx -t` fails — the body is {error, output}.
+ * output (the test output) is re-thrown inside ApiError so the UI can show it
+ * in a mono block. profileId — in the query, like the other mutations (the
+ * cron convention).
  */
 export async function reloadNginx(profileId: string, source: string): Promise<NginxConfigTest> {
   const res = await fetch(`/api/nginx/reload?profileId=${encodeURIComponent(profileId)}`, {
@@ -636,7 +639,7 @@ export async function fetchTerminalHistory(profileId: string, limit = 100): Prom
   return data.commands;
 }
 
-// Терминальные вкладки (эпик 15)
+// Terminal tabs (epic 15)
 export interface TerminalSessionEntry {
   tabId: number;
   container: string | null;
@@ -648,19 +651,19 @@ export interface TerminalSessionsResponse {
   limit: number;
 }
 
-/** Живые терминальные сессии профиля — сверка вкладок после F5/чистки localStorage. */
+/** Live terminal sessions of a profile — reconciling tabs after F5/localStorage cleanup. */
 export function fetchTerminalSessions(profileId: string): Promise<TerminalSessionsResponse> {
   return api<TerminalSessionsResponse>(
     `/api/terminal/sessions?profileId=${encodeURIComponent(profileId)}`,
   );
 }
 
-// Вкладка «Службы» (эпик 13)
+// The "Services" tab (epic 13)
 export interface UnitInfo {
-  /** Имя unit'а с суффиксом: 'nginx.service'. */
+  /** Unit name with the suffix: 'nginx.service'. */
   name: string;
   description: string | null;
-  /** loaded / not-found / error / null (не загружен). */
+  /** loaded / not-found / error / null (not loaded). */
   load: string | null;
   /** active / inactive / activating / failed / null. */
   active: string | null;
@@ -673,27 +676,27 @@ export interface UnitInfo {
 export interface ServicesSnapshot {
   timestamp: number;
   available: boolean;
-  /** Причина недоступности systemd — для заглушки UI. */
+  /** Why systemd is unavailable — for the UI placeholder. */
   reason?: string;
   units: UnitInfo[];
 }
 
 export interface ServiceDetail {
   name: string;
-  /** Raw-вывод `systemctl status` — для человека. */
+  /** Raw `systemctl status` output — for humans. */
   status: string;
-  /** Значения полей `systemctl show`; отсутствующие — null. */
+  /** Values of `systemctl show` fields; missing ones — null. */
   show: Record<string, string | null>;
 }
 
 export type ServiceAction = 'start' | 'stop' | 'restart' | 'reload' | 'enable' | 'disable' | 'reset-failed';
 
-/** Снимок служб сервера (вкладка «Службы»). */
+/** Server services snapshot (the "Services" tab). */
 export function fetchServices(profileId: string): Promise<ServicesSnapshot> {
   return api<ServicesSnapshot>(`/api/services?profileId=${encodeURIComponent(profileId)}`);
 }
 
-/** Деталь unit'а: raw-статус + сводка полей show. */
+/** Unit detail: the raw status + a summary of show fields. */
 export function fetchServiceDetail(profileId: string, unit: string): Promise<ServiceDetail> {
   return api<ServiceDetail>(
     `/api/services/${encodeURIComponent(unit)}?profileId=${encodeURIComponent(profileId)}`,
@@ -701,10 +704,10 @@ export function fetchServiceDetail(profileId: string, unit: string): Promise<Ser
 }
 
 /**
- * Действие над unit'ом. Ошибки 400 (текст systemd/пользовательские причины)
- * показываются как есть; 502 сервер уже отдаёт с текстом «Сервер недоступен:
- * <детали>» — пробрасываем целиком, чтобы диагностика (в т.ч. таймаут из
- * п. 2 ревью) не терялась.
+ * An action on a unit. 400 errors (systemd text/user-facing reasons) are
+ * shown as is; 502 already comes from the server with a "server unavailable:
+ * <details>" text — re-thrown whole so the diagnostics (including the timeout
+ * from review item 2) are not lost.
  */
 export async function serviceAction(
   profileId: string,
@@ -718,14 +721,14 @@ export async function serviceAction(
   });
 }
 
-/** URL журнала unit'а для просмотрщика (fetch + reader, chunked text/plain). */
+/** Unit journal URL for the viewer (fetch + reader, chunked text/plain). */
 export function serviceLogsUrl(profileId: string, unit: string, tail: number, follow: boolean): string {
   const params = new URLSearchParams({ profileId, tail: String(tail) });
   if (follow) params.set('follow', '1');
   return `/api/services/${encodeURIComponent(unit)}/logs?${params}`;
 }
 
-// Действия над процессами (эпик 17)
+// Process actions (epic 17)
 export type ProcessSignal = 'TERM' | 'KILL' | 'HUP';
 
 export interface ProcessActionResult {
@@ -734,9 +737,9 @@ export interface ProcessActionResult {
 }
 
 /**
- * Сигнал процессу (TERM|KILL|HUP). Ошибки 400 (нет прав, процесса больше нет,
- * нет утилиты, неверный sudo-пароль) показываются как есть; 502 — сервер
- * недоступен. Паттерн serviceAction.
+ * Signal a process (TERM|KILL|HUP). 400 errors (no permission, the process is
+ * gone, the utility is missing, wrong sudo password) are shown as is; 502 —
+ * the server is unreachable. The serviceAction pattern.
  */
 export async function processSignal(
   profileId: string,
@@ -750,7 +753,7 @@ export async function processSignal(
   });
 }
 
-/** Понижение приоритета процесса (nice −20..19); output renice — в notice. */
+/** Lower the process priority (nice −20..19); renice output goes into a notice. */
 export async function processRenice(
   profileId: string,
   pid: number,
@@ -763,13 +766,13 @@ export async function processRenice(
   });
 }
 
-// Сохранённые команды (эпик 18, раздел «Команды» на странице «Серверы»)
+// Saved commands (epic 18, the "Commands" section on the "Servers" page)
 export interface Snippet {
   id: string;
   name: string;
   command: string;
   description?: string;
-  /** null — доступен на всех серверах; список id — только на выбранных. */
+  /** null — available on all servers; a list of ids — only on the selected ones. */
   profileIds?: string[] | null;
   createdAt: string;
   updatedAt: string;
@@ -779,21 +782,21 @@ export type SnippetInput = Omit<Snippet, 'id' | 'createdAt' | 'updatedAt'>;
 
 export interface SnippetRunResult {
   profileId: string;
-  /** true — только exit code 0. */
+  /** true — exit code 0 only. */
   ok: boolean;
-  /** null — транспортный отказ/таймаут, команда не завершилась. */
+  /** null — transport failure/timeout, the command did not complete. */
   code: number | null;
   stdout: string;
   stderr: string;
   ms: number;
-  /** Вывод обрезан лимитом ответа (100 КБ на поток). */
+  /** Output truncated by the response limit (100 KB per stream). */
   truncated: boolean;
-  /** Текст транспортного отказа (отсутствует, если команда завершилась). */
+  /** Transport failure text (absent when the command completed). */
   error?: string;
 }
 
 export interface SnippetRunResponse {
-  /** Что реально выполнялось — эхо для UI и «В чат». */
+  /** What actually ran — an echo for the UI and "To chat". */
   command: string;
   results: SnippetRunResult[];
 }
@@ -818,11 +821,12 @@ export function deleteSnippet(id: string): Promise<void> {
 }
 
 /**
- * Параллельный запуск сниппета или разовой команды на выбранных серверах.
- * Отказ отдельного сервера — не ошибка запроса: элемент results с ok:false.
- * UI шлёт именно command (строку из подтверждения), а не snippetId —
- * сниппет могли отредактировать между показом модалки и запуском.
- * signal — кнопка «Отмена»: на сервере команда может продолжить выполняться.
+ * Run a snippet or a one-off command on the selected servers in parallel.
+ * An individual server failure is not a request error: a results entry with
+ * ok:false. The UI sends command itself (the string from the confirmation),
+ * not snippetId — the snippet may have been edited between showing the modal
+ * and the run. signal — the "Cancel" button: on the server the command may
+ * keep running.
  */
 export function runSnippet(
   params: {
@@ -835,7 +839,7 @@ export function runSnippet(
   return api('/api/snippets/run', { method: 'POST', body: JSON.stringify(params), signal });
 }
 
-// Обновления пакетов (эпик 19)
+// Package updates (epic 19)
 export type PackageManager = 'apt' | 'dnf' | 'yum' | 'apk';
 
 export interface PackageUpdate {
@@ -855,16 +859,16 @@ export interface PackagesSnapshot {
   error?: string;
 }
 
-/** Снимок обновлений (кэш 60 с на сервере) — карточка и раздел «Обзора». */
+/** Updates snapshot (a 60 s cache on the server) — the card and the "Overview" section. */
 export function fetchPackages(profileId: string): Promise<PackagesSnapshot> {
   return api<PackagesSnapshot>(`/api/packages/updates?profileId=${encodeURIComponent(profileId)}`);
 }
 
 /**
- * Запрос применения обновлений: POST-стрим (chunked text/plain) с паролем в
- * JSON-теле. Возвращается не fetch, а параметры для LogViewer.buildRequest —
- * вызывающий стабилизирует useCallback (identity пропа перезапускала бы
- * мутацию).
+ * Apply-updates request: a POST stream (chunked text/plain) with the password
+ * in the JSON body. What is returned is not fetch but the parameters for
+ * LogViewer.buildRequest — the caller stabilizes them with useCallback (an
+ * identity prop would restart the mutation).
  */
 export function packagesApplyRequest(
   profileId: string,
@@ -880,16 +884,16 @@ export function packagesApplyRequest(
   };
 }
 
-// Вкладка «Базы данных» (эпик 12, итерация 2: явные креденшалы)
+// The "Databases" tab (epic 12, iteration 2: explicit credentials)
 export type DbEngine = 'postgres' | 'mysql';
 export type MysqlFlavor = 'mysql' | 'mariadb';
 
-/** Цель подключения: контейнер (рабочий путь v1) или хост (модель под v2). */
+/** Connection target: a container (the v1 working path) or a host (the model for v2). */
 export type DbConnectionTarget =
   | { kind: 'container'; containerId: string }
   | { kind: 'host'; host: string; port: number };
 
-/** Сохранённое подключение (пароль наружу не отдаётся). */
+/** A saved connection (the password is never returned). */
 export interface DbConnectionInfo {
   id: string;
   profileId: string;
@@ -904,7 +908,7 @@ export interface DbConnectionInfo {
   updatedAt: string;
 }
 
-/** Поля подключения, создаваемые/обновляемые формой. */
+/** Connection fields created/updated by the form. */
 export interface DbConnectionInput {
   profileId: string;
   name: string;
@@ -929,7 +933,7 @@ export function createDbConnection(input: DbConnectionInput): Promise<DbConnecti
   });
 }
 
-/** PUT: непереданный (пустой) пароль сохраняется из хранилища. */
+/** PUT: a missing (empty) password is kept from the store. */
 export function updateDbConnection(id: string, input: DbConnectionInput): Promise<DbConnectionInfo> {
   return api(`/api/db/connections/${encodeURIComponent(id)}`, {
     method: 'PUT',
@@ -942,9 +946,9 @@ export function deleteDbConnection(id: string): Promise<void> {
 }
 
 /**
- * Проверка креденшалов без сохранения: SELECT 1 по реальному каналу.
- * Ошибка клиента БД приходит структурой {message, stderr, exitCode} —
- * выбрасываем её, а не строку.
+ * Credential check without saving: SELECT 1 over the real channel.
+ * A DB client error arrives as the {message, stderr, exitCode} structure —
+ * we throw that structure, not a string.
  */
 export async function testDbConnection(
   input: DbConnectionInput & { id?: string },
@@ -974,7 +978,7 @@ export async function testDbConnection(
   }
 }
 
-/** Контейнер СУБД из discovery — автозаполнение формы подключения. */
+/** A DBMS container from discovery — prefilling the connection form. */
 export interface DbSuggestion {
   id: string;
   name: string;
@@ -1034,7 +1038,7 @@ export interface DbColumnInfo {
   name: string;
 }
 
-/** Детальные поля таблицы (раскрытие в сайдбаре). */
+/** Detailed table fields (expanding in the sidebar). */
 export interface DbColumnDetail {
   name: string;
   type: string;
@@ -1057,7 +1061,7 @@ export interface DbTableDetail {
   indexes: DbIndexDetail[];
 }
 
-/** Детали таблицы: поля (типы, ключи) + индексы (имя, колонки, тип). */
+/** Table details: columns (types, keys) + indexes (name, columns, type). */
 export function fetchDbTableDetail(
   profileId: string,
   connectionId: string,
@@ -1069,8 +1073,8 @@ export function fetchDbTableDetail(
   return api<DbTableDetail>(`/api/db/table-detail?${params}`);
 }
 
-/** Колонки таблиц базы — схема для промпта «Спросить агента».
- * `truncated` — сервер обрезал список по лимиту (4000). */
+/** Database table columns — the schema for the "Ask the agent" prompt.
+ * `truncated` — the server cut the list by the limit (4000). */
 export function fetchDbColumns(
   profileId: string,
   connectionId: string,
@@ -1090,7 +1094,7 @@ export interface DbQueryResult {
   rawOutput?: string;
 }
 
-/** Структурированная ошибка клиента БД: stderr и exit code — в mono-блок. */
+/** Structured DB client error: stderr and the exit code go into a mono block. */
 export interface DbQueryErrorInfo {
   message: string;
   stderr: string;
@@ -1098,8 +1102,8 @@ export interface DbQueryErrorInfo {
 }
 
 /**
- * Выполнение SQL. Ошибка приходит телом {error: {message, stderr, exitCode}}
- * — выбрасываем её структуру, а не строку (в отличие от api()).
+ * Run SQL. An error arrives as the {error: {message, stderr, exitCode}} body —
+ * we throw its structure, not a string (unlike api()).
  */
 export async function runDbQuery(
   profileId: string,
@@ -1131,9 +1135,10 @@ export async function runDbQuery(
   return body as DbQueryResult;
 }
 
-/** Скачивание дампа базы: .sql.gz стримом → Blob → файл. Дамп собирается в
- * памяти браузера целиком — осознанное упрощение v1 (Blob не удерживает
- * JS-heap так, как string-конкатенация, но очень большие базы лимитируют). */
+/** Downloading a database dump: .sql.gz streamed → Blob → file. The dump is
+ * assembled in browser memory as a whole — a deliberate v1 simplification
+ * (a Blob does not pin the JS heap the way string concatenation does, but
+ * very large databases are capped anyway). */
 export async function downloadDbDump(
   profileId: string,
   connectionId: string,
@@ -1167,7 +1172,7 @@ export function downloadDirUrl(profileId: string, path: string): string {
   return `/api/files/download-dir?${params}`;
 }
 
-/** Batch-скачивание выбранных файлов/папок одним tar.gz (POST → blob → download). */
+/** Batch download of the selected files/folders as a single tar.gz (POST → blob → download). */
 export async function downloadBatch(profileId: string, dirPath: string, names: string[]): Promise<void> {
   const params = new URLSearchParams({ profileId });
   const res = await fetch(`/api/files/download-batch?${params}`, {
@@ -1226,12 +1231,12 @@ export async function searchFiles(
   return data.results;
 }
 
-// «Что занимает» — навигатор по du (эпик 16)
+// "What takes space" — the du navigator (epic 16)
 export interface DiskUsageChild {
   name: string;
   path: string;
   bytes: number;
-  /** Доля от суммы поддерева каталога (1 знак после запятой). */
+  /** Share of the directory subtree total (one decimal place). */
   pctOfParent: number;
 }
 
@@ -1239,12 +1244,12 @@ export interface DiskUsageSnapshot {
   timestamp: number;
   path: string;
   totalBytes: number;
-  /** Размер файлов прямо в каталоге (du в -d 1 их не печатает). */
+  /** Size of the files directly in the directory (du with -d 1 does not print them). */
   directBytes: number;
   children: DiskUsageChild[];
-  /** Отказы доступа при обходе — цифры неполные. */
+  /** Permission failures during traversal — the numbers are incomplete. */
   incomplete?: { unreadable: number } | null;
-  /** Вывод du обрезан по лимиту — сумма неполная. */
+  /** du output truncated by the limit — the total is incomplete. */
   truncated?: boolean;
 }
 
@@ -1261,7 +1266,7 @@ export interface DiskUsageFilesResponse {
   truncated: boolean;
 }
 
-/** Снимок du одного каталога: сумма, прямые файлы, подкаталоги с долями. */
+/** du snapshot of one directory: the total, direct files, subdirectories with shares. */
 export function fetchDiskUsage(
   profileId: string,
   path: string,
@@ -1271,7 +1276,7 @@ export function fetchDiskUsage(
   return api<DiskUsageSnapshot>(`/api/disk-usage?${params}`, { signal });
 }
 
-/** Топ крупнейших файлов каталога (режим «Файлы» модалки). */
+/** Top largest files of the directory (the "Files" mode of the modal). */
 export function fetchDiskUsageFiles(
   profileId: string,
   path: string,
@@ -1282,9 +1287,9 @@ export function fetchDiskUsageFiles(
   return api<DiskUsageFilesResponse>(`/api/disk-usage/files?${params}`, { signal });
 }
 
-// Вкладка «ИИ-расходы» (docs/ai-costs-plan.md)
-/** Агрегат по дню/профилю/итогам: суммы токенов и USD, честный счётчик
- * вызовов без цены модели (costUsd тогда неполна). */
+// The "AI costs" tab (docs/ai-costs-plan.md)
+/** An aggregate by day/profile/totals: token and USD sums, an honest call
+ * counter without a model price (costUsd is incomplete then). */
 export interface AiUsageAgg {
   calls: number;
   promptTokens: number;
@@ -1295,7 +1300,7 @@ export interface AiUsageAgg {
 }
 
 export interface AiUsageDay {
-  /** Локальная дата сервера, YYYY-MM-DD. */
+  /** The server's local date, YYYY-MM-DD. */
   date: string;
   byProfile: Record<string, AiUsageAgg>;
   total: AiUsageAgg;
@@ -1307,13 +1312,13 @@ export interface AiUsageReport {
   totals: AiUsageAgg;
 }
 
-/** Отчёт по расходам AI за период (days — число дней или 'all'). */
+/** AI spend report for a period (days — a number of days or 'all'). */
 export function fetchAiUsage(days: number | 'all'): Promise<AiUsageReport> {
   const params = new URLSearchParams({ days: String(days) });
   return api<AiUsageReport>(`/api/ai/usage?${params}`);
 }
 
-/** USD: меньше $1 — 4 знака (типичная стоимость вызова), иначе 2. */
+/** USD: below $1 — 4 digits (a typical call cost), otherwise 2. */
 export function formatUsd(v: number | null | undefined): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return '—';
   return v < 1 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`;
@@ -1339,8 +1344,8 @@ export function formatDate(ms: number): string {
 }
 
 /**
- * Относительная дата для списков: «только что», «5 мин назад»,
- * «2 часа назад», иначе — полная дата «04.08.26 16:12».
+ * Relative date for lists: "just now", "5 min ago",
+ * "2 hours ago", otherwise — the full date "04.08.26 16:12".
  */
 export function formatRelativeDate(ms: number): string {
   if (!ms) return '—';

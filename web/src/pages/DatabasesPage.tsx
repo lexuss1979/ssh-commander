@@ -29,16 +29,16 @@ import {
 import type { AgentAskMode, Profile } from '../types';
 import { useT } from '../i18n';
 
-// Редактор с подсветкой — тот же чанк, что и в файловом менеджере
+// Editor with highlighting — the same lazy chunk as in the file manager
 const CodeEditor = lazy(() => import('../components/CodeEditor'));
 
 interface Props {
   profile: Profile;
   showError: (msg: string) => void;
   visible: boolean;
-  /** «Спросить агента»: собрать промпт с движком и схемой в AgentPage. */
+  /** "Ask the agent": assemble the prompt with the engine and schema, AgentPage sends it. */
   onAskAgent: (text: string, mode?: AgentAskMode, source?: string) => void;
-  /** Одноразовая вставка SQL из чата агента (кнопка «→ SQL»), расходуется эффектом. */
+  /** One-shot SQL insert from the agent chat (the "→ SQL" button), consumed by an effect. */
   sqlInsert?: { id: number; sql: string } | null;
   onSqlInsertConsumed?: () => void;
 }
@@ -50,10 +50,10 @@ const ENGINE_LABEL: Record<string, string> = {
 
 const HISTORY_KEY = (profileId: string) => `sc-db-history-${profileId}`;
 const HISTORY_LIMIT = 50;
-/** Лимит контекста схемы для «Спросить агента» (как у терминала). */
+/** Schema context limit for "Ask the agent" (same as the terminal). */
 const SCHEMA_CONTEXT_LIMIT = 4096;
 
-/** Короткая версия: «PostgreSQL 16.4» из полной строки version(), «8.0.36» из @@version. */
+/** Short version: "PostgreSQL 16.4" from the full version() string, "8.0.36" from @@version. */
 function shortVersion(engine: string, version: string): string {
   if (!version) return '';
   if (engine === 'postgres') {
@@ -64,8 +64,8 @@ function shortVersion(engine: string, version: string): string {
   return m ? m[1] : version.split(',')[0];
 }
 
-/** Схема для промпта агента: «schema.table (col1, col2, …)» по строке на
- * таблицу; колонок нет — имена таблиц. */
+/** Schema for the agent prompt: "schema.table (col1, col2, …)" one line per
+ * table; no columns — table names only. */
 function buildSchemaText(tables: DbTableInfo[] | null, columns: DbColumnInfo[] | null): string {
   if (columns && columns.length > 0) {
     const byTable = new Map<string, string[]>();
@@ -95,11 +95,11 @@ function saveHistory(profileId: string, items: string[]): void {
   try {
     localStorage.setItem(HISTORY_KEY(profileId), JSON.stringify(items));
   } catch {
-    /* localStorage может быть недоступен */
+    /* localStorage may be unavailable */
   }
 }
 
-/** Палитра истории запросов (паттерн Ctrl+R терминала, данные — localStorage). */
+/** Query history palette (the terminal's Ctrl+R pattern, data in localStorage). */
 function QueryHistoryPalette({
   history,
   onPick,
@@ -179,9 +179,9 @@ function QueryHistoryPalette({
 }
 
 /**
- * Форма подключения (модалка): креденшалы задаются явно, как в DBeaver.
- * Discovery автозаполняет движок/пользователя/базу из env контейнера —
- * но это подсказка: env мог протухнуть, источник истины — человек.
+ * Connection form (modal): credentials are set explicitly, as in DBeaver.
+ * Discovery prefills engine/user/database from the container env — but it is
+ * only a hint: the env may have gone stale, the source of truth is a human.
  */
 function ConnectionModal({
   profileId,
@@ -233,8 +233,8 @@ function ConnectionModal({
     };
   }, [profileId]);
 
-  // Выбор контейнера автозаполняет форму подсказками discovery (движок,
-  // пользователь, база, семейство mysql/mariadb; имя — только если пусто).
+  // Picking a container prefills the form with discovery hints (engine,
+  // user, database, the mysql/mariadb flavor; the name only if empty).
   const pickContainer = (id: string) => {
     setContainerId(id);
     const s = suggestions?.find((x) => x.id === id);
@@ -310,8 +310,8 @@ function ConnectionModal({
     }
   };
 
-  // Контейнер правки мог не попасть в свежий discovery (перезапущен под
-  // другим id) — показываем сохранённый id отдельной опцией.
+  // The edited container may be missing from the fresh discovery (restarted
+  // under a different id) — show the saved id as a separate option.
   const editingContainerId =
     editing?.target.kind === 'container' ? editing.target.containerId : null;
   const editingContainerMissing =
@@ -460,36 +460,36 @@ export function DatabasesPage({
   onSqlInsertConsumed,
 }: Props) {
   const { t } = useT();
-  // Подключения (обновление по кнопке и после правок — polling нет)
+  // Connections (refreshed by the button and after edits — no polling)
   const [connections, setConnections] = useState<DbConnectionInfo[] | null>(null);
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<DbConnectionInfo | null>(null);
 
-  // Выбор: подключение → база → таблицы/колонки
+  // Selection: connection → database → tables/columns
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [overview, setOverview] = useState<DbOverview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [database, setDatabase] = useState<string | null>(null);
   const [tables, setTables] = useState<DbTableInfo[] | null>(null);
-  /** Ошибка загрузки таблиц: пустой список и сбой — разные состояния. */
+  /** Table load error: an empty list and a failure are different states. */
   const [tablesError, setTablesError] = useState<string | null>(null);
-  /** Колонки выбранной базы — для схемы в промпте «Спросить агента». */
+  /** Columns of the selected database — for the "Ask the agent" prompt schema. */
   const [columns, setColumns] = useState<DbColumnInfo[] | null>(null);
-  /** Сервер обрезал колонки по лимиту (4000) — пометка в промпте. */
+  /** The server cut the columns by the limit (4000) — noted in the prompt. */
   const [columnsTruncated, setColumnsTruncated] = useState(false);
 
-  // Раскрытие таблицы (поля + индексы): ключ `${schema}.${name}` → детали.
+  // Table expansion (columns + indexes): the key is `${schema}.${name}` → details.
   const [expandedTable, setExpandedTable] = useState<string | null>(null);
   const [tableDetails, setTableDetails] = useState<Record<string, DbTableDetail>>({});
   const [tableDetailLoading, setTableDetailLoading] = useState<Record<string, boolean>>({});
   const tableDetailKey = (t: DbTableInfo) => `${t.schema}.${t.name}`;
 
-  // Консоль
+  // Console
   const [sql, setSql] = useState('');
-  /** Только чтение: защита от случайности (серверный SET перед запросом),
-   * не персистится — каждая монтировка вкладки начинается с ON. */
+  /** Read-only: a guard against accidents (a server-side SET before the
+   * query), not persisted — every tab mount starts with it ON. */
   const [readOnly, setReadOnly] = useState(true);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<DbQueryResult | null>(null);
@@ -497,13 +497,14 @@ export function DatabasesPage({
   const [dumping, setDumping] = useState<string | null>(null);
   const [history, setHistory] = useState<string[]>(() => loadHistory(profile.id));
   const [historyOpen, setHistoryOpen] = useState(false);
-  /** Счётчик контекста: инкремент при смене подключения/базы — ответ
-   * выполнявшегося запроса, вернувшийся после смены, не трогает стейт. */
+  /** Context generation counter: incremented on a connection/database change —
+   * a reply of a query in flight that arrives after the change does not touch
+   * the state. */
   const runSeqRef = useRef(0);
   const dbRootRef = useRef<HTMLDivElement>(null);
-  /** Курсор над вкладкой: Ctrl+R перехватываем при фокусе внутри вкладки ИЛИ
-   * при наведённом курсоре — после закрытия палитры фокус падает на body и
-   * без hover второй Ctrl+R улетал бы в reload страницы. */
+  /** Cursor over the tab: Ctrl+R is intercepted when the focus is inside the
+   * tab OR the cursor hovers it — after the palette closes the focus falls to
+   * body, and without hover a second Ctrl+R would reload the page. */
   const dbHoverRef = useRef(false);
 
   const connection = useMemo(
@@ -511,7 +512,7 @@ export function DatabasesPage({
     [connections, connectionId],
   );
 
-  // Загрузка списка подключений при первом показе вкладки и по кнопке.
+  // Load the connection list on the first tab show and by the button.
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
@@ -520,8 +521,8 @@ export function DatabasesPage({
       .then((list) => {
         if (cancelled) return;
         setConnections(list);
-        // Первое подключение выбирается автоматически; выбранное удалено —
-        // переходим на первое оставшееся.
+        // The first connection is selected automatically; if the selected one
+        // was deleted — move to the first remaining one.
         setConnectionId((prev) =>
           prev && list.some((c) => c.id === prev) ? prev : list[0]?.id ?? null);
       })
@@ -533,9 +534,10 @@ export function DatabasesPage({
     };
   }, [profile.id, visible, reloadKey]);
 
-  // Сменилось подключение — тащим обзор (версия, базы с размерами). Прошлые
-  // база/таблицы/результаты недействительны сразу: без сброса database
-  // таблицы успели бы запроситься у нового подключения со старой базой.
+  // The connection changed — fetch the overview (version, databases with
+  // sizes). The previous database/tables/results become invalid at once:
+  // without resetting database the tables could be queried from the new
+  // connection against the old database.
   useEffect(() => {
     if (!connectionId) return;
     let cancelled = false;
@@ -553,7 +555,7 @@ export function DatabasesPage({
       .then((res) => {
         if (cancelled) return;
         setOverview(res);
-        // Первая база выбирается автоматически — сразу можно писать SELECT.
+        // The first database is selected automatically — a SELECT can be typed right away.
         setDatabase(res.databases[0]?.name ?? null);
       })
       .catch((err) => {
@@ -566,8 +568,8 @@ export function DatabasesPage({
     };
   }, [profile.id, connectionId]);
 
-  // Сменилась база — список таблиц и колонки; результаты прошлого контекста
-  // больше не относятся к экрану.
+  // The database changed — the table list and columns; results of the previous
+  // context no longer belong to the screen.
   useEffect(() => {
     if (!connectionId || !database) {
       setTables(null);
@@ -589,12 +591,13 @@ export function DatabasesPage({
         if (!cancelled) setTables(res);
       })
       .catch((err) => {
-        // Сбой не маскируем пустым списком: «Таблиц нет» и «не загрузились» —
-        // разные состояния, ошибка видна прямо в секции.
+        // A failure is not masked with an empty list: "no tables" and "failed
+        // to load" are different states, the error is visible right in the
+        // section.
         if (cancelled) return;
         setTablesError((err as Error).message);
       });
-    // Колонки — вспомогательные (схема для агента): тишина при неудаче.
+    // Columns are auxiliary (the schema for the agent): stay silent on failure.
     fetchDbColumns(profile.id, connectionId, database)
       .then((res) => {
         if (!cancelled) {
@@ -610,9 +613,9 @@ export function DatabasesPage({
     };
   }, [profile.id, connectionId, database, showError]);
 
-  // Ctrl+R — палитра истории запросов (как в терминале). Перехватываем при
-  // фокусе внутри вкладки или наведённом на неё курсоре: в панели агента и
-  // вне вкладки Ctrl+R остаётся браузерным reload.
+  // Ctrl+R — the query history palette (as in the terminal). Intercepted when
+  // the focus is inside the tab or the cursor hovers it: in the agent panel
+  // and outside the tab Ctrl+R stays the browser reload.
   useEffect(() => {
     if (!visible) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -627,7 +630,7 @@ export function DatabasesPage({
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [visible]);
 
-  // Вставка SQL из чата агента (кнопка «→ SQL»).
+  // SQL insert from the agent chat (the "→ SQL" button).
   const lastSqlInsertRef = useRef(0);
   useEffect(() => {
     if (!sqlInsert || sqlInsert.id === lastSqlInsertRef.current) return;
@@ -652,8 +655,9 @@ export function DatabasesPage({
       return;
     }
     if (!sql.trim() || running) return;
-    // Поколение контекста: если подключение/база сменились, пока шёл запрос
-    // (до 120 с), его результат относится к прошлому экрану — не кладём.
+    // The context generation: if the connection/database changed while the
+    // query ran (up to 120 s), its result belongs to the previous screen —
+    // not stored.
     const seq = ++runSeqRef.current;
     setRunning(true);
     setQueryError(null);
@@ -690,8 +694,8 @@ export function DatabasesPage({
     }
   };
 
-  // EXPLAIN — по синтаксису движка: PG (ANALYZE, BUFFERS), MySQL/MariaDB —
-  // обычный EXPLAIN (EXPLAIN ANALYZE есть только в MySQL 8.0.18+).
+  // EXPLAIN — per the engine syntax: PG (ANALYZE, BUFFERS), MySQL/MariaDB —
+  // a plain EXPLAIN (EXPLAIN ANALYZE exists only in MySQL 8.0.18+).
   const insertExplain = () => {
     if (!connection) return;
     setSql((prev) => {
@@ -709,7 +713,7 @@ export function DatabasesPage({
     setSql(`SELECT *\nFROM ${quote(tbl.schema)}.${quote(tbl.name)}\nLIMIT 100;`);
   };
 
-  // Раскрытие таблицы: показать/скрыть поля и индексы (деталь кэшируется).
+  // Table expansion: show/hide columns and indexes (the detail is cached).
   const toggleTableDetail = async (tbl: DbTableInfo) => {
     const key = tableDetailKey(tbl);
     if (expandedTable === key) {
@@ -730,9 +734,9 @@ export function DatabasesPage({
     }
   };
 
-  // «Спросить агента»: промпт собираем здесь (движок, версия, черновик,
-  // схема с колонками ≤4 КБ), AgentPage отправляет его как есть (mode
-  // 'send'). Выполняет сгенерированный запрос всегда пользователь.
+  // "Ask the agent": the prompt is assembled here (engine, version, the SQL
+  // draft, the schema with columns ≤4 KB), AgentPage sends it as is (mode
+  // 'send'). The generated query is always executed by the user.
   const askAgent = () => {
     if (!connection) {
       showError(t('databases.errorNoConnection'));
@@ -745,9 +749,9 @@ export function DatabasesPage({
     }
     const engineLabel = ENGINE_LABEL[connection.engine] ?? connection.engine;
     const version = overview ? shortVersion(overview.engine, overview.version) : '';
-    // Схема — «таблица (колонки)» по строке на таблицу; без колонок (ещё
-    // грузятся или не нужны серверу) — хотя бы имена таблиц. Обрезку по
-    // серверному лимиту честно помечаем в самом тексте.
+    // The schema is a "table (columns)" line per table; without columns (still
+    // loading or not needed by the server) — at least the table names. The cut
+    // by the server limit is honestly noted in the text itself.
     let schema = buildSchemaText(tables, columns).slice(0, SCHEMA_CONTEXT_LIMIT);
     if (columnsTruncated) {
       schema += '\n' + t('databases.askSchemaTruncated');

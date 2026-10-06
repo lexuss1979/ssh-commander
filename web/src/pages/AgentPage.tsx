@@ -18,14 +18,14 @@ type TFn = (key: I18nKey, params?: I18nParams | number) => string;
 interface Props {
   profile: Profile;
   showError: (msg: string) => void;
-  /** Одноразовый запрос «Спросить агента» (терминал/вкладка БД; расходуется эффектом ниже). */
+  /** One-shot "Ask the agent" request (terminal/databases tab; consumed by the effect below). */
   agentRequest?: { id: number; text: string; mode?: AgentAskMode; source?: string } | null;
   onAgentRequestConsumed?: () => void;
-  /** Индикатор активности в сайдбаре: 'pending' (ждёт approve) важнее 'running'. */
+  /** Sidebar activity indicator: 'pending' (awaiting approve) outranks 'running'. */
   onActivity?: (profileId: string, state: 'running' | 'pending' | null) => void;
   /**
-   * «→ SQL» на sql-блоках ответов (когда активный запрос пришёл со вкладки
-   * «Базы данных»): вставить SQL в редактор консоли и переключить вкладку.
+   * "→ SQL" on sql blocks in replies (when the active request came from the
+   * "Databases" tab): insert the SQL into the console editor and switch tabs.
    */
   onSqlInsert?: (profileId: string, sql: string) => void;
 }
@@ -44,7 +44,7 @@ interface ToolCallView {
   status: 'running' | 'pending' | 'ok' | 'error' | 'rejected';
   output?: string;
   truncated?: boolean;
-  /** Имя сервера из событий tool_start/tool_pending/tool_result (бейдж). */
+  /** Server name from the tool_start/tool_pending/tool_result events (badge). */
   server?: string;
 }
 
@@ -58,7 +58,7 @@ interface ChatMessageView {
 
 let nextId = 1;
 
-// Иконки для кнопки копирования сообщения агента.
+// Icons for the agent message copy button.
 function CopyIcon() {
   return (
     <svg
@@ -92,7 +92,7 @@ function CheckIcon() {
   );
 }
 
-// Шаблон запроса по выводу терминала (режимы 'explain' и 'new-dialogue').
+// Template of a request built from terminal output ('explain' and 'new-dialogue' modes).
 function terminalContextMessage(
   t: (key: I18nKey, params?: I18nParams | number) => string,
   text: string,
@@ -102,8 +102,8 @@ function terminalContextMessage(
 }
 
 export function AgentPage({ profile, showError, agentRequest, onAgentRequestConsumed, onActivity, onSqlInsert }: Props) {
-  // lang (в отличие от t) — в deps WS-эффекта: смена языка интерфейса
-  // пересоздаёт подключение, чтобы агент отвечал на языке UI.
+  // lang (unlike t) is in the WS effect deps: a UI language change
+  // recreates the connection so the agent answers in the UI language.
   const { t, lang, locale } = useT();
   const [messages, setMessages] = useState<ChatMessageView[]>([]);
   const [copiedId, setCopiedId] = useState<number | null>(null);
@@ -113,57 +113,57 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   const [dialogues, setDialogues] = useState<DialogueSummary[]>([]);
   const [activeDialogueId, setActiveDialogueId] = useState('');
   const [loading, setLoading] = useState(true);
-  // Режим планирования: сообщения уходят с planMode=true, агент сначала
-  // составляет план без инструментов и ждёт approve_plan.
+  // Planning mode: messages are sent with planMode=true; the agent first
+  // drafts a plan without tools and waits for approve_plan.
   const [planMode, setPlanMode] = useState(false);
   const [planReady, setPlanReady] = useState(false);
-  // Модалка «Проверка безопасности»: необязательный sudo-пароль для root-секций аудита.
+  // The "Security audit" modal: an optional sudo password for the audit's root sections.
   const [auditOpen, setAuditOpen] = useState(false);
   const [auditPassword, setAuditPassword] = useState('');
-  // Сервер, на котором запускать аудит ('' — домашний профиль диалога).
+  // The server to run the audit on ('' — the dialogue's home profile).
   const [auditServerId, setAuditServerId] = useState('');
-  // Dropdown с историей диалогов (кнопка «История» в тулбаре).
+  // Dropdown with the dialogue history (the "History" button in the toolbar).
   const [historyOpen, setHistoryOpen] = useState(false);
-  // Серверы, подключённые к диалогу (событие WS `servers`): домашний первым.
+  // Servers attached to the dialogue (the WS `servers` event): home first.
   const [serversInfo, setServersInfo] = useState<{ home: string; attached: AttachedServer[] } | null>(null);
-  // Dropdown кнопки «+» — профили, которые можно подключить к диалогу.
+  // The "+" button dropdown — profiles that can be attached to the dialogue.
   const [addOpen, setAddOpen] = useState(false);
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
-  // Решение по мутирующему вызову отправлено (кнопки плашки заблокированы
-  // до tool_result); смена диалога сбрасывает.
+  // The decision on a mutating call has been sent (the bar buttons stay
+  // disabled until tool_result); a dialogue switch resets it.
   const [decidedCalls, setDecidedCalls] = useState<Set<string>>(() => new Set());
-  // Живые итоги расходов диалога (WS-событие usage): обновляются после каждой
-  // записи в журнал — бейдж двигается во время длинных прогонов, а не только
-  // по done (refreshDialogues). Сбрасываются при смене диалога.
+  // Live spend totals of the dialogue (the WS `usage` event): updated after
+  // every journal write — the badge moves during long runs, not only on
+  // done (refreshDialogues). Reset on a dialogue switch.
   const [liveUsage, setLiveUsage] = useState<DialogueUsageTotals | null>(null);
-  // Подсказка вероятного ответа (WS-событие suggestion): плейсхолдер пустого
-  // поля ввода, Tab подставляет текст. Живёт только в стейте страницы — до
-  // следующего хода (сброс на running/send/error/смену диалога), из
-  // persisted-диалога не восстанавливается. Автоотправки нет никогда.
+  // Suggested likely reply (the WS `suggestion` event): the placeholder of the
+  // empty input, Tab inserts the text. Lives only in the page state — until
+  // the next turn (reset on running/send/error/dialogue switch), never
+  // restored from the persisted dialogue. There is never any auto-send.
   const [suggestion, setSuggestion] = useState('');
   const wsRef = useRef<WebSocket | null>(null);
-  // Отложенная отправка первого сообщения в только что созданный диалог
-  // ('new-dialogue' из терминала): заполняется после успешного POST, а
-  // отправляется в ws.onopen, когда WS нового диалога готов.
+  // Deferred send of the first message into a just-created dialogue
+  // ('new-dialogue' from the terminal): filled after a successful POST and
+  // sent in ws.onopen once the new dialogue's WS is ready.
   const pendingSendRef = useRef<{ content: string; dialogueId: string } | null>(null);
-  // Поле ввода — для фокуса/курсора после prefill из терминала.
+  // The input field — for focus/caret after a terminal prefill.
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  // DOM-карточки вызовов в ленте — клик по плашке подтверждения скроллит к карточке.
+  // DOM cards of calls in the feed — clicking the confirmation bar scrolls to the card.
   const cardRefs = useRef(new Map<string, HTMLDivElement>());
   const listRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
   const addRef = useRef<HTMLDivElement>(null);
-  // Актуальные значения для эффекта «Спросить агента» — без добавления в deps,
-  // чтобы смена состояния не расходовала запрос повторно.
+  // Current values for the "Ask the agent" effect — kept out of deps,
+  // so a state change does not consume the request twice.
   const connectedRef = useRef(connected);
   connectedRef.current = connected;
   const runningRef = useRef(running);
   runningRef.current = running;
   const activeDialogueIdRef = useRef(activeDialogueId);
   activeDialogueIdRef.current = activeDialogueId;
-  // t для WS-эффекта без добавления в deps: переводы не должны
-  // пересоздавать подключение (паттерн tRef из TerminalPage). Сам язык
-  // (lang) в deps есть — его смена пересоздаёт WS намеренно.
+  // t for the WS effect kept out of deps: translations must not recreate the
+  // connection (the tRef pattern from TerminalPage). The language itself
+  // (lang) is in deps — changing it recreates the WS deliberately.
   const tRef = useRef(t);
   tRef.current = t;
 
@@ -187,8 +187,8 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     });
   }, []);
 
-  // Карточка инструмента: 'running' — read-only вызов исполняется (tool_start),
-  // 'pending' — мутрующий ждёт подтверждения (tool_pending).
+  // Tool card: 'running' — a read-only call is executing (tool_start),
+  // 'pending' — a mutating one awaits approval (tool_pending).
   const addToolCard = useCallback((
     callId: string,
     name: string,
@@ -226,8 +226,9 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     else cardRefs.current.delete(callId);
   }, []);
 
-  // Решение по мутирующему вызову: единственная точка — закреплённая плашка
-  // у поля ввода. callId запоминается до tool_result, чтобы кнопки не мигали.
+  // The decision on a mutating call: the single place is the pinned bar by
+  // the input field. callId is remembered before tool_result so the buttons
+  // do not flicker.
   const decide = useCallback(
     (callId: string, action: 'approve' | 'reject') => {
       setDecidedCalls((prev) => {
@@ -251,12 +252,12 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       );
       setDialogues(list.dialogues);
     } catch {
-      /* список обновится при следующем открытии */
+      /* the list refreshes on the next open */
     }
   }, [profile.id]);
 
-  // Возвращает id созданного диалога (null при ошибке) — «открыть в новом
-  // чате» из терминала привязывает к нему отложенную отправку.
+  // Returns the created dialogue id (null on error) — "open in a new chat"
+  // from the terminal attaches its deferred send to it.
   const startNewDialogue = useCallback(async (): Promise<string | null> => {
     try {
       const { dialogue } = await api<{ dialogue: Dialogue }>('/api/ai/dialogues', {
@@ -298,7 +299,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     [activeDialogueId, running, dialogues, startNewDialogue, showError, t],
   );
 
-  // Загрузка списка диалогов профиля; при отсутствии — создаём первый.
+  // Load the dialogue list of the profile; create the first one when empty.
   useEffect(() => {
     let cancelled = false;
     setDialogues([]);
@@ -336,7 +337,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     };
   }, [profile.id, showError]);
 
-  // Подключение WS и загрузка истории выбранного диалога.
+  // WS connection and history load for the selected dialogue.
   useEffect(() => {
     if (!activeDialogueId) return;
     let cancelled = false;
@@ -361,10 +362,10 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     wsRef.current = ws;
     ws.onopen = () => {
       setConnected(true);
-      // Отложенное первое сообщение нового диалога ('new-dialogue' из
-      // терминала): сверка dialogueId закрывает гонку «пользователь успел
-      // переключить диалог, пока коннектился» — замыкание держит id именно
-      // этого WS. planMode: false — это готовый вопрос, а не планирование.
+      // Deferred first message of a new dialogue ('new-dialogue' from the
+      // terminal): the dialogueId check closes the race "the user managed to
+      // switch dialogues while connecting" — the closure holds the id of this
+      // very WS. planMode: false — this is a ready question, not planning.
       const pending = pendingSendRef.current;
       if (pending && pending.dialogueId === activeDialogueId) {
         pendingSendRef.current = null;
@@ -373,9 +374,9 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
         ws.send(JSON.stringify({ type: 'message', content: pending.content, planMode: false }));
       }
     };
-    // Обрыв WS между кликом и tool_result: результат уже не придёт, снимаем
-    // блокировку, чтобы плашка не зависала навсегда в «выполняется…»
-    // (перезагрузка диалога пересоздаст сессию и состояние в любом случае).
+    // WS dropped between the click and tool_result: the result will never
+    // arrive, so unlock to keep the bar from hanging in "running…" forever
+    // (reloading the dialogue recreates the session and state anyway).
     ws.onclose = () => {
       setConnected(false);
       setDecidedCalls(new Set());
@@ -404,8 +405,9 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           finalizeAssistant(String(msg.content ?? ''));
           break;
         case 'suggestion':
-          // Подсказка вероятного ответа агента: плейсхолдер поля ввода,
-          // подставляется по Tab. На done не сбрасываем — агент ждёт ответа.
+          // The agent's suggested likely reply: the input placeholder,
+          // inserted by Tab. Not reset on done — the agent is waiting for an
+          // answer.
           setSuggestion(String(msg.text ?? ''));
           break;
         case 'tool_start':
@@ -432,7 +434,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           break;
         }
         case 'usage': {
-          // Кумулятивные итоги диалога после каждой записи в журнал расходов.
+          // Cumulative dialogue totals after each spend-journal write.
           const totals = msg.totals as DialogueUsageTotals | undefined;
           if (totals && typeof totals.calls === 'number') setLiveUsage(totals);
           break;
@@ -474,7 +476,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           setPlanReady(false);
           setSuggestion('');
           const error = String(msg.message ?? tRef.current('agent.errorFallback'));
-          // Ошибка остаётся видна в чате; частичный ответ больше не стримится.
+          // The error stays visible in the chat; the partial reply is no longer streaming.
           setMessages((prev) => [
             ...prev.map((message) => message.streaming ? { ...message, streaming: false } : message),
             { id: nextId++, role: 'assistant', content: `⚠️ ${error}` },
@@ -487,12 +489,12 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     };
     return () => {
       cancelled = true;
-      // Протухший pending: пользователь ушёл с диалога до onopen —
-      // отложенное сообщение сбрасываем, чтобы не выстрелило при
-      // следующем открытии этого диалога. Условно: безусловная очистка
-      // роняла бы основной путь — ref заполняется до ре-рендера от
-      // setActiveDialogueId, и cleanup предыдущего effect'а выполняется
-      // уже после заполнения (там pending чужого dialogueId).
+      // A stale pending: the user left the dialogue before onopen — reset the
+      // deferred message so it does not fire on the next open of this
+      // dialogue. Conditional on purpose: an unconditional clear would break
+      // the main path — the ref is filled before the re-render caused by
+      // setActiveDialogueId, and the cleanup of the previous effect runs only
+      // after that fill (holding a pending of a different dialogueId).
       if (pendingSendRef.current?.dialogueId === activeDialogueId) {
         pendingSendRef.current = null;
       }
@@ -502,9 +504,9 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   }, [
     activeDialogueId,
     profile.id,
-    // Смена языка интерфейса пересоздаёт WS: диалог тот же (dialogueId
-    // сохраняется), но сессия агента собирается с новым языком промпта.
-    // Обрыв стрима на середине при этом редком действии приемлем.
+    // A UI language change recreates the WS: the dialogue is the same
+    // (dialogueId is kept), but the agent session is assembled with the new
+    // prompt language. A mid-stream break on this rare action is acceptable.
     lang,
     pushAssistantToken,
     finalizeAssistant,
@@ -518,7 +520,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages]);
 
-  // Dropdown истории: закрывается по клику вне его и по Escape.
+  // History dropdown: closes on an outside click and on Escape.
   useEffect(() => {
     if (!historyOpen) return;
     const onMouseDown = (e: MouseEvent) => {
@@ -537,7 +539,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     };
   }, [historyOpen]);
 
-  // Dropdown «+» (подключить сервер): закрывается по клику вне его и по Escape.
+  // The "+" dropdown (attach a server): closes on an outside click and on Escape.
   useEffect(() => {
     if (!addOpen) return;
     const onMouseDown = (e: MouseEvent) => {
@@ -556,13 +558,14 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     };
   }, [addOpen]);
 
-  // Одновременно висит максимум одно подтверждение (сервер обрабатывает
-  // вызовы последовательно) — плашка показывает ровно один pending-вызов.
+  // At most one confirmation is pending at a time (the server processes calls
+  // sequentially) — the bar shows exactly one pending call.
   const pendingTool: ToolCallView | null =
     messages.flatMap((m) => m.toolCalls ?? []).find((tc) => tc.status === 'pending') ?? null;
 
-  // Индикатор активности для сайдбара (App): висящее подтверждение (pending)
-  // важнее, чем просто «работает» — без него агент молча ждёт approve в фоне.
+  // Activity indicator for the sidebar (App): a hanging confirmation (pending)
+  // matters more than just "running" — without it the agent silently waits
+  // for approve in the background.
   const hasPending = pendingTool !== null;
   useEffect(() => {
     onActivity?.(profile.id, hasPending ? 'pending' : running ? 'running' : null);
@@ -572,21 +575,22 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     return () => onActivity?.(id, null);
   }, [onActivity, profile.id]);
 
-  // Запрос «Спросить агента» из терминала: если WS готов и агент свободен —
-  // отправляем сообщение сразу; иначе (нет соединения или идёт выполнение)
-  // подставляем текст в поле ввода, чтобы пользователь отправил сам и текущий
-  // поток не сломался. Запрос одноразовый: id запоминаем, App сбрасывает стейт.
-  // mode: 'explain' (кнопка «Спросить агента») — как выше; 'prefill' — всегда
-  // только вставка в поле ввода; 'new-dialogue' — создать диалог и отправить
-  // текст первым сообщением (отложенно, в ws.onopen нового диалога);
-  // 'send' — текст уже собран отправителем (SQL-консоль вкладки «Базы данных»),
-  // отправляется как есть.
+  // The "Ask the agent" request from the terminal: if the WS is ready and the
+  // agent is idle — send the message right away; otherwise (no connection or
+  // a run in progress) put the text into the input so the user sends it
+  // themselves and the current stream is not broken. The request is one-shot:
+  // the id is remembered and App resets the state.
+  // mode: 'explain' (the "Ask the agent" button) — as above; 'prefill' —
+  // always only inserts into the input; 'new-dialogue' — create a dialogue
+  // and send the text as the first message (deferred, in the new dialogue's
+  // ws.onopen); 'send' — the text was already composed by the sender (the SQL
+  // console of the "Databases" tab), sent as is.
   const lastHandledRequestRef = useRef(0);
-  // «→ SQL» на sql-блоках: активен, пока последний разовый запрос пришёл со
-  // вкладки «Базы данных» (source === 'db'). Пассивный сброс при назначении
-  // диалога (оно бывает поздним — при монтировании панели) не делаем: гасим
-  // флаг только в явных действиях пользователя (новый диалог, выбор из
-  // истории) — контекст запроса к этим моментам точно устарел.
+  // "→ SQL" on sql blocks: active while the latest one-shot request came from
+  // the "Databases" tab (source === 'db'). No passive reset when a dialogue is
+  // assigned (it can happen late — when the panel mounts): the flag is only
+  // cleared by explicit user actions (new dialogue, picking from history) —
+  // by then the request context is definitely stale.
   const [sqlInsertEnabled, setSqlInsertEnabled] = useState(false);
   useEffect(() => {
     if (!agentRequest || agentRequest.id === lastHandledRequestRef.current) return;
@@ -594,9 +598,9 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     setSqlInsertEnabled(agentRequest.source === 'db');
     const mode = agentRequest.mode ?? 'explain';
     if (mode === 'prefill') {
-      // Цитата без инструкции «объясни» — пользователь допишет свой вопрос;
-      // набранное не затираем. Фокус и курсор в конец — после применённого
-      // стейта, поэтому requestAnimationFrame.
+      // A quote without an "explain" instruction — the user will add their own
+      // question; do not wipe what is already typed. Focus and caret to the
+      // end — after the state is applied, hence requestAnimationFrame.
       const block = t('agent.terminalPrefillBlock', { serverName: profile.name, text: agentRequest.text });
       setInput((prev) => (prev ? `${prev}\n\n${block}` : block));
       requestAnimationFrame(() => {
@@ -621,7 +625,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       onAgentRequestConsumed?.();
       return;
     }
-    // 'explain' и 'send' идут одним путём; 'send' текст не оборачивает.
+    // 'explain' and 'send' share one path; 'send' does not wrap the text.
     const content = mode === 'send'
       ? agentRequest.text
       : terminalContextMessage(t, agentRequest.text, profile.name);
@@ -635,41 +639,41 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     onAgentRequestConsumed?.();
   }, [agentRequest, planMode, sendWs, onAgentRequestConsumed, profile.name, showError, startNewDialogue, t]);
 
-  // «→ SQL» из sql-блока ответа: SQL уходит в редактор консоли нужного
-  // профиля, App переключает на вкладку «Базы данных».
+  // "→ SQL" from a sql block of a reply: the SQL goes to the console editor of
+  // the right profile, App switches to the "Databases" tab.
   const handleSqlInsert = useCallback(
     (sql: string) => onSqlInsert?.(profile.id, sql),
     [onSqlInsert, profile.id],
   );
 
-  // Копирование текста сообщения агента (кнопка в бабле при наведении).
+  // Copying the text of an agent message (the button on the bubble on hover).
   const handleCopyMessage = useCallback(async (m: ChatMessageView) => {
     const text = m.content ?? '';
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
     } catch {
-      // clipboard может быть недоступен (http) — молча игнорируем.
+      // clipboard may be unavailable (http) — silently ignore.
       return;
     }
     setCopiedId(m.id);
     setTimeout(() => setCopiedId((c) => (c === m.id ? null : c)), 1600);
   }, []);
 
-  // Подключённые серверы для чипов и модалки аудита: до события `servers`
-  // показываем только домашний профиль.
+  // Attached servers for the chips and the audit modal: until the `servers`
+  // event, only the home profile is shown.
   const attachedServers: AttachedServer[] = serversInfo?.attached ?? [
     { id: profile.id, name: profile.name, host: profile.host, username: profile.username },
   ];
   const homeServerId = serversInfo?.home ?? profile.id;
   const availableProfiles = allProfiles.filter((p) => !attachedServers.some((s) => s.id === p.id));
 
-  // Итоги расходов текущего диалога: живое WS-значение (во время прогона)
-  // важнее summary-значения из списка (обновляется по done/error).
+  // Spend totals of the current dialogue: the live WS value (during a run)
+  // wins over the summary value from the list (updated on done/error).
   const activeUsage: DialogueUsageTotals | null =
     liveUsage ?? dialogues.find((d) => d.id === activeDialogueId)?.usage ?? null;
 
-  // Кнопка «+»: при открытии подгружаем полный список профилей.
+  // The "+" button: load the full profile list when opened.
   const toggleAdd = () => {
     const next = !addOpen;
     setAddOpen(next);
@@ -687,15 +691,15 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     setInput('');
     setPlanReady(false);
     setSuggestion('');
-    // Правки к ожидающему плану — это тоже message с planMode=true:
-    // сервер пересоставит план. Выход из режима — снять переключатель «План».
+    // Edits to a pending plan are also a message with planMode=true:
+    // the server will redraft the plan. Leaving the mode — toggle "Plan" off.
     sendWs({ type: 'message', content, planMode });
   };
 
-  // Запуск «Проверки безопасности»: пароль (если введён) уходит отдельным
-  // WS-сообщением sudo_credentials и хранится только в памяти сессии агента —
-  // в текст запроса и историю диалога он не попадает. Если агент занят или
-  // соединения нет — не запускаем (модалка остаётся открытой).
+  // Starting the "Security audit": the password (if entered) goes as a separate
+  // sudo_credentials WS message and is kept only in the agent session memory —
+  // it never reaches the request text or the dialogue history. If the agent is
+  // busy or there is no connection — do not start (the modal stays open).
   const startAudit = () => {
     if (!connected || !activeDialogueId) {
       showError(t('agent.auditNoConnection'));
@@ -718,7 +722,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       t('agent.auditPromptTail');
     setMessages((prev) => [...prev, { id: nextId++, role: 'user', content }]);
     setPlanReady(false);
-    // planMode: false — аудит запускается сразу, минуя режим планирования.
+    // planMode: false — the audit starts right away, bypassing planning mode.
     sendWs({ type: 'message', content, planMode: false });
     setAuditPassword('');
     setAuditServerId('');
@@ -794,9 +798,9 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                           className="dialogue-item-title"
                           title={d.title}
                         >
-                          {/* 'Новый диалог' — persisted-сентинел автотитула
-                              (server/src/ai/dialogues.ts); на сервере не
-                              переводится, локализуем только отображение. */}
+                          {/* 'Новый диалог' — the persisted auto-title sentinel
+                              (server/src/ai/dialogues.ts); not translated on
+                              the server, only the display is localized. */}
                           {d.title === 'Новый диалог' ? t('agent.dialogueUntitled') : d.title}
                         </div>
                         {d.extraProfileIds && d.extraProfileIds.length > 0 && (
@@ -886,7 +890,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                 title={usageTooltip(activeUsage, t, locale)}
                 data-unpriced={activeUsage.unpricedCalls > 0 ? 'true' : undefined}
               >
-                {/* Ни один вызов не протарифицирован — $0.0000 врал бы «бесплатно» */}
+                {/* No call was priced at all — $0.0000 would lie "free" */}
                 ≈ {activeUsage.costUsd === 0 && activeUsage.unpricedCalls > 0 ? '—' : formatUsd(activeUsage.costUsd)}
               </span>
             )}
@@ -1028,10 +1032,10 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                 e.preventDefault();
                 send();
               }
-              // Tab подставляет подсказку агента — только при строго пустом
-              // поле (иначе сохраняем нативное поведение — переход фокуса).
-              // Подставленный текст — обычное содержимое поля: правится
-              // перед отправкой, Enter всегда нажимает пользователь.
+              // Tab inserts the agent suggestion — only when the field is
+              // strictly empty (otherwise the native behavior — moving focus
+              // — is kept). The inserted text is ordinary field content:
+              // edited before sending, Enter is always pressed by the user.
               if (
                 e.key === 'Tab' &&
                 !e.shiftKey &&
@@ -1129,8 +1133,8 @@ function toSummary(d: Dialogue): DialogueSummary {
   };
 }
 
-// Подсказка бейджа стоимости: вызовы и токены (вход/выход/кэш); при вызовах
-// без цены модели — честная пометка «неполная сумма».
+// Cost badge tooltip: calls and tokens (prompt/completion/cached); for calls
+// without a model price — an honest "incomplete sum" note.
 function usageTooltip(u: DialogueUsageTotals, t: TFn, locale: string): string {
   const parts = [
     t('agent.usageCalls', { n: u.calls }),
@@ -1210,8 +1214,9 @@ const TOOL_LABEL_KEYS: Record<string, I18nKey> = {
   list_servers: 'agent.tool.listServers',
 };
 
-// Человекочитаемый лейбл вызова; connect_server — карточка-вопрос про целевой
-// сервер (приходит в поле server события, он ещё не подключён; фолбэк — args.server).
+// Human-readable label of a call; connect_server — a question card about the
+// target server (it arrives in the server field of the event, which is not
+// attached yet; fallback — args.server).
 function toolLabel(tool: ToolCallView, t: TFn): string {
   if (tool.name === 'connect_server') {
     const target = tool.server ?? String(tool.args?.server ?? '');
@@ -1221,8 +1226,8 @@ function toolLabel(tool: ToolCallView, t: TFn): string {
   return key ? t(key) : tool.name;
 }
 
-// Главный аргумент вызова (запрос поиска, команда, путь) — видно,
-// чем занят агент или что именно он предлагает выполнить.
+// The main argument of a call (search query, command, path) — shows what the
+// agent is busy with or what exactly it proposes to run.
 function mainArgPreview(args?: Record<string, unknown>): string {
   for (const key of ['query', 'command', 'path', 'target', 'containerId']) {
     const v = args?.[key];
@@ -1231,10 +1236,10 @@ function mainArgPreview(args?: Record<string, unknown>): string {
   return '';
 }
 
-// Полный главный аргумент для раскрытия в плашке подтверждения:
-// команда exec целиком (многострочная), путь + размер содержимого
-// write_file, сводка write_memory, docker-действие с целью;
-// без главного аргумента — pretty-JSON args (как «Детали» карточки).
+// The full main argument for expanding in the confirmation bar:
+// the whole exec command (multiline), the path + content size of
+// write_file, the write_memory summary, a docker action with its target;
+// without a main argument — pretty-JSON of args (like the card's "Details").
 function fullArgText(tool: ToolCallView, t: TFn, locale: string): string {
   const args = tool.args ?? {};
   if (tool.name === 'write_file') {
@@ -1278,8 +1283,8 @@ function ToolCard({ tool, decided, registerCard }: {
   const { t } = useT();
   const [expanded, setExpanded] = useState(false);
   const name = toolLabel(tool, t);
-  // Пока инструмент выполняется или ждёт подтверждения, вместо вывода
-  // показываем его главный аргумент (запрос поиска, команду, путь).
+  // While the tool is running or awaiting approval, its main argument (a
+  // search query, command, path) is shown instead of the output.
   const argPreview = mainArgPreview(tool.args);
   const preview = (
     tool.status === 'running' || tool.status === 'pending' ? argPreview : (tool.output ?? '')
@@ -1346,10 +1351,11 @@ function ToolCard({ tool, decided, registerCard }: {
   );
 }
 
-// Закреплённая плашка подтверждения мутирующего вызова — единая точка
-// решения (кнопки из карточек в ленте убраны), всегда видна у поля ввода.
-// Клик по строке скроллит ленту к карточке вызова; «Подробнее» раскрывает
-// полный главный аргумент. После клика кнопки блокируются до tool_result.
+// The pinned confirmation bar for a mutating call — the single decision
+// point (the buttons on the feed cards were removed), always visible by the
+// input. Clicking the row scrolls the feed to the call card; "Details"
+// expands the full main argument. After a click the buttons are disabled
+// until tool_result.
 function PendingBar({ tool, decided, onApprove, onReject, onScrollToCard }: {
   tool: ToolCallView;
   decided: boolean;
@@ -1359,8 +1365,8 @@ function PendingBar({ tool, decided, onApprove, onReject, onScrollToCard }: {
 }) {
   const { t, locale } = useT();
   const [expanded, setExpanded] = useState(false);
-  // Очередь подтверждений: смена вызова мгновенно заменяет содержимое
-  // плашки — раскрытие не переносится на следующий вызов.
+  // A confirmation queue: switching calls replaces the bar contents
+  // instantly — the expansion does not carry over to the next call.
   useEffect(() => {
     setExpanded(false);
   }, [tool.callId]);
@@ -1424,11 +1430,12 @@ function PendingBar({ tool, decided, onApprove, onReject, onScrollToCard }: {
   );
 }
 
-// Карточка «План готов»: запускает исполнение плана (approve_plan).
-// Отказ от плана — просто написать правки в чат: план будет пересоставлен.
+// The "Plan ready" card: starts executing the plan (approve_plan).
+// Rejecting the plan — just type the edits into the chat: the plan will be
+// redrafted.
 function PlanCard({ onExecute }: { onExecute: () => void }) {
   const { t } = useT();
-  // Решение отправлено на сервер — блокируем кнопку (паттерн как в ToolCard).
+  // The decision was sent to the server — disable the button (the ToolCard pattern).
   const [sent, setSent] = useState(false);
   return (
     <div className="plan-card">

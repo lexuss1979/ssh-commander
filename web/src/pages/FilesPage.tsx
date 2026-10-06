@@ -16,7 +16,7 @@ import { Modal } from '../components/Modal';
 import { useSortBy, SortableTh } from '../hooks/useSortBy';
 import { useT } from '../i18n';
 
-// Редактор с подсветкой грузится отдельным чанком, чтобы не раздувать основной бандл
+// The editor with highlighting loads as a separate chunk to keep the main bundle small
 const CodeEditor = lazy(() => import('../components/CodeEditor'));
 
 interface Props {
@@ -25,10 +25,10 @@ interface Props {
   visible: boolean;
   onAskAgent: (text: string, mode?: AgentAskMode, source?: string) => void;
   onProfilesChanged: () => void;
-  /** Одноразовый переход на путь (из навигатора «Что занимает»); App сбрасывает через onFilesPathConsumed. */
+  /** One-shot navigation to a path (from the "What takes space" navigator); App resets it via onFilesPathConsumed. */
   openPath?: string | null;
   onFilesPathConsumed?: () => void;
-  /** «Открыть в терминале» — открыть terminal-вкладку профиля с cd в директорию пути. */
+  /** "Open in terminal" — open the profile's terminal tab with a cd into the path directory. */
   onOpenInTerminal?: (path: string) => void;
 }
 
@@ -37,8 +37,8 @@ function fileQuery(profileId: string, path: string): string {
   return `/api/files/list?${params}`;
 }
 
-// SVG-иконки на currentColor — читаемы на обеих темах (вместо эмодзи, которые
-// на светлой теме почти не видны).
+// SVG icons on currentColor — readable on both themes (instead of emoji,
+// which are nearly invisible on the light theme).
 const FOLDER_ICON = (
   <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
     <path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z" />
@@ -68,16 +68,16 @@ const EYE_ICON = (
     <circle cx="12" cy="12" r="3" />
   </svg>
 );
-// «Просмотр» — read-only с подсветкой по расширению (лупа-инспекция), отличимо
-// от глаза (живой tail) и карандаша (редактирование).
+// "View" — read-only with extension-based highlighting (a magnifier),
+// distinguishable from the eye (a live tail) and the pencil (editing).
 const VIEW_ICON = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <circle cx="11" cy="11" r="7" />
     <line x1="20.5" y1="20.5" x2="16" y2="16" />
   </svg>
 );
-// Переименование — «карандаш на поле имени» (отличимо от карандаша
-// редактирования содержимого) и наглядно читается в 13px.
+// Rename — a "pencil on a name field" (distinct from the content-editing
+// pencil) and clearly readable at 13px.
 const RENAME_ICON = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -95,27 +95,27 @@ const X_ICON = (
     <path d="M18 6L6 18M6 6l12 12" />
   </svg>
 );
-// Скопировать путь — иконка «два листа» (отличима от карандаша редактирования).
+// Copy path — a "two sheets" icon (distinct from the edit pencil).
 const COPY_ICON = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <rect x="9" y="9" width="13" height="13" rx="2" />
     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
   </svg>
 );
-// Галочка — краткая обратная связь «скопировано».
+// The checkmark — brief "copied" feedback.
 const CHECK_ICON = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <path d="M20 6L9 17l-5-5" />
   </svg>
 );
-// Открыть в терминале — приглашение shell.
+// Open in terminal — a shell prompt.
 const TERMINAL_ICON = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <path d="M4 17l6-5-6-5" />
     <path d="M12 19h8" />
   </svg>
 );
-// «Дополнительно» — три точки (оверфлоу-меню редко используемых действий).
+// "More" — three dots (the overflow menu of rarely used actions).
 const MORE_ICON = (
   <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
     <circle cx="5" cy="12" r="1.6" />
@@ -127,14 +127,14 @@ const MORE_ICON = (
 export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesChanged, openPath, onFilesPathConsumed, onOpenInTerminal }: Props) {
   const { t } = useT();
   const [path, setPath] = useState('/');
-  // Редактируемая адресная строка: draft синхронизирован с path, Enter — переход.
+  // The editable address bar: draft is synced with path, Enter navigates.
   const [pathDraft, setPathDraft] = useState('/');
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<number | null>(null);
-  // Путь только что скопированного элемента — короткая подсветка иконки copy.
+  // The path of the just-copied entry — a brief copy-icon highlight.
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
   const copiedPathTimer = useRef<number | null>(null);
-  // Оверфлоу-меню «Дополнительно» (редко используемые действия строки).
+  // The "More" overflow menu (rarely used row actions).
   const [overflowMenu, setOverflowMenu] = useState<{ path: string; x: number; y: number } | null>(null);
   const overflowMenuRef = useRef<HTMLDivElement>(null);
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -142,11 +142,11 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
   const [editTarget, setEditTarget] = useState<FileEntry | null>(null);
   const [editContent, setEditContent] = useState('');
   const [editLoading, setEditLoading] = useState(false);
-  // «Просмотр» — read-only файл с подсветкой синтаксиса по расширению.
+  // "View" — a read-only file with syntax highlighting by extension.
   const [viewTarget, setViewTarget] = useState<FileEntry | null>(null);
   const [viewContent, setViewContent] = useState('');
   const [viewLoading, setViewLoading] = useState(false);
-  // Стабильный no-op для read-only CodeMirror (onChange обязательный).
+  // A stable no-op for read-only CodeMirror (onChange is required).
   const noop = useCallback(() => {}, []);
   const [promptState, setPromptState] = useState<{ title: string; value: string; action: 'mkdir' | 'rename' | 'chmod' | 'newfile'; target?: FileEntry } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -160,14 +160,14 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
   const dragCounter = useRef(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchLoading, setBatchLoading] = useState(false);
-  // Живой просмотр лога (эпик 14): tailTarget — путь открытого файла,
-  // addLogInput — значение инпута модалки «+ путь» для чипов.
+  // Live log viewing (epic 14): tailTarget — the path of the open file,
+  // addLogInput — the value of the modal's "+ path" input for the chips.
   const [tailTarget, setTailTarget] = useState<string | null>(null);
   const [addLogOpen, setAddLogOpen] = useState(false);
   const [addLogInput, setAddLogInput] = useState('');
 
   const fileAccessors = useMemo(() => ({
-    // Папки всегда выше файлов; внутри группы — по алфавиту.
+    // Folders always come before files; within a group — alphabetically.
     name: (e: FileEntry) => `${e.isDirectory ? '0' : '1'}${e.name.toLowerCase()}`,
     size: (e: FileEntry) => e.size,
     mtime: (e: FileEntry) => e.mtime,
@@ -191,9 +191,9 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
     void load();
   }, [load]);
 
-  // «Открыть в файлах» из навигатора «Что занимает» (эпик 16): одноразовый
-  // переход на путь. Страница смонтирована keep-alive — эффект срабатывает
-  // при переключении вкладки; App сбрасывает openPath через onFilesPathConsumed.
+  // "Open in files" from the "What takes space" navigator (epic 16): a
+  // one-shot navigation to a path. The page is mounted keep-alive — the
+  // effect fires on tab switches; App resets openPath via onFilesPathConsumed.
   useEffect(() => {
     if (!openPath) return;
     setSelected(new Set());
@@ -249,11 +249,11 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
       void openEditor({ name, path: result.path, isDirectory: false, isSymlink: false, size: 0, mtime: 0, mode: '' });
     };
     if (searchMode === 'content') {
-      // совпадение по содержимому — это всегда файл
+      // a content match is always a file
       openAsFile();
       return;
     }
-    // по имени тип неизвестен: пробуем открыть как директорию, иначе — как файл
+    // by name the type is unknown: try opening as a directory, otherwise as a file
     try {
       await api<FileListResponse>(fileQuery(profile.id, result.path));
       navigate(result.path);
@@ -274,7 +274,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
     void load();
   };
 
-  // Drag & drop: счётчик enter/leave корректно работает с вложенными элементами.
+  // Drag & drop: an enter/leave counter handles nested elements correctly.
   const onDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -303,7 +303,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
     if (files.length > 0) await upload(files);
   };
 
-  // Мультивыбор: toggle, select all, batch download/delete.
+  // Multi-select: toggle, select all, batch download/delete.
   const toggleSelect = (path: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -318,47 +318,47 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
       setSelected(new Set(sortedEntries.map((e) => e.path)));
     }
   };
-  // При смене директории сбрасываем выделение.
+  // A directory change clears the selection.
   const navigate = (p: string) => { setSelected(new Set()); setPath(p); setPathDraft(p); };
 
-  // Вверх (родительский каталог).
+  // Up (the parent directory).
   const goUp = () => {
     const parent = path === '/' ? '/' : path.replace(/\/[^/]*$/, '') || '/';
     navigate(parent);
   };
 
-  // Копировать текущий путь; короткая подсветка кнопки.
+  // Copy the current path; a brief button highlight.
   const copyPath = async () => {
     try {
       await navigator.clipboard.writeText(path);
     } catch {
-      /* clipboard может быть недоступен */
+      /* clipboard may be unavailable */
     }
     setCopied(true);
     if (copiedTimer.current) window.clearTimeout(copiedTimer.current);
     copiedTimer.current = window.setTimeout(() => setCopied(false), 1500);
   };
 
-  // Копировать путь конкретного элемента; подсветка иконки copy в строке.
+  // Copy the path of a specific entry; the copy icon highlights in the row.
   const copyEntryPath = async (entry: FileEntry) => {
     try {
       await navigator.clipboard.writeText(entry.path);
     } catch {
-      /* clipboard может быть недоступен */
+      /* clipboard may be unavailable */
     }
     setCopiedPath(entry.path);
     if (copiedPathTimer.current) window.clearTimeout(copiedPathTimer.current);
     copiedPathTimer.current = window.setTimeout(() => setCopiedPath(null), 1500);
   };
 
-  // «Открыть в терминале»: для директории — сама директория, для файла — родитель.
+  // "Open in terminal": for a directory — itself, for a file — its parent.
   const openInTerminal = (entry: FileEntry) => {
     const cwd = entry.isDirectory ? entry.path : entry.path.replace(/\/[^/]*$/, '') || '/';
     onOpenInTerminal?.(cwd);
   };
 
-  // Оверфлоу-меню «Дополнительно»: позиционируем по trigger-кнопке (fixed-меню
-  // вне скролл-контейнера, чтобы не обрезалось).
+  // The "More" overflow menu: positioned by the trigger button (a fixed menu
+  // outside the scroll container so it is not clipped).
   const openOverflowMenu = (e: React.MouseEvent, path: string) => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const w = Math.min(240, window.innerWidth);
@@ -370,7 +370,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
     });
   };
 
-  // Закрытие оверфлоу-меню по клику вне и по Esc.
+  // The overflow menu closes on an outside click and on Esc.
   useEffect(() => {
     if (!overflowMenu) return;
     const onDown = (e: MouseEvent) => {
@@ -389,7 +389,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
     };
   }, [overflowMenu]);
 
-  // Переход по введённому пути (Enter в адресной строке).
+  // Navigate to the entered path (Enter in the address bar).
   const commitPathDraft = () => {
     const v = pathDraft.trim();
     if (!v.startsWith('/')) {
@@ -400,8 +400,8 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
     navigate(v);
   };
 
-  // Эпик 14: живой просмотр логов. buildUrl стабилизирован useCallback —
-  // LogViewer перезапускает стрим при смене identity пропа.
+  // Epic 14: live log viewing. buildUrl is stabilized with useCallback —
+  // LogViewer restarts the stream when the prop identity changes.
   const buildTailUrl = useCallback(
     (follow: boolean) => {
       const params = new URLSearchParams({
@@ -415,8 +415,8 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
     [profile.id, tailTarget],
   );
 
-  // PUT log-paths — отдельный маршрут: полный апдейт профиля рвёт
-  // SSH-подключение и оборвал бы открытый tail-стрим.
+  // PUT log-paths — a dedicated route: a full profile update tears down the
+  // SSH connection and would kill an open tail-stream.
   const putLogPaths = useCallback(
     async (paths: string[]): Promise<boolean> => {
       try {
@@ -443,7 +443,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
       showError(t('files.pathMustStartSlash'));
       return;
     }
-    // при отказе сервера (не-абсолютный, ..) модалку держим открытой
+    // on a server rejection (non-absolute, ..) the modal stays open
     if (await putLogPaths([...pinnedPaths, value])) {
       setAddLogOpen(false);
       setAddLogInput('');
@@ -516,8 +516,8 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
     }
   };
 
-  // «Просмотр» (read-only): тот же /api/files/read, но в редакторе с readOnly
-  // и подсветкой по расширению — без сохранения.
+  // "View" (read-only): the same /api/files/read, but in a readOnly editor
+  // with extension-based highlighting — no saving.
   const openView = async (entry: FileEntry) => {
     setViewTarget(entry);
     setViewLoading(true);
@@ -744,8 +744,8 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
         </div>
       </div>
 
-      {/* Ряд закреплённых логов — компактные чипы по имени файла (полный путь в
-          подсказке); «+» достижим и при пустом logPaths. */}
+      {/* The pinned logs row — compact chips by file name (the full path in
+          the tooltip); "+" is reachable even with an empty logPaths. */}
       <div className="log-bookmarks">
         <span className="lbl">{t('files.pinnedLogs')}</span>
         {pinnedPaths.map((p) => (
@@ -896,7 +896,7 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
                 <td className="col-narrow mono">{entry.mode}</td>
                 <td className="col-narrow">
                   <div className="row-actions">
-                    {/* Важные действия — одной строкой; остальное в «…» (overflowMenu). */}
+                    {/* Important actions on one row; the rest in "…" (overflowMenu). */}
                     {entry.isDirectory ? (
                       <a
                         className="btn btn-mini"
@@ -1062,8 +1062,8 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
             logPath={tailTarget}
             serverName={profile.name}
             onAskAgent={(text) => {
-              // Модалку закрываем: панель агента раскрывается под ней, и
-              // ответ не виден, пока просмотрщик висит поверх.
+              // The modal is closed: the agent panel expands beneath it, and
+              // the reply is not visible while the viewer floats on top.
               setTailTarget(null);
               onAskAgent(text, 'send');
             }}

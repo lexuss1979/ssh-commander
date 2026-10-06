@@ -16,28 +16,28 @@ import { LogViewer, type LogViewerStatus } from '../components/LogViewer';
 import { Modal } from '../components/Modal';
 import { useT } from '../i18n';
 import type { I18nKey, I18nParams } from '../i18n';
-// Не-React вариант t — для экспортируемых хелперов (их сигнатуры
-// использует ServersPage, менять их нельзя).
+// A non-React variant of t — for the exported helpers (ServersPage uses
+// their signatures, they must not change).
 import { t as tCore } from '../i18n/core';
 
 interface Props {
   profile: Profile;
   showError: (msg: string) => void;
   visible: boolean;
-  /** Переход на путь во вкладке «Файлы» (из навигатора «Что занимает»). */
+  /** Navigate to the path in the "Files" tab (from the "What takes space" navigator). */
   onOpenInFiles: (path: string) => void;
   onAskAgent?: (text: string, mode?: AgentAskMode) => void;
 }
 
 const POLL_INTERVAL_MS = 3000;
-// Обновления пакетов опрашиваются отдельным (медленным) таймером, а не тиком
-// метрик: снимок — это 2 exec'а + SFTP-stat, и раз в минуту он не должен
-// стопорить тик CPU/памяти/дисков. Серверный кэш 60 с гасит повторы.
+// Package updates are polled by a separate (slow) timer, not by the metrics
+// tick: a snapshot is 2 execs + an SFTP-stat, and once a minute it must not
+// stall the CPU/memory/disks tick. The server's 60 s cache absorbs repeats.
 const PACKAGES_POLL_MS = 60000;
 
 type TFn = (key: I18nKey, params?: I18nParams | number) => string;
 
-/** Строка таблицы процессов (элемент `metrics.processes`). */
+/** A process table row (an element of `metrics.processes`). */
 type ProcRow = ServerMetrics['processes'][number];
 
 export function formatBytes(bytes: number | null): string {
@@ -83,7 +83,7 @@ export function Meter({ percent }: { percent: number | null }) {
   );
 }
 
-/** Имя команды применения — для заголовка просмотрщика и контекста «В чат». */
+/** The apply command name — for the viewer title and the "To chat" context. */
 export function applyLogLabel(pm: 'apt' | 'dnf' | 'yum' | 'apk'): string {
   switch (pm) {
     case 'apt':
@@ -97,7 +97,7 @@ export function applyLogLabel(pm: 'apt' | 'dnf' | 'yum' | 'apk'): string {
   }
 }
 
-/** Возраст индекса apt: «индекс не обновлялся» (файла нет) / «N дн назад». */
+/** The apt index age: "index never updated" (no file) / "N days ago". */
 function indexAgeText(t: TFn, ms: number | null): string {
   if (ms === null) return t('overview.indexNever');
   const days = ms / 86400000;
@@ -172,15 +172,15 @@ export function OverviewPage({ profile, visible, onOpenInFiles, onAskAgent }: Pr
   const [packages, setPackages] = useState<PackagesSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  // Навигатор «Что занимает»: точка монтирования выбранной строки диска.
+  // The "What takes space" navigator: the mount point of the selected disk row.
   const [duTarget, setDuTarget] = useState<string | null>(null);
-  // Действия над процессами (эпик 17): цель модалки, статус, sudo-пароль.
+  // Process actions (epic 17): the modal target, status, sudo password.
   const [actionTarget, setActionTarget] = useState<ProcRow | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
-  // sudo-пароль держим в стейте страницы на время жизни вкладки (без persist):
-  // после первого ввода повторные действия не спрашивают его заново (паттерн
-  // ServicesPage, комментарий тот же).
+  // The sudo password is kept in the page state for the tab's lifetime (no
+  // persist): after the first entry subsequent actions do not ask again (the
+  // ServicesPage pattern, same comment).
   const [sudoPassword, setSudoPassword] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
   const noticeTimer = useRef<number | null>(null);
@@ -197,22 +197,22 @@ export function OverviewPage({ profile, visible, onOpenInFiles, onAskAgent }: Pr
     };
   }, []);
   const updatesSectionRef = useRef<HTMLDivElement>(null);
-  // Применение обновлений: подтверждение → просмотрщик живого вывода.
+  // Applying updates: confirmation → live output viewer.
   const [confirmApply, setConfirmApply] = useState(false);
   const [applyPassword, setApplyPassword] = useState('');
   const [applying, setApplying] = useState(false);
-  // Подтверждение закрытия просмотрщика, пока обновление ещё выполняется.
+  // Closing confirmation for the viewer while the update is still running.
   const [confirmCloseApply, setConfirmCloseApply] = useState(false);
-  // Прерывание стрима применения: родительский контроллер — LogViewer в
-  // oneShot-режиме живёт не по `visible`, а по abortSignal.
+  // Aborting the apply stream: the parent controller — LogViewer in oneShot
+  // mode lives not by `visible` but by the abortSignal.
   const applyAbortRef = useRef<AbortController | null>(null);
-  // Последний статус стрима — чтобы requestCloseApply знал, нужен ли confirm.
+  // The last stream status — so requestCloseApply knows whether to confirm.
   const applyStatusRef = useRef<LogViewerStatus>('loading');
 
-  // Последовательный polling: следующий запрос только после завершения
-  // предыдущего. На скрытой вкладке (keep-alive) опрос полностью остановлен.
-  // История нагрузки грузится тем же тиком, но её ошибки тихие — графики
-  // декоративные, при сбое остаётся последнее нарисованное.
+  // Sequential polling: the next request only after the previous one
+  // finishes. In a hidden tab (keep-alive) the poll is fully stopped.
+  // The load history is fetched by the same tick, but its errors are silent —
+  // the charts are decorative, on a failure the last drawn picture remains.
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
@@ -243,9 +243,9 @@ export function OverviewPage({ profile, visible, onOpenInFiles, onAskAgent }: Pr
     };
   }, [profile.id, visible, reloadKey]);
 
-  // Обновления пакетов — отдельный медленный таймер (не блокирует тик метрик);
-  // ошибки тихие — карточка остаётся с последним снимком. reloadKey — чтобы
-  // после применения (инвалидации серверного кэша) refetch случился сразу.
+  // Package updates — a separate slow timer (does not block the metrics tick);
+  // errors are silent — the card keeps the last snapshot. reloadKey — so that
+  // after applying (invalidating the server cache) a refetch happens at once.
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
@@ -255,7 +255,7 @@ export function OverviewPage({ profile, visible, onOpenInFiles, onAskAgent }: Pr
         const p = await fetchPackages(profile.id);
         if (!cancelled) setPackages(p);
       } catch {
-        /* тихие ошибки */
+        /* silent errors */
       }
       if (!cancelled) {
         timer = window.setTimeout(tickPackages, PACKAGES_POLL_MS);
@@ -268,8 +268,8 @@ export function OverviewPage({ profile, visible, onOpenInFiles, onAskAgent }: Pr
     };
   }, [profile.id, visible, reloadKey]);
 
-  // Стабильность identity обязательна: LogViewer перезапускает стрим при
-  // смене buildRequest, а для oneShot это повторный запуск мутации.
+  // Identity stability is mandatory: LogViewer restarts the stream when
+  // buildRequest changes, and for oneShot that means re-running the mutation.
   const buildApplyRequest = useCallback(
     (): { url: string; init?: RequestInit } => packagesApplyRequest(profile.id, applyPassword || undefined),
     [profile.id, applyPassword],
@@ -283,19 +283,19 @@ export function OverviewPage({ profile, visible, onOpenInFiles, onAskAgent }: Pr
   };
 
   const finishApply = () => {
-    // Прерывание идущего стрима (если он ещё жив) и закрытие модалки.
+    // Abort the running stream (if still alive) and close the modal.
     applyAbortRef.current?.abort();
-    // Пароль не живёт в стейте дольше модалки — следующее подтверждение
-    // начинается с пустого поля.
+    // The password does not live in the state longer than the modal — the
+    // next confirmation starts with an empty field.
     setApplyPassword('');
     setApplying(false);
     setConfirmCloseApply(false);
-    // Серверный кэш снимка уже сброшен инвалидацией — немедленный refetch.
+    // The server snapshot cache has already been reset by invalidation — an immediate refetch.
     setReloadKey((k) => k + 1);
   };
 
-  // Закрытие просмотрщика: пока стрим выполняется — подтверждение (клик по
-  // оверлею при этом вообще не закрывает: Modal dismissable={false}).
+  // Closing the viewer: while the stream runs — a confirmation (clicking the
+  // overlay does not close at all: Modal dismissable={false}).
   const requestCloseApply = () => {
     const s = applyStatusRef.current;
     if (s === 'stopped' || s === 'error') {
@@ -317,9 +317,9 @@ export function OverviewPage({ profile, visible, onOpenInFiles, onAskAgent }: Pr
   }), []);
   const { sort: procSort, toggle: toggleProcSort, sorted: sortedProcesses } = useSortBy(processes, procAccessors, { key: 'cpu', dir: 'desc' });
 
-  /** Подтверждённое действие из модалки: сигнал или renice с sudo-ретраем.
-   * После успеха — кэш метрик сброшен на сервере, тик polling'а сработает
-   * немедленно против свежего снимка. */
+  /** The confirmed action from the modal: a signal or a renice with a sudo retry.
+   * After success — the metrics cache has been reset on the server, the
+   * polling tick will immediately hit a fresh snapshot. */
   const handleProcessAction = async (action: ProcessModalAction, nice: number) => {
     if (!actionTarget) return;
     setActionBusy(true);
@@ -543,8 +543,8 @@ export function OverviewPage({ profile, visible, onOpenInFiles, onAskAgent }: Pr
           initialPath={duTarget}
           onClose={() => setDuTarget(null)}
           onOpenInFiles={(p) => {
-            // Закрываем навигатор: без этого модалка уезжает вместе со скрытой
-            // вкладкой «Обзора» и встречает пользователя на старом пути.
+            // Close the navigator: without this the modal rides along with the
+            // hidden "Overview" tab and greets the user at the old path.
             setDuTarget(null);
             onOpenInFiles(p);
           }}
@@ -616,8 +616,9 @@ export function OverviewPage({ profile, visible, onOpenInFiles, onAskAgent }: Pr
               applyStatusRef.current = s;
             }}
             onAskAgent={(text) => {
-              // Модалку НЕ закрываем: для oneShot закрытие = прерывание
-              // мутации; панель агента раскрывается справа, вывод остаётся.
+              // Do NOT close the modal: for oneShot closing = aborting the
+              // mutation; the agent panel expands on the right, the output
+              // stays.
               onAskAgent?.(text, 'send');
             }}
           />
@@ -650,7 +651,7 @@ export function OverviewPage({ profile, visible, onOpenInFiles, onAskAgent }: Pr
 }
 
 // ---------------------------------------------------------------------------
-// Модалка действий над процессом (эпик 17)
+// Process action modal (epic 17)
 // ---------------------------------------------------------------------------
 
 type ProcessModalAction = ProcessSignal | 'renice';
@@ -683,17 +684,18 @@ function ProcessActionModal({
 }) {
   const { t } = useT();
   const [action, setAction] = useState<ProcessModalAction>('TERM');
-  // Сырая строка: очищенное `<input type="number">` даёт '', а
-  // `Number('') === 0` — пустое поле не должно молча означать «сброс в 0».
+  // The raw string: a cleared `<input type="number">` yields '', and
+  // `Number('') === 0` — an empty field must not silently mean "reset to 0".
   const [nice, setNice] = useState('5');
 
-  // Превью команды mono: сервер соберёт ровно её (кроме sudo-обёртки).
+  // Mono command preview: the server will run exactly this (except the sudo wrapper).
   const command = action === 'renice' ? `renice -n ${nice} -p ${p.pid}` : `kill -${action} ${p.pid}`;
 
-  // Предупреждения усиливают подтверждение, не блокируют (roadmap).
+  // Warnings strengthen the confirmation, they do not block (roadmap).
   const warnings: string[] = [];
-  // `ps aux` усекает колонку USER до 8 символов с хвостовым '+' — длинные
-  // имена своего пользователя не должны ложно помечаться «чужими».
+  // `ps aux` truncates the USER column to 8 characters with a trailing '+' —
+  // long names of the user's own account must not be falsely marked as
+  // "someone else's".
   const userMatches = (u: string): boolean =>
     u === profileUsername || (profileUsername.length > 8 && u === `${profileUsername.slice(0, 8)}+`);
   if (!userMatches(p.user)) {
@@ -783,7 +785,7 @@ function ProcessActionModal({
         </button>
         <button
           className={`btn ${action === 'KILL' ? 'btn-danger' : 'btn-primary'}`}
-          // Пустое поле nice — дефолт 5, а не молчаливый 0 (Number('') === 0).
+          // An empty nice field — the default of 5, not a silent 0 (Number('') === 0).
           onClick={() => onConfirm(action, nice.trim() === '' ? 5 : Number(nice))}
           disabled={busy}
         >

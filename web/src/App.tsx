@@ -27,7 +27,7 @@ import { AlertsBell } from './components/AlertsBell';
 import { useT } from './i18n';
 import type { I18nKey } from './i18n';
 
-// Иконки футера сайдбара (настройки/выход) — в фирменном SVG-стиле.
+// Sidebar footer icons (settings/logout) in the project's SVG style.
 const SETTINGS_ICON = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <circle cx="12" cy="12" r="3" />
@@ -76,7 +76,7 @@ function loadAgentWidth(): number {
     const v = Number(localStorage.getItem('sc-agent-width'));
     if (v >= AGENT_MIN_WIDTH && v <= AGENT_MAX_WIDTH) return v;
   } catch {
-    /* localStorage может быть недоступен */
+    /* localStorage may be unavailable */
   }
   return AGENT_DEFAULT_WIDTH;
 }
@@ -92,27 +92,28 @@ function loadAgentOpen(): boolean {
 export default function App() {
   const { t } = useT();
   const [authed, setAuthed] = useState<boolean | null>(null);
-  // Первичная настройка (docs/onboarding-plan.md): true — рендерим
-  // OnboardingPage вместо LoginPage, пока пароль не задан в UI.
+  // First-run setup (docs/onboarding-plan.md): true renders OnboardingPage
+  // instead of LoginPage until a password is set in the UI.
   const [onboarding, setOnboarding] = useState(false);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [activeProfileId, setActiveProfileId] = useState('');
   const [tab, setTab] = useState<Tab>('servers');
-  // Одноразовый запрос «терминал в контейнер» из Docker Explorer (эпик 15):
-  // TerminalPage добавляет/активирует вкладку контейнера и сбрасывает через
-  // onOpenContainerConsumed (паттерн sqlInsert). Сбрасывается и при смене
-  // профиля — запрос мог остаться от контейнера чужого сервера.
+  // One-shot "open a container terminal" request from Docker Explorer
+  // (epic 15): TerminalPage adds/activates the container tab and resets it
+  // via onOpenContainerConsumed (the sqlInsert pattern). Also reset on
+  // profile change — the request may be left over from another server's
+  // container.
   const [terminalOpenRequest, setTerminalOpenRequest] = useState<{
     containerId: string;
     name: string;
   } | null>(null);
-  // Одноразовый запрос «Открыть в терминале cd <путь>» из файлового менеджера:
-  // TerminalPage открывает/активирует host-вкладку и сбрасывает через
+  // One-shot "Open in terminal (cd <path>)" request from the file manager:
+  // TerminalPage opens/activates the host tab and resets it via
   // onOpenInTerminalConsumed.
   const [hostTerminalRequest, setHostTerminalRequest] = useState<{ cwd: string } | null>(null);
   const [showProfiles, setShowProfiles] = useState(false);
-  // Модалка «Настройки» (шестерёнка в футере сайдбара) — без keep-alive:
-  // монтируется при открытии, разделы запрашивают свежие данные сами.
+  // The "Settings" modal (gear in the sidebar footer) — no keep-alive:
+  // mounted on open, sections fetch fresh data themselves.
   const [showSettings, setShowSettings] = useState(false);
   const [toast, setToast] = useState<{ message: string; kind: 'error' | 'success' } | null>(null);
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -124,38 +125,41 @@ export default function App() {
   });
   const [agentWidth, setAgentWidth] = useState<number>(loadAgentWidth);
   const [agentOpen, setAgentOpen] = useState<boolean>(loadAgentOpen);
-  // Одноразовый запрос «Спросить агента» (терминал, меню «В чат», SQL-консоль
-  // вкладки «Базы данных»): AgentPage расходует его и сбрасывает через
-  // onAgentRequestConsumed. profileId — панель агента того профиля, откуда
-  // пришёл запрос; mode — что делать с текстом (по умолчанию 'explain');
-  // source === 'db' включает кнопку «→ SQL» на sql-блоках ответов.
+  // One-shot "Ask the agent" request (terminal, the "To chat" menu, the SQL
+  // console of the "Databases" tab): AgentPage consumes it and resets it via
+  // onAgentRequestConsumed. profileId targets the agent panel of the profile
+  // the request came from; mode says what to do with the text (default
+  // 'explain'); source === 'db' enables the "→ SQL" button on sql blocks in
+  // replies.
   const [agentRequest, setAgentRequest] = useState<
     { id: number; text: string; profileId: string; mode: AgentAskMode; source?: string } | null
   >(null);
-  // Обратный ход «→ SQL»: AgentPage просит вставить SQL в редактор консоли,
-  // DatabasesPage расходует и сбрасывает через onSqlInsertConsumed.
+  // The reverse of "→ SQL": AgentPage asks to insert SQL into the console
+  // editor, DatabasesPage consumes and resets it via onSqlInsertConsumed.
   const [sqlInsert, setSqlInsert] = useState<{ id: number; sql: string } | null>(null);
-  // «Открыть в файлах» из навигатора «Что занимает» (эпик 16): одноразовый
-  // путь для FilesPage; сбрасывается через onFilesPathConsumed.
+  // "Open in files" from the "What takes space" navigator (epic 16): a
+  // one-shot path for FilesPage; reset via onFilesPathConsumed.
   const [filesOpenPath, setFilesOpenPath] = useState<string | null>(null);
-  // Keep-alive панели агента: монтируются для всех посещённых за сессию
-  // профилей, неактивные скрываются display:none — WS и чат-стейт живут.
+  // Agent panel keep-alive: panels mount for every profile visited in the
+  // session, inactive ones are hidden with display:none — WS and chat
+  // state stay alive.
   const [visitedProfileIds, setVisitedProfileIds] = useState<string[]>([]);
-  // Активность агента по профилям для индикатора в сайдбаре:
-  // 'pending' (ждёт подтверждения) важнее 'running'.
+  // Per-profile agent activity for the sidebar indicator:
+  // 'pending' (awaiting approval) outranks 'running'.
   const [agentActivity, setAgentActivity] = useState<Record<string, 'running' | 'pending'>>({});
-  // Алерты по порогам (эпик 20): правила считает сервер поверх кэша
-  // overview, переходы/гистерезис/уведомления — здесь. Настройки —
-  // настройка клиента (localStorage 'sc-alerts').
+  // Threshold alerts (epic 20): the server evaluates the rules on top of
+  // the overview cache; transitions/hysteresis/notifications live here.
+  // Settings are a client-side concern (localStorage 'sc-alerts').
   const [alertsSettings, setAlertsSettings] = useState<AlertsSettings>(loadAlertsSettings);
   const [activeAlerts, setActiveAlerts] = useState<ActiveAlert[]>([]);
   const activeAlertsRef = useRef<Map<string, ActiveAlert>>(new Map());
   const syncedOnceRef = useRef(false);
   const toastTimer = useRef<number | null>(null);
-  // Пороги читаются из ref: в deps эффекта опроса — только тумблеры, иначе
-  // каждое изменение числа в модалке пересоздавало бы таймер. Синхронизация —
-  // эффектом, не в теле рендера; сохранение настроек пишет ref напрямую,
-  // чтобы тик между setState и коммитом не прочитал старые пороги.
+  // Thresholds are read from a ref: the poll effect deps hold only the
+  // toggles, otherwise every number change in the modal would recreate the
+  // timer. Sync runs as an effect, not in the render body; saving settings
+  // writes the ref directly so a tick landing between setState and commit
+  // does not read stale thresholds.
   const alertsSettingsRef = useRef(alertsSettings);
   const profilesRef = useRef(profiles);
   useEffect(() => {
@@ -170,7 +174,7 @@ export default function App() {
     try {
       localStorage.setItem('sc-theme', theme);
     } catch {
-      /* localStorage может быть недоступен */
+      /* localStorage may be unavailable */
     }
   }, [theme]);
 
@@ -179,7 +183,7 @@ export default function App() {
       localStorage.setItem('sc-agent-width', String(agentWidth));
       localStorage.setItem('sc-agent-open', agentOpen ? '1' : '0');
     } catch {
-      /* localStorage может быть недоступен */
+      /* localStorage may be unavailable */
     }
   }, [agentWidth, agentOpen]);
 
@@ -209,22 +213,22 @@ export default function App() {
     applyProfiles(list);
   }, [applyProfiles]);
 
-  // После пиннинга логов из FilesPage: стабильная ссылка, чтобы useCallback
-  // у putLogPaths не пересоздавался каждый рендер.
+  // After log pinning from FilesPage: a stable identity so the putLogPaths
+  // useCallback is not recreated on every render.
   const handleProfilesChanged = useCallback(() => {
     void loadProfiles();
   }, [loadProfiles]);
 
-  // Истёкшая сессия (401 на любом запросе) — возвращаемся на страницу логина.
+  // Expired session (401 on any request) — back to the login page.
   useEffect(() => {
     setUnauthorizedHandler(() => setAuthed(false));
     return () => setUnauthorizedHandler(null);
   }, []);
 
-  // Bootstrap (docs/onboarding-plan.md): сначала публичный статус первичной
-  // настройки, затем обычная проверка сессии через /api/profiles. Пока статус
-  // не пришёл — прежний loading; required → OnboardingPage (авто-вход после
-  // POST /api/setup, cookie ставит сервер).
+  // Bootstrap (docs/onboarding-plan.md): first the public first-run setup
+  // status, then the regular session check via /api/profiles. Until the
+  // status arrives — the previous loading screen; required → OnboardingPage
+  // (auto-login after POST /api/setup, the server sets the cookie).
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -233,17 +237,18 @@ export default function App() {
         const status = await fetchSetupStatus();
         required = status.required;
       } catch {
-        // Пробный запрос: отказ (сеть/старый сервер) не должен показывать
-        // ошибку — просто пробуем обычный bootstrap (401 уведёт на логин
-        // глобальным обработчиком).
+        // Probe request: a failure (network/old server) must not show an
+        // error — just fall through to the regular bootstrap (401 would
+        // send us to login via the global handler).
       }
       if (cancelled) return;
       if (required) {
         setOnboarding(true);
-        // authed=false, не true: иначе стартует сайдбар-опрос, чей
-        // неавторизованный /api/overview → 401 → глобальный обработчик
-        // выкинул бы на логин после успешного setup. Экран не меняется —
-        // guard `if (onboarding)` в рендере стоит раньше `if (!authed)`.
+        // authed=false, not true: otherwise the sidebar poll would start,
+        // and its unauthorized /api/overview → 401 → the global handler
+        // would kick us to login right after a successful setup. The
+        // screen does not change — the `if (onboarding)` guard in the
+        // render stands before `if (!authed)`.
         setAuthed(false);
         return;
       }
@@ -254,8 +259,8 @@ export default function App() {
         setAuthed(true);
       } catch (err) {
         if (cancelled) return;
-        // На логин уводит только 401 (сработает и глобальный обработчик);
-        // прочие ошибки (сеть, 5xx) — показываем toast, пользователь остаётся.
+        // Only 401 sends to login (the global handler fires for it too);
+        // other errors (network, 5xx) show a toast and the user stays.
         if (!(err instanceof ApiError && err.status === 401)) {
           showError((err as Error).message);
           return;
@@ -268,11 +273,12 @@ export default function App() {
     };
   }, [applyProfiles, showError]);
 
-  // Точки доступности серверов в сайдбаре + алерты: один тик — два запроса
-  // параллельно (общий кэш overview на сервере 4 с; /api/alerts должен
-  // прийти, пока кэш жив, — последовательный вызов порождал бы второй опрос
-  // SSH). В скрытой вкладке опрос идёт только когда включены и алерты, и
-  // браузерные уведомления (см. guard эффекта), иначе — прежняя пауза.
+  // Server availability dots in the sidebar + alerts: one tick fires both
+  // requests in parallel (the shared overview cache on the server lasts
+  // 4 s; /api/alerts must arrive while the cache is alive — a sequential
+  // call would trigger a second SSH poll). In a hidden tab the poll runs
+  // only when both alerts and browser notifications are enabled (see the
+  // effect guard), otherwise — the usual pause.
   const [pageVisible, setPageVisible] = useState(() => !document.hidden);
   const [serverStatus, setServerStatus] = useState<Record<string, { ok: boolean; error?: string }>>({});
 
@@ -282,16 +288,16 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', onChange);
   }, []);
 
-  // Слияние состояний правил: держащиеся/новые/снятые + браузерные
-  // уведомления на новые (после первой тихой синхронизации, только когда
-  // вкладка неактивна — в приложении хватает колокольчика).
+  // Rule state merge: held/new/cleared + browser notifications for new
+  // ones (after the first silent sync, and only while the tab is hidden —
+  // the in-app bell is enough otherwise).
   const applyAlertRules = useCallback((rules: AlertRuleState[]) => {
     const { next, fired } = mergeAlertStates(activeAlertsRef.current, rules, Date.now());
     activeAlertsRef.current = next;
     setActiveAlerts([...next.values()]);
     const first = !syncedOnceRef.current;
     syncedOnceRef.current = true;
-    if (first) return; // F5 не спамит уведомлениями по уже активным алертам
+    if (first) return; // F5 must not spam notifications for already active alerts
     const s = alertsSettingsRef.current;
     if (
       !s.notify ||
@@ -313,18 +319,19 @@ export default function App() {
           setTab('overview');
         };
       } catch {
-        /* браузер может отказаться создавать уведомление — не критично */
+        /* the browser may refuse to create a notification — not critical */
       }
     }
   }, []);
 
   useEffect(() => {
     if (!authed) return;
-    // Скрытая вкладка не опрашивает, пока не включены браузерные уведомления
-    // — единственный сценарий, где фоновый опрос что-то даёт (колокольчик в
-    // скрытой вкладке не видно, уведомления по умолчанию выключены — иначе
-    // опрос даром дёргал бы SSH-зонды круглосуточно). Браузер троттлит
-    // скрытые таймеры до ~1/мин — честный ритм фоновой проверки.
+    // A hidden tab does not poll until browser notifications are enabled —
+    // the only scenario where background polling pays off (the bell is not
+    // visible in a hidden tab, notifications are off by default — otherwise
+    // the poll would fire SSH probes around the clock for nothing). The
+    // browser throttles hidden timers to ~1/min — an honest background
+    // check rate.
     const s0 = alertsSettingsRef.current;
     if (!pageVisible && !(s0.enabled && s0.notify)) return;
     let cancelled = false;
@@ -341,8 +348,8 @@ export default function App() {
         for (const srv of overviewRes.value.servers) next[srv.id] = { ok: srv.ok, error: srv.error };
         setServerStatus(next);
       }
-      // Отказ любого из запросов — оставляем последний снимок без mass-resolve;
-      // 401 уводит на логин глобальным обработчиком.
+      // If either request fails — keep the last snapshot without
+      // mass-resolving; 401 goes to login via the global handler.
       if (alertsRes.status === 'fulfilled' && alertsRes.value) {
         applyAlertRules(alertsRes.value.rules);
       }
@@ -357,9 +364,10 @@ export default function App() {
     };
   }, [authed, pageVisible, alertsSettings.enabled, alertsSettings.notify, applyAlertRules]);
 
-  // Сохранение настроек алертов — тихий re-baseline: активный набор строится
-  // заново на следующем тике с новыми порогами (иначе гистерезис держал бы
-  // алерты по старым порогам, а смена настроек давала бы залп уведомлений).
+  // Saving alert settings — a silent re-baseline: the active set is rebuilt
+  // on the next tick with the new thresholds (otherwise hysteresis would
+  // keep alerts against the old thresholds, and a settings change would
+  // fire a salvo of notifications).
   const handleAlertsSettingsSaved = useCallback((s: AlertsSettings) => {
     setAlertsSettings(s);
     alertsSettingsRef.current = s;
@@ -378,8 +386,8 @@ export default function App() {
     [loadProfiles],
   );
 
-  // Onboarding завершён: сессия уже стоит (POST /api/setup поставил cookie) —
-  // подтягиваем профили и открываем приложение.
+  // Onboarding complete: the session is already in place (POST /api/setup
+  // set the cookie) — load the profiles and open the app.
   const handleOnboardingComplete = useCallback(async () => {
     await loadProfiles();
     setAuthed(true);
@@ -399,19 +407,19 @@ export default function App() {
     syncedOnceRef.current = false;
   }, []);
 
-  // Панель агента монтируется при первом посещении профиля и дальше живёт.
+  // The agent panel mounts on the first visit of a profile and stays alive afterwards.
   useEffect(() => {
     if (!activeProfileId) return;
     setVisitedProfileIds((prev) => (prev.includes(activeProfileId) ? prev : [...prev, activeProfileId]));
   }, [activeProfileId]);
 
-  // Смена профиля гасит зависший запрос терминала контейнера — контейнер
-  // принадлежал прошлому серверу.
+  // A profile change cancels a dangling container terminal request — the
+  // container belonged to the previous server.
   useEffect(() => {
     setTerminalOpenRequest(null);
   }, [activeProfileId]);
 
-  // AgentPage сообщает о своей активности; null — снять индикатор.
+  // AgentPage reports its activity; null clears the indicator.
   const handleAgentActivity = useCallback((profileId: string, state: 'running' | 'pending' | null) => {
     setAgentActivity((prev) => {
       if (state === null) {
@@ -425,9 +433,10 @@ export default function App() {
     });
   }, []);
 
-  // Кнопка «Спросить агента», меню «В чат» в терминале и кнопка SQL-консоли:
-  // раскрывает панель и передаёт контекст панели того профиля, откуда пришёл
-  // запрос. mode задаёт действие над текстом в AgentPage.
+  // The "Ask the agent" button, the "To chat" menu in the terminal and the
+  // SQL console button: expand the panel and pass the request to the panel
+  // of the profile it came from. mode picks what AgentPage does with the
+  // text.
   const handleAskAgent = useCallback(
     (text: string, mode: AgentAskMode = 'explain', source?: string) => {
       setAgentOpen(true);
@@ -436,31 +445,33 @@ export default function App() {
     [activeProfileId],
   );
 
-  // «→ SQL» на sql-блоке в чате агента: вставить в редактор консоли профиля
-  // и вернуться на вкладку «Базы данных» (DatabasesPage расходует sqlInsert).
+  // "→ SQL" on a sql block in the agent chat: insert into the console
+  // editor of the profile and switch back to the "Databases" tab
+  // (DatabasesPage consumes sqlInsert).
   const handleSqlInsert = useCallback((profileId: string, sql: string) => {
     setActiveProfileId(profileId);
     setTab('databases');
     setSqlInsert({ id: Date.now(), sql });
   }, []);
 
-  // «Открыть в файлах» из навигатора «Что занимает»: переход на путь во
-  // вкладке «Файлы» (профиль уже активный — «Обзор» рендерится только для
-  // activeProfile, FilesPage смонтирован keep-alive и реагирует на openPath).
+  // "Open in files" from the "What takes space" navigator: navigate to the
+  // path in the "Files" tab (the profile is already active — "Overview" is
+  // rendered only for activeProfile, and FilesPage is mounted keep-alive
+  // and reacts to openPath).
   const handleOpenInFiles = useCallback((path: string) => {
     setFilesOpenPath(path);
     setTab('files');
   }, []);
 
-  // «Открыть в терминале» из файлового менеджера: открыть terminal-вкладку
-  // профиля с cd в директорию пути (профиль уже активный — FilesPage для
-  // activeProfile, TerminalPage смонтирован keep-alive).
+  // "Open in terminal" from the file manager: open the profile's terminal
+  // tab with a cd into the path directory (the profile is already active —
+  // FilesPage is for activeProfile, TerminalPage is mounted keep-alive).
   const handleOpenInTerminal = useCallback((cwd: string) => {
     setHostTerminalRequest({ cwd });
     setTab('terminal');
   }, []);
 
-  // Drag-разделитель панели агента: ширина считается от правого края окна.
+  // Agent panel drag separator: the width is measured from the right edge of the window.
   const onResizerMouseDown = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
@@ -482,7 +493,7 @@ export default function App() {
     [agentWidth],
   );
 
-  // Чипы проблемных профилей в сайдбаре: счётчик алертов и худшая severity.
+  // Problem profile chips in the sidebar: the alert count and the worst severity.
   const profileAlerts = useMemo(() => {
     const map = new Map<string, { count: number; crit: boolean; messages: string[] }>();
     for (const a of activeAlerts) {
@@ -504,7 +515,7 @@ export default function App() {
     );
   }
 
-  // Первичная настройка — вместо страницы логина (пароль ещё не задан).
+  // First-run setup — instead of the login page (no password set yet).
   if (onboarding) {
     return (
       <>

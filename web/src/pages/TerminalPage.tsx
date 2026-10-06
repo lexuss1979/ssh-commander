@@ -6,24 +6,24 @@ import type { AgentAskMode, Profile, TerminalTab } from '../types';
 import { fetchTerminalHistory, fetchTerminalSessions } from '../api';
 import { useT } from '../i18n';
 
-// Лимит до сверки с сервером (сервер отдаёт фактический в /api/terminal/sessions).
+// Limit until reconciled with the server (the actual one comes in /api/terminal/sessions).
 const TERMINAL_LIMIT_DEFAULT = 4;
 
 type TerminalStatus = 'connecting' | 'connected' | 'disconnected' | 'closed' | 'error';
 
-// Лимиты контекста для кнопки «Спросить агента» (см. roadmap, эпик 7):
-// последние ~30 непустых строк, суммарно не более ~4 КБ.
+// Context limits for the "Ask the agent" button (see roadmap, epic 7):
+// the last ~30 non-empty lines, at most ~4 KB total.
 const ASK_AGENT_MAX_LINES = 30;
 const ASK_AGENT_MAX_CHARS = 4096;
 
-// Выделение xterm (с той же обрезкой до 4 КБ с сохранением хвоста, что и
-// в collectTerminalContext) — для действий меню «В чат», работающих только
-// на выделении.
+// The xterm selection (trimmed to 4 KB keeping the tail, same as in
+// collectTerminalContext) — for the "To chat" menu actions that work only
+// on a selection.
 function collectSelection(term: Terminal): string {
   return term.getSelection().trim().slice(-ASK_AGENT_MAX_CHARS);
 }
 
-// Выделение xterm, если есть; иначе — хвост буфера (последние непустые строки).
+// The xterm selection if any; otherwise the buffer tail (last non-empty lines).
 function collectTerminalContext(term: Terminal): string {
   const selection = term.getSelection().trim();
   if (selection) return selection.slice(-ASK_AGENT_MAX_CHARS);
@@ -40,7 +40,7 @@ function collectTerminalContext(term: Terminal): string {
   return lines.join('\n');
 }
 
-/** POSIX-экранирование одинарными кавычками для команды в терминале. */
+/** POSIX single-quote escaping for a command in the terminal. */
 function shq(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
@@ -54,7 +54,7 @@ interface WsMessage {
 
 interface HistoryPaletteProps {
   profileId: string;
-  /** Вставить команду в терминал (без Enter) и закрыть палитру. */
+  /** Insert a command into the terminal (no Enter) and close the palette. */
   onPick: (cmd: string) => void;
   onClose: () => void;
 }
@@ -90,12 +90,12 @@ function HistoryPalette({ profileId, onPick, onClose }: HistoryPaletteProps) {
     return commands.filter((c) => c.toLowerCase().includes(q));
   }, [commands, filter]);
 
-  // При смене фильтра выбор возвращается на первую строку.
+  // On a filter change the selection returns to the first row.
   useEffect(() => {
     setSelected(0);
   }, [filter]);
 
-  // Выбранная строка всегда в видимой области списка.
+  // The selected row is always within the visible area of the list.
   useEffect(() => {
     listRef.current
       ?.querySelector('.history-item.selected')
@@ -155,27 +155,28 @@ function HistoryPalette({ profileId, onPick, onClose }: HistoryPaletteProps) {
 interface TerminalViewProps {
   profile: Profile;
   tab: TerminalTab;
-  /** Внутренняя вкладка активна (переключение вкладок терминала). */
+  /** The inner tab is active (switching terminal tabs). */
   active: boolean;
-  /** Вкладка «Терминал» приложения видима (возврат с других вкладок). */
+  /** The app's "Terminal" tab is visible (returning from other tabs). */
   visible: boolean;
   showError: (msg: string) => void;
-  /** «Спросить агента»: передать контекст терминала AI-агенту. */
+  /** "Ask the agent": pass the terminal context to the AI agent. */
   onAskAgent?: (text: string, mode?: AgentAskMode) => void;
-  /** Флаг «вкладку закрыл пользователь» (✕): cleanup шлёт серверу close-фрейм,
-   * сессия умирает явно. На прочих unmount'ах (смена профиля, «Обновить
-   * сессию») фрейм не шлётся — сессию держит grace 60 с. */
+  /** The "tab closed by the user" flag (✕): the cleanup sends the server a
+   * close frame and the session dies explicitly. On other unmounts (profile
+   * change, "Restart session") the frame is not sent — the session is kept
+   * by the 60 s grace. */
   closeOnUnmountRef: { current: boolean };
-  /** Статус WS/shell — точка в заголовке вкладки. */
+  /** WS/shell status — the dot in the tab header. */
   onStatus: (key: string, status: TerminalStatus) => void;
-  /** Одноразовые `cd` для вкладок «Открыть в терминале» (по terminalTabKey). */
+  /** One-shot `cd`s for "Open in terminal" tabs (keyed by terminalTabKey). */
   pendingCwdRef: React.MutableRefObject<Map<string, string>>;
 }
 
-/** Идентификатор вкладки на клиенте — пара (tabId, container), как и ключ
- * серверной сессии: два браузера с независимыми счётчиками tabId могут
- * дать одинаковый номер host-вкладке и контейнерной — id одного номера
- * недостаточно (коллизия React-ключей). */
+/** Client-side tab identifier — the (tabId, container) pair, same as the
+ * server session key: two browsers with independent tabId counters can give
+ * the same number to a host tab and a container tab — a single number is
+ * not enough (a React key collision). */
 export function terminalTabKey(tab: TerminalTab): string {
   return `${tab.id}:${tab.container?.id ?? 'host'}`;
 }
@@ -192,7 +193,7 @@ function TerminalView({
   pendingCwdRef,
 }: TerminalViewProps) {
   const { t } = useT();
-  // t для WS-эффекта через ref: t в deps рвал бы WebSocket при смене языка.
+  // t for the WS effect goes through a ref: t in deps would tear down the WebSocket on a language change.
   const tRef = useRef(t);
   tRef.current = t;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -203,18 +204,18 @@ function TerminalView({
   const [status, setStatus] = useState<TerminalStatus>('connecting');
   const [sessionKey, setSessionKey] = useState(0);
   const [historyOpen, setHistoryOpen] = useState(false);
-  // Есть ли выделение в xterm — включает пункты меню «В чат».
+  // Whether there is a selection in xterm — enables the "To chat" menu items.
   const [hasSelection, setHasSelection] = useState(false);
   const [askMenuOpen, setAskMenuOpen] = useState(false);
   const askMenuRef = useRef<HTMLDivElement>(null);
   const containerId = tab.container?.id ?? '';
 
-  // Статус — вверх, в точку заголовка вкладки.
+  // Status goes up, into the tab header dot.
   useEffect(() => {
     onStatus(terminalTabKey(tab), status);
   }, [tab, status, onStatus]);
 
-  // В контейнерной сессии история системного shell не имеет смысла.
+  // In a container session the system shell history makes no sense.
   const openHistory = () => {
     if (containerId) return;
     setHistoryOpen(true);
@@ -228,14 +229,14 @@ function TerminalView({
   };
 
   const pickHistory = (cmd: string) => {
-    // Команда уходит как обычный ввод, без Enter — выполнение за пользователем.
+    // The command goes as ordinary input, without Enter — execution is up to the user.
     sendInputRef.current(cmd);
     closeHistory();
   };
 
-  // «Спросить агента»: берём выделение или хвост буфера и отдаём наверх (App).
-  // В контейнерном режиме кнопка остаётся доступной: вывод контейнера — тоже
-  // полезный контекст для агента (он работает с хостом, но объяснить его может).
+  // "Ask the agent": take the selection or the buffer tail and pass it up (App).
+  // In container mode the button stays available: container output is also
+  // useful context for the agent (it works on the host, but can explain it).
   const askAgent = () => {
     const term = termRef.current;
     if (!term || !onAskAgent) return;
@@ -248,9 +249,9 @@ function TerminalView({
     onAskAgent(text);
   };
 
-  // Действия меню «В чат» — строго на выделении (без фолбэка хвоста буфера):
-  // 'new-dialogue' — новый диалог с выделением первым сообщением,
-  // 'prefill' — вставка в поле ввода текущего диалога без отправки.
+  // "To chat" menu actions — strictly on a selection (no buffer-tail fallback):
+  // 'new-dialogue' — a new dialogue with the selection as the first message,
+  // 'prefill' — insert into the current dialogue's input without sending.
   const sendSelectionToChat = (mode: 'new-dialogue' | 'prefill') => {
     const term = termRef.current;
     if (!term || !onAskAgent) return;
@@ -264,7 +265,7 @@ function TerminalView({
     onAskAgent(text, mode);
   };
 
-  // Меню «В чат»: закрывается по клику вне его и по Escape.
+  // The "To chat" menu: closes on an outside click and on Escape.
   useEffect(() => {
     if (!askMenuOpen) return;
     const onMouseDown = (e: MouseEvent) => {
@@ -305,8 +306,8 @@ function TerminalView({
     term.open(containerRef.current);
     fit.fit();
 
-    // Ctrl+R — палитра истории вместо reverse-i-search в readline.
-    // false = событие не уходит в xterm, обычный ввод не ломается.
+    // Ctrl+R — the history palette instead of reverse-i-search in readline.
+    // false = the event does not reach xterm, ordinary input keeps working.
     term.attachCustomKeyEventHandler((ev) => {
       if (
         ev.type === 'keydown' &&
@@ -343,7 +344,7 @@ function TerminalView({
 
     term.onData((data) => send({ type: 'input', data }));
 
-    // Пункты меню «В чат» активны только при выделении — трекаем его live.
+    // The "To chat" menu items are active only with a selection — tracked live.
     term.onSelectionChange(() => setHasSelection(term.hasSelection()));
 
     ws.onopen = () => {
@@ -359,7 +360,7 @@ function TerminalView({
         if (msg.type === 'output' && msg.data) term.write(msg.data);
         if (msg.type === 'connected') {
           setStatus('connected');
-          // «Открыть в терминале»: однократно выполняем cd в директорию.
+          // "Open in terminal": run the cd into the directory once.
           const cwd = pendingCwdRef.current.get(terminalTabKey(tab));
           if (cwd) {
             pendingCwdRef.current.delete(terminalTabKey(tab));
@@ -396,17 +397,19 @@ function TerminalView({
       closed = true;
       wsRef.current = null;
       ro.disconnect();
-      // close-фрейм — только явное закрытие вкладки пользователем: смена
-      // профиля размонтирует страницу, и безусловная отправка убивала бы все
-      // терминалы вместо grace (вернулся в течение 60 с — тот же shell).
+      // The close frame — only for an explicit tab close by the user: a
+      // profile change unmounts the page, and an unconditional send would
+      // kill all terminals instead of grace (back within 60 s — the same
+      // shell).
       if (closeOnUnmountRef.current) {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'close' }));
           ws.close();
         } else if (ws.readyState === WebSocket.CONNECTING) {
-          // Сессия создаётся на сервере уже в момент апгрейда, а OPEN у
-          // клиента наступает позже: закрытие свежей вкладки должно донести
-          // close и по ещё не открывшемуся сокету, иначе слот держит grace.
+          // The session is created on the server at upgrade time, while the
+          // client's OPEN comes later: closing a fresh tab must deliver the
+          // close over a not-yet-open socket too, otherwise the slot sits in
+          // grace.
           ws.addEventListener('open', () => {
             ws.send(JSON.stringify({ type: 'close' }));
             ws.close();
@@ -424,14 +427,14 @@ function TerminalView({
     };
   }, [profile.id, sessionKey, showError, containerId, tab.id, tab, pendingCwdRef, closeOnUnmountRef]);
 
-  // При display:none xterm теряет размеры — пересчитываем, когда вкладка
-  // терминалов видима и внутренняя вкладка активна (оба случая скрытия).
+  // With display:none xterm loses its size — recompute when the terminal tab
+  // is visible and the inner tab is active (both hiding cases).
   useEffect(() => {
     if (!visible || !active) return;
     try {
       fitRef.current?.fit();
     } catch {
-      /* контейнер ещё скрыт */
+      /* the container is still hidden */
     }
     termRef.current?.focus();
   }, [visible, active]);
@@ -512,12 +515,12 @@ function TerminalView({
           onClick={() => {
             const ws = wsRef.current;
             if (ws && ws.readyState === WebSocket.OPEN) {
-              // Мягкий перезапуск: сервер закроет SSH и откроет новый shell,
-              // буфер терминала сохраняется.
+              // Soft restart: the server will close the SSH channel and open
+              // a new shell; the terminal buffer is kept.
               setStatus('connecting');
               ws.send(JSON.stringify({ type: 'restart' }));
             } else {
-              // WS мёртв (сессия завершена/ошибка) — полный ремаунт терминала.
+              // The WS is dead (session closed/error) — a full terminal remount.
               setSessionKey((k) => k + 1);
               setStatus('connecting');
             }
@@ -526,9 +529,9 @@ function TerminalView({
           {t('terminal.restartSession')}
         </button>
       </div>
-      {/* Палитра — внутри terminal-container: якорится к области терминала
-          (position: relative), а не к заголовкам вкладок/тулбара с фиксированным
-          смещением, которое плывёт при росте тулбара. */}
+      {/* The palette lives inside terminal-container: anchored to the
+          terminal area (position: relative), not to the tab strip/toolbar
+          with a fixed offset that drifts as the toolbar grows. */}
       <div className="terminal-container" ref={containerRef}>
         {historyOpen && !tab.container && (
           <HistoryPalette profileId={profile.id} onPick={pickHistory} onClose={closeHistory} />
@@ -538,13 +541,13 @@ function TerminalView({
   );
 }
 
-// ---------- Вкладки терминалов (эпик 15) ----------
+// ---------- Terminal tabs (epic 15) ----------
 
 interface TabsState {
   tabs: TerminalTab[];
-  /** Монотонный счётчик id — вкладка сохраняет id на всю жизнь. */
+  /** Monotonic id counter — a tab keeps its id for life. */
   nextId: number;
-  /** Ключ активной вкладки — terminalTabKey (пара id+container). */
+  /** The active tab key — terminalTabKey (the id+container pair). */
   activeId: string | null;
 }
 
@@ -552,12 +555,12 @@ interface Props {
   profile: Profile;
   showError: (msg: string) => void;
   visible: boolean;
-  /** Одноразовый запрос «терминал в контейнер» из Docker Explorer:
-   * TerminalPage добавляет/активирует вкладку контейнера и сбрасывает
-   * запрос через onOpenContainerConsumed (паттерн sqlInsert). */
+  /** One-shot "open a container terminal" request from Docker Explorer:
+   * TerminalPage adds/activates the container tab and resets the request via
+   * onOpenContainerConsumed (the sqlInsert pattern). */
   openContainerRequest: { containerId: string; name: string } | null;
   onOpenContainerConsumed: () => void;
-  /** Одноразовый запрос «Открыть в терминале cd <путь>» из файлового менеджера. */
+  /** One-shot "Open in terminal (cd <path>)" request from the file manager. */
   openInTerminalRequest: { cwd: string } | null;
   onOpenInTerminalConsumed: () => void;
   onAskAgent?: (text: string, mode?: AgentAskMode) => void;
@@ -567,10 +570,11 @@ const tabsStorageKey = (profileId: string) => `sc-terminal-tabs:${profileId}`;
 
 const DEFAULT_TABS: TabsState = { tabs: [{ id: 0 }], nextId: 1, activeId: '0:host' };
 
-/** Разбор сохранённых вкладок: мусорные элементы отбрасываются, дубли
- * числовых id — тоже: свои записи дубликатов не пишут (nextId монотонный),
- * а возможную после сверки с сервером пару «host N + контейнер N» при
- * следующем F5 сверка же и доукомплектует из живых сессий. */
+/** Parsing stored tabs: junk entries are discarded, duplicate numeric ids
+ * as well — our own writes never produce duplicates (nextId is monotonic),
+ * while a possible "host N + container N" pair left over from the server
+ * reconciliation is filled in by that same reconciliation on the next F5
+ * from live sessions. */
 function parseStoredTabs(raw: string | null): TabsState | null {
   if (!raw) return null;
   try {
@@ -620,7 +624,7 @@ function loadTabsState(profileId: string): TabsState {
   try {
     return parseStoredTabs(localStorage.getItem(tabsStorageKey(profileId))) ?? DEFAULT_TABS;
   } catch {
-    /* localStorage может быть недоступен */
+    /* localStorage may be unavailable */
     return DEFAULT_TABS;
   }
 }
@@ -639,19 +643,20 @@ export function TerminalPage({
   const [tabsState, setTabsState] = useState<TabsState>(() => loadTabsState(profile.id));
   const [statuses, setStatuses] = useState<Record<string, TerminalStatus>>({});
   const [limit, setLimit] = useState(TERMINAL_LIMIT_DEFAULT);
-  // Флаги «вкладку закрыл пользователь»: TerminalView читает ref в cleanup
-  // и решает, слать ли close-фрейм (unmount по другой причине — grace).
+  // The "tab closed by the user" flags: TerminalView reads the ref in its
+  // cleanup and decides whether to send the close frame (an unmount for
+  // another reason — grace).
   const closeFlags = useRef(new Map<string, { current: boolean }>());
-  // Одноразовый `cd` для новой host-вкладки («Открыть в терминале»):
-  // ключ — terminalTabKey; consumed в TerminalView после 'connected'.
+  // A one-shot `cd` for a new host tab ("Open in terminal"):
+  // the key is terminalTabKey; consumed in TerminalView after 'connected'.
   const pendingCwdRef = useRef(new Map<string, string>());
 
-  // Вкладки переживают F5: пишем при каждом изменении.
+  // Tabs survive F5: written on every change.
   useEffect(() => {
     try {
       localStorage.setItem(tabsStorageKey(profile.id), JSON.stringify(tabsState));
     } catch {
-      /* localStorage может быть недоступен */
+      /* localStorage may be unavailable */
     }
   }, [profile.id, tabsState]);
 
@@ -668,9 +673,9 @@ export function TerminalPage({
     setStatuses((prev) => (prev[key] === status ? prev : { ...prev, [key]: status }));
   }, []);
 
-  // Сверка с сервером при монтировании: живые сессии, которых нет среди
-  // вкладок (чистка localStorage, другой браузер), возвращаются вкладками;
-  // переполнение режет локальные вкладки без серверной сессии.
+  // Reconcile with the server on mount: live sessions missing from the tabs
+  // (localStorage cleanup, another browser) come back as tabs; overflow cuts
+  // local tabs that have no server session.
   useEffect(() => {
     let cancelled = false;
     fetchTerminalSessions(profile.id)
@@ -700,10 +705,10 @@ export function TerminalPage({
           while (tabs.length > serverLimit && tabs.some((t) => !isServerBacked(t))) {
             for (let i = tabs.length - 1; i >= 0; i--) {
               if (!isServerBacked(tabs[i])) {
-                // Срезаемой вкладке мог не хватить места в снимке (её WS
-                // открылся после запроса) — выставляем флаг закрытия, чтобы
-                // cleanup отправил close-фрейм и слот освободился сразу,
-                // а не по grace 60 с.
+                // The cut tab may have missed the snapshot (its WS opened
+                // after the request) — set the close flag so the cleanup
+                // sends the close frame and the slot frees right away,
+                // not after the 60 s grace.
                 const key = terminalTabKey(tabs[i]);
                 getCloseFlag(key).current = true;
                 trimmed.push(key);
@@ -728,16 +733,16 @@ export function TerminalPage({
         }
       })
       .catch(() => {
-        /* Сервер недоступен — остаёмся на вкладках из localStorage. */
+        /* The server is unreachable — staying on the localStorage tabs. */
       });
     return () => {
       cancelled = true;
     };
   }, [profile.id, getCloseFlag]);
 
-  // «Терминал в контейнер» из Docker Explorer: существующая вкладка
-  // активируется, новой контейнерной вкладке не страшен предел (сервер
-  // останется защитой — ошибка придёт в терминал).
+  // "Open a container terminal" from Docker Explorer: an existing tab is
+  // activated, a new container tab need not fear the limit (the server
+  // remains the guard — an error will arrive in the terminal).
   useEffect(() => {
     if (!openContainerRequest) return;
     const { containerId, name } = openContainerRequest;
@@ -754,9 +759,9 @@ export function TerminalPage({
     });
   }, [openContainerRequest, onOpenContainerConsumed]);
 
-  // «Открыть в терминале» из файлового менеджера: создаём/активируем новую
-  // host-вкладку (без контейнера) и запоминаем cd для однократной вставки
-  // после подключения (см. TerminalView на 'connected').
+  // "Open in terminal" from the file manager: create/activate a new host tab
+  // (no container) and remember the cd for a one-time insertion after
+  // connecting (see TerminalView on 'connected').
   useEffect(() => {
     if (!openInTerminalRequest) return;
     const { cwd } = openInTerminalRequest;
@@ -785,11 +790,12 @@ export function TerminalPage({
   };
 
   const closeTab = (key: string) => {
-    // Флаг выставляется ДО удаления из стейта: cleanup TerminalView при
-    // unmount увидит его и пошлёт close-фрейм — destroy, grace не занимается.
-    // Запись в closeFlags не удаляем: объект флага должен дожить до unmount
-    // View с той же идентичностью (проп в deps WS-эффекта) — ключи вкладок
-    // не повторяются (nextId монотонный), копеечный рост мапы допустим.
+    // The flag is set BEFORE removing from state: the TerminalView cleanup
+    // on unmount will see it and send the close frame — a destroy, no grace.
+    // The closeFlags entry is not removed: the flag object must outlive the
+    // unmount of the View with the same identity (a prop in the WS effect
+    // deps) — tab keys never repeat (nextId is monotonic), a negligible map
+    // growth is acceptable.
     getCloseFlag(key).current = true;
     setStatuses((prev) => {
       if (!(key in prev)) return prev;
