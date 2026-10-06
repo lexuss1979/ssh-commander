@@ -493,7 +493,7 @@ export class AgentSession {
         const tokenFilter = createSuggestionTokenFilter((t) => this.send({ type: 'token', content: t }));
         const result = await streamChatCompletion({
           messages: buildPlanRequestMessages(sanitizeMessages(this.messages), this.lang),
-          tools: toolsForRequest(true),
+          tools: toolsForRequest(true, this.lang),
           signal: this.loopAbort.signal,
           onToken: (token) => tokenFilter.push(token),
           lang: this.lang,
@@ -563,7 +563,7 @@ export class AgentSession {
           const tokenFilter = createSuggestionTokenFilter((t) => this.send({ type: 'token', content: t }));
           const result = await streamChatCompletion({
             messages: sanitizeMessages(this.messages),
-            tools: getToolDefs(),
+            tools: getToolDefs(this.lang),
             signal: this.loopAbort.signal,
             onToken: (token) => tokenFilter.push(token),
             lang: this.lang,

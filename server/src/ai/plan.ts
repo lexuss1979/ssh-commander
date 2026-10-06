@@ -8,8 +8,8 @@ import { planModeInstruction, type PromptLang } from './prompts.js';
  * отсутствует в теле запроса — защита на уровне API, а не только промпта.
  * В обычном режиме отдаётся набор с учётом гейтинга web_search.
  */
-export function toolsForRequest(planMode: boolean): ToolDef[] | undefined {
-  return planMode ? undefined : getToolDefs();
+export function toolsForRequest(planMode: boolean, lang: PromptLang = 'ru'): ToolDef[] | undefined {
+  return planMode ? undefined : getToolDefs(lang);
 }
 
 /**

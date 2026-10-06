@@ -17,7 +17,7 @@ describe('toolsForRequest', () => {
   });
 
   it('в обычном режиме возвращается полный набор инструментов', () => {
-    expect(toolsForRequest(false)).toEqual(getToolDefs(false));
+    expect(toolsForRequest(false)).toEqual(getToolDefs('ru', false));
     expect(toolsForRequest(false)?.length).toBeGreaterThan(0);
   });
 });

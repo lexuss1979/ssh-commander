@@ -11,7 +11,7 @@ process.env.DATA_DIR = dataDir;
 process.env.AI_SEARCH_API_BASE = 'https://search.example';
 
 const ws = await import('../src/ai/web-search.js');
-const { getToolDefs, toolDefs } = await import('../src/ai/tools.js');
+const { getToolDefs, buildToolDefs } = await import('../src/ai/tools.js');
 const settingsMod = await import('../src/services/settings.js');
 
 afterAll(() => {
@@ -185,18 +185,18 @@ describe('formatSearchOutput', () => {
 
 describe('getToolDefs — гейтинг web_search', () => {
   it('включён: web_search объявляется модели', () => {
-    const defs = getToolDefs(true);
+    const defs = getToolDefs('ru', true);
     expect(defs.map((d) => d.function.name)).toContain('web_search');
-    expect(defs).toHaveLength(toolDefs.length);
+    expect(defs).toHaveLength(buildToolDefs('ru').length);
   });
 
   it('выключен: web_search не объявляется, остальные инструменты на месте', () => {
-    const defs = getToolDefs(false);
+    const defs = getToolDefs('ru', false);
     const names = defs.map((d) => d.function.name);
     expect(names).not.toContain('web_search');
     expect(names).toContain('exec');
     expect(names).toContain('security_audit');
-    expect(defs).toHaveLength(toolDefs.length - 1);
+    expect(defs).toHaveLength(buildToolDefs('ru').length - 1);
   });
 });
 
