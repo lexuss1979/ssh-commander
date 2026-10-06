@@ -106,11 +106,11 @@ dockerRouter.get('/containers/:id/logs', async (req, res) => {
     return;
   }
 
-  // Follow-стримы считаются общим лимитером на профиль (не на подсистему):
-  // docker-логи, журнал systemd, tail файлов и терминал делят каналы одного
-  // SSH-соединения. Заголовки выставляем после проверки слота — иначе 429
-  // ушёл бы с Content-Type: text/plain (Express не перетирает уже
-  // установленный).
+  // Follow-streams share the per-profile limiter (not per subsystem): docker
+  // logs, the systemd journal, file tail and terminal all divide the channels
+  // of a single SSH connection. Headers are set after the slot check —
+  // otherwise the 429 would go out with Content-Type: text/plain (Express
+  // does not override an already-set header).
   if (!acquireFollowSlot(profile.id)) {
     res.status(429).json({
       error: 'Достигнут лимит одновременных журналов на сервер — закройте часть просмотрщиков и повторите',
@@ -129,9 +129,10 @@ dockerRouter.get('/containers/:id/logs', async (req, res) => {
   res.flushHeaders();
   let closed = false;
   const write = createChunkGate(res);
-  // Синхронный throw при сборке хэндла (между acquire и req.on('close'))
-  // оставил бы слот занятым до рестарта — headers уже отправлены, поэтому
-  // отказ уходит телом, а слот снимается catch'ем.
+  // A synchronous throw while assembling the handle (between acquire and
+  // req.on('close')) would keep the slot occupied until a restart — headers
+  // are already sent, so the failure goes out in the body and the slot is
+  // released by the catch.
   try {
     const handle = streamContainerLogs(profile, req.params.id, tail, (chunk) => {
       if (!closed) write(chunk);
@@ -139,7 +140,7 @@ dockerRouter.get('/containers/:id/logs', async (req, res) => {
     void handle.code
       .then(() => {
         if (!closed) {
-          // Стрим закончился в состоянии дропа — маркер о потере.
+          // The stream ended in the drop state — emit the loss marker.
           write.finish();
           res.end();
         }

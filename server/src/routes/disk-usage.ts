@@ -13,10 +13,10 @@ import {
 import type { Profile } from '../types.js';
 
 /**
- * «Что съело диск» (эпик 16): проваливание по каталогам через du + топ
- * крупнейших файлов. Всё read-only, ошибки: 404 — нет профиля, 400 —
- * пользовательские причины (путь, права, утилиты), 502 — только транспорт
- * (SSH недоступен) — разделение как в routes/metrics.ts.
+ * "What ate the disk" (epic 16): drilling into directories with du + the top
+ * largest files. All read-only; errors: 404 — no profile, 400 — user-facing
+ * causes (path, permissions, missing utilities), 502 — transport only
+ * (SSH unreachable) — the same split as routes/metrics.ts.
  */
 export const diskUsageRouter = Router();
 

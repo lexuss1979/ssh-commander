@@ -20,14 +20,15 @@ function parseError(err: unknown): string {
 }
 
 // ---------------------------------------------------------------------------
-// Запуск (до CRUD-маршрутов: POST /:id нет, но /run читается явнее)
+// Run (before the CRUD routes: there is no POST /:id, but /run reads clearer)
 // ---------------------------------------------------------------------------
 
 /**
- * Запуск сниппета или разовой команды на выбранных серверах. Команда идёт в
- * exec как есть (уровень терминала); все цели валидируются до первого exec —
- * запуск не начинается «наполовину». Ответ всегда 200: отказ отдельного
- * сервера — элемент results с ok:false, а не ошибка запроса.
+ * Run a snippet or a one-off command on the selected servers. The command
+ * goes into exec as is (terminal level); all targets are validated before
+ * the first exec — the run never starts "half-way". The response is always
+ * 200: a per-server failure is an entry in results with ok:false, not a
+ * request error.
  */
 snippetsRouter.post('/run', async (req, res) => {
   const parsed = snippetRunBodySchema.safeParse(req.body);
@@ -46,7 +47,8 @@ snippetsRouter.post('/run', async (req, res) => {
       return;
     }
   }
-  // XOR гарантируется схемой; проверка закрывает тип и страхует рефайн.
+  // The XOR is guaranteed by the schema; this check satisfies the type and
+  // backs up the refine.
   if (!resolvedCommand) {
     res.status(400).json({ error: 'Укажите сниппет или команду' });
     return;
@@ -78,7 +80,7 @@ snippetsRouter.post('/run', async (req, res) => {
 // CRUD
 // ---------------------------------------------------------------------------
 
-/** Все сниппеты (глобальный стор, цели — по id профилей). */
+/** All snippets (a global store; run targets are referenced by profile ids). */
 snippetsRouter.get('/', (_req, res) => {
   res.json({ snippets: listSnippets() });
 });
@@ -102,8 +104,8 @@ snippetsRouter.put('/:id', (req, res) => {
     res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Некорректная команда' });
     return;
   }
-  // Существование проверяем явно, а не регексом по тексту ошибки — HTTP-код
-  // не должен зависеть от формулировки сообщения.
+  // Existence is checked explicitly, not by regex over the error text — the
+  // HTTP code must not depend on the message wording.
   if (!getSnippet(req.params.id)) {
     res.status(404).json({ error: `Сниппет ${req.params.id} не найден` });
     return;

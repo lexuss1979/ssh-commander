@@ -275,8 +275,8 @@ filesRouter.get('/search', async (req, res) => {
   }
 });
 
-// Предел вывода разового tail (совпадает с дефолтом exec — нужен для
-// обнаружения обрезки и честной пометки в теле ответа).
+// Output limit of a one-shot tail (matches the exec default — needed to
+// detect truncation and mark it honestly in the response body).
 const TAIL_OUTPUT_LIMIT = 2 * 1024 * 1024;
 
 const tailQuerySchema = z.object({
@@ -286,8 +286,8 @@ const tailQuerySchema = z.object({
   follow: z.enum(['0', '1']).default('0'),
 });
 
-// Живой просмотр лога: follow=0 — разовый снимок tail -n, follow=1 — chunked
-// стрим tail -F (переключение вкладки в UI рвёт запрос → req close → close()).
+// Live log viewing: follow=0 — a one-shot tail -n snapshot, follow=1 — a
+// chunked tail -F stream (switching the UI tab aborts the request → req close → close()).
 filesRouter.get('/tail', async (req, res) => {
   try {
     const parsed = tailQuerySchema.safeParse(req.query);
@@ -298,8 +298,8 @@ filesRouter.get('/tail', async (req, res) => {
     const q = parsed.data;
     const profile = requireProfile(q.profileId);
     const path = assertSafePath(normalizePath(q.path));
-    // Предпроверка до flushHeaders: отказ (нет файла, директория, бинарник) —
-    // обычная JSON-ошибка, канал под tail не открывается.
+    // Precheck before flushHeaders: a rejection (missing file, directory,
+    // binary) is a regular JSON error — no channel is opened for the tail.
     await precheckTailable(profile, path);
 
     if (q.follow === '0') {
@@ -308,7 +308,7 @@ filesRouter.get('/tail', async (req, res) => {
         maxOutput: TAIL_OUTPUT_LIMIT,
       });
       if (result.code !== 0) {
-        // нет прав, путь пропал между stat и tail
+        // no permissions, or the path vanished between stat and tail
         res.status(400).json({ error: result.stderr.trim() || `tail завершился с кодом ${result.code}` });
         return;
       }
@@ -327,10 +327,10 @@ filesRouter.get('/tail', async (req, res) => {
       });
       return;
     }
-    // Слот снимается на любом пути завершения — req close и settle code
-    // (гарантия шага 0: промис резолвится и на ошибке до открытия канала).
-    // Идемпотентно через флаг: иначе 3 неудачных коннекта запрут стримы
-    // до рестарта процесса.
+    // The slot is released on every completion path — req close and settled
+    // code (the step-0 guarantee: the promise resolves even on a failure
+    // before the channel opens). Idempotent via a flag: otherwise 3 failed
+    // connections would lock the streams until a process restart.
     let slotReleased = false;
     const releaseSlot = () => {
       if (!slotReleased) {
@@ -341,20 +341,22 @@ filesRouter.get('/tail', async (req, res) => {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache');
     res.flushHeaders();
-    // Backpressure — общий гейт chunk-gate.ts: при переполнении сокета чанки
-    // дропаются с подсчётом и маркером (пауза SSH-канала потребовала бы
-    // вывода канала наружу через API execStream — отклонено планом).
+    // Backpressure — the shared chunk-gate.ts gate: when the socket
+    // overflows, chunks are dropped with a counter and marker (pausing the
+    // SSH channel would require exposing the channel through the execStream
+    // API — rejected by the plan).
     const write = createChunkGate(res);
-    // Синхронный throw при сборке хэндла (между acquire и req.on('close'))
-    // оставил бы слот занятым до рестарта — headers уже отправлены, поэтому
-    // отказ уходит телом, а слот снимается catch'ем.
+    // A synchronous throw while assembling the handle (between acquire and
+    // req.on('close')) would keep the slot occupied until a restart — headers
+    // are already sent, so the failure goes out in the body and the slot is
+    // released by the catch.
     try {
       const handle = execStream(profile, buildTailFollowCommand(path, q.lines), (chunk) => {
         write(chunk);
       });
       void handle.code.then(() => {
-        // Стрим закончился в состоянии дропа — маркер о потере, иначе
-        // пользователь не узнает о пропущенных байтах.
+        // The stream ended in the drop state — emit the loss marker, otherwise
+        // the user never learns about skipped bytes.
         write.finish();
         if (!res.writableEnded) res.end();
         releaseSlot();
@@ -380,7 +382,7 @@ filesRouter.get('/download-dir', async (req, res) => {
   try {
     const profile = requireProfile(profileId(req));
     const path = assertSafePath(normalizePath(String(req.query.path ?? '')));
-    // Проверка ДО начала отдачи тела: путь существует и это директория.
+    // Check BEFORE the body starts streaming: the path exists and is a directory.
     const stat = await withSftp(profile, (sftp) => sftpStat(sftp, path));
     if ((stat.mode & 0o170000) !== 0o040000) {
       res.status(400).json({ error: 'Это не директория' });
@@ -396,8 +398,9 @@ filesRouter.get('/download-dir', async (req, res) => {
     channel.stderr.on('data', (d: Buffer) => {
       if (stderr.length < 65536) stderr += d.toString();
     });
-    // end: false — ответ завершаем сами по 'close': если tar упал до первого
-    // байта stdout (например, tar не установлен), успеваем отдать JSON-ошибку.
+    // end: false — we finish the response ourselves on 'close': if tar failed
+    // before the first stdout byte (e.g. tar not installed), we still get to
+    // return a JSON error.
     channel.pipe(res, { end: false });
     channel.on('close', (code: number | null) => {
       if (code !== 0 && !res.headersSent) {
@@ -422,7 +425,7 @@ filesRouter.get('/download-dir', async (req, res) => {
   }
 });
 
-// Batch-скачивание нескольких файлов/папок из текущей директории одним tar.gz.
+// Batch-download several files/folders from the current directory as one tar.gz.
 filesRouter.post('/download-batch', async (req, res) => {
   try {
     const profile = requireProfile(profileId(req));
@@ -432,7 +435,7 @@ filesRouter.post('/download-batch', async (req, res) => {
       res.status(400).json({ error: 'names must be a non-empty array of strings' });
       return;
     }
-    // Валидация каждого имени: безопасный путь без сепараторов.
+    // Validate each name: a safe path without separators.
     for (const n of names) assertSafePath(n);
     const stat = await withSftp(profile, (sftp) => sftpStat(sftp, dirPath));
     if ((stat.mode & 0o170000) !== 0o040000) {
@@ -506,7 +509,7 @@ filesRouter.post(
     const code = await new Promise<number | null>((resolve) => {
       channel.on('close', (c: number | null) => resolve(c));
       channel.on('error', () => resolve(null));
-      // Readable.pipe даёт backpressure и закрывает stdin по окончании тела.
+      // Readable.pipe provides backpressure and closes stdin when the body ends.
       Readable.from(body).pipe(channel);
     });
     if (code !== 0) {

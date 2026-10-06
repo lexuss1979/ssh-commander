@@ -19,8 +19,8 @@ aiRouter.get('/dialogues', (req, res) => {
       return;
     }
     requireProfile(profileId);
-    // Enrichment на уровне роута (docs/ai-costs-plan.md): сторы друг о друге
-    // не знают. Диалог без записей usage — null.
+    // Enrichment at the route level (docs/ai-costs-plan.md): the stores know
+    // nothing about each other. A dialogue without usage records → null.
     const totals = usageTotalsByDialogue();
     const dialogues = listDialogues(profileId).map((d) => ({
       ...d,
@@ -65,12 +65,12 @@ aiRouter.delete('/dialogues/:id', (req, res) => {
   }
 });
 
-// Период отчёта: положительное число дней или 'all' (всё).
+// Report period: a positive number of days or 'all'.
 const daysSchema = z.union([z.literal('all'), z.coerce.number().int().min(1).max(3650)]);
 
 /**
- * Отчёт по расходам AI: дни desc × профили + итоги. Имена профилей — join
- * с profiles.ts; удалённый профиль — `<id> (удалён)`.
+ * AI spending report: days desc × profiles + totals. Profile names are a
+ * join with profiles.ts; a deleted profile shows as `<id> (удалён)`.
  */
 aiRouter.get('/usage', (req, res) => {
   const parsed = daysSchema.safeParse(req.query.days ?? '30');

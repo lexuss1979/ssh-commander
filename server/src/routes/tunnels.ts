@@ -65,7 +65,7 @@ tunnelsRouter.post('/', async (req, res) => {
   } catch (err) {
     const e = err as Error & { code?: string };
     const msg = e.message;
-    // 409 для конфликтов: занятый порт (EADDRINUSE), дубликат, лимит.
+    // 409 for conflicts: port in use (EADDRINUSE), duplicate, limit.
     if (e.code === 'EADDRINUSE' || msg.includes('уже существует') || msg.includes('лимит')) {
       res.status(409).json({ error: msg });
     } else if (msg.includes('Недопустимый') || msg.includes('вне диапазона')) {

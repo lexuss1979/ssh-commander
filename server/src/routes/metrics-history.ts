@@ -5,10 +5,10 @@ import { getAllHistory, getHistory } from '../services/metrics-history.js';
 export const metricsHistoryRouter = Router();
 
 /**
- * История нагрузки. С profileId — сэмплы одного профиля для вкладки «Обзор»
- * (≤360 точек); без — по всем профилям для сводного экрана «Серверы» (≤120
- * точек на профиль, достаточно для спарклайнов). Ошибок не бросает: пока
- * истории нет, отдаются пустые массивы.
+ * Load history. With profileId — samples of one profile for the Overview tab
+ * (≤360 points); without — across all profiles for the Servers summary
+ * screen (≤120 points per profile, enough for sparklines). Never throws:
+ * while there is no history, empty arrays are served.
  */
 metricsHistoryRouter.get('/', (req, res) => {
   const profileId = String(req.query.profileId ?? '');

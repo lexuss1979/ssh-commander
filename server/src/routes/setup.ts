@@ -10,15 +10,16 @@ import {
 } from '../services/settings.js';
 
 /**
- * Первичная настройка при первом запуске (план — docs/settings-model-plan.md):
- * пароль веб-интерфейса и (опционально) AI-конфиг задаются в UI один раз.
- * Эндпоинты монтируются без `requireAuth` — на этапе, когда пароль ещё не
- * задан, сессий нет. POST доступен только пока onboarding required (409
- * после успеха) — защита от перезаписи настроек без авторизации; rate-limit
- * общий с логином (10 попыток / 15 мин) закрывает перебор на этом этапе.
+ * First-run onboarding (plan — docs/settings-model-plan.md): the web
+ * password and (optionally) the AI config are set once in the UI. Endpoints
+ * are mounted without `requireAuth` — at the stage when the password does
+ * not exist yet, there are no sessions. POST is available only while
+ * onboarding is required (409 after success) — protects against rewriting
+ * settings without auth; the rate limit shared with login (10 attempts /
+ * 15 min) blocks brute force at this stage.
  *
- * Запись — мерж поверх существующих settings, а не перезапись: посеянные
- * seed'ом из env AI-поля не должны затираться формой без ключа.
+ * Writes are a merge over the existing settings, not a rewrite: AI fields
+ * seeded from env must not be wiped by a keyless form submit.
  */
 export const setupRouter = Router();
 
@@ -53,9 +54,9 @@ const setupBodySchema = z
       .refine((v) => !v || !/\s/.test(v), 'Модель не может содержать пробелы')
       .optional(),
   })
-  // Ключ задан → провайдер и модель обязательны (пресет без модели не
-  // работает); для custom обязателен и base URL — иначе ключ ушёл бы на
-  // дефолтную базу OpenAI с неочевидной ошибкой.
+  // Key present → provider and model are required (a preset without a model
+  // does not work); for custom the base URL is required too — otherwise the
+  // key would go to the default OpenAI base with an obscure error.
   .superRefine((v, ctx) => {
     if (!v.aiApiKey) return;
     if (!v.aiProvider) {
@@ -84,7 +85,7 @@ const setupBodySchema = z
     password: v.password,
     aiApiKey: v.aiApiKey || undefined,
     aiProvider: v.aiProvider,
-    // Срез хвостового '/' — как в config.ts (config.ai.apiBase).
+    // Trailing '/' stripped — same as config.ts (config.ai.apiBase).
     aiApiBase: v.aiApiBase
       ? v.aiApiBase.replace(/\/+$/, '')
       : v.aiProvider === 'opencode-go' ? OPENCODE_GO_API_BASE : undefined,
@@ -110,8 +111,9 @@ setupRouter.post('/', (req, res) => {
   }
   const { password, aiApiKey, aiProvider, aiApiBase, aiModel } = parsed.data;
   try {
-    // Мерж, а не перезапись: AI-поля пишутся только вместе с введённым
-    // ключом — иначе посеянные env'ом поля затирались бы пустой формой.
+    // Merge, not rewrite: AI fields are written only together with the
+    // entered key — otherwise env-seeded fields would be wiped by an empty
+    // form.
     const prev = getSettings() ?? {};
     saveSettings({
       ...prev,
@@ -119,13 +121,13 @@ setupRouter.post('/', (req, res) => {
       ...(aiApiKey ? { aiProvider, aiApiKey, aiApiBase, aiModel } : {}),
     });
   } catch (err) {
-    // Битый settings.json (corrupt-guard) — настройка невозможна до ручного
-    // исправления файла; 500 с текстом, а не молчаливая перезапись.
+    // Broken settings.json (corrupt-guard) — onboarding is impossible until
+    // the file is fixed manually; a 500 with text, not a silent overwrite.
     res.status(500).json({ error: (err as Error).message });
     return;
   }
-  // Авто-вход: пароль только что сохранён хешем — createSession проходит
-  // через verifyPassword (settings-ветка). Тот же путь cookie, что у login.
+  // Auto-login: the password was just saved hashed — createSession goes
+  // through verifyPassword (the settings branch). Same cookie path as login.
   const token = createSession(password);
   if (!token) {
     res.status(500).json({ error: 'Не удалось создать сессию' });

@@ -9,19 +9,19 @@ import {
 import { isSearchConfigured } from '../ai/web-search.js';
 
 /**
- * Страница «Настройки» (эпик 23, docs/settings-model-plan.md): смена пароля
- * веб-интерфейса и AI-конфига после первого запуска — без правки
- * data/settings.json и рестарта. Монтируется **с** `requireAuth` (страница за
- * авторизацией — rate-limit не нужен, перебор текущего пароля был бы атакой
- * на самого себя). Ключ API наружу не возвращается никогда — только факт
- * «задан» (`apiKeySet`).
+ * Settings page (epic 23, docs/settings-model-plan.md): changing the web
+ * password and AI config after the first run — without editing
+ * data/settings.json or restarting. Mounted **with** `requireAuth` (the page
+ * sits behind auth — no rate limit needed; brute-forcing the current
+ * password would be an attack on oneself). The API key is never returned —
+ * only the fact that it is set (`apiKeySet`).
  *
- * Сессии при смене пароля не инвалидируются (single-user, in-memory):
- * открытые сессии живут до истечения TTL, новые входы — по новому паролю.
+ * Sessions are not invalidated on password change (single-user, in-memory):
+ * open sessions live until TTL expiry, new logins use the new password.
  */
 export const settingsRouter = Router();
 
-/** Маскированный статус настроек: единая форма ответа GET и PUT. */
+/** Masked settings status: the single response shape shared by GET and PUT. */
 function settingsStatus() {
   const ai = getAiSettings();
   return {
@@ -30,7 +30,7 @@ function settingsStatus() {
       apiKeySet: Boolean(ai.apiKey),
       apiBase: ai.apiBase,
       model: ai.model,
-      // Честный статус поиска, включая env-оверрайд для не-DeepSeek.
+      // Honest search status, including the env override for non-DeepSeek.
       searchAvailable: isSearchConfigured(),
     },
   };
@@ -83,7 +83,7 @@ const putBodySchema = z
       });
       return;
     }
-    // Пароль — только парой: смена требует и текущего, и нового.
+    // Password changes come in pairs: both the current and the new one are required.
     if (hasPasswordChange && (v.currentPassword === undefined || v.newPassword === undefined)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -92,13 +92,13 @@ const putBodySchema = z
       });
     }
     if (!hasAiChange) return;
-    // Смена только модели сохраняет write-only ключ и остальные AI-настройки.
+    // Model-only change keeps the write-only key and the other AI settings.
     if (v.aiApiKey === undefined && v.aiProvider === undefined && v.aiApiBase === undefined && v.aiModel !== undefined) {
       if (!v.aiModel) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['aiModel'], message: 'Модель обязательна' });
       return;
     }
-    // Очистка ключа — явный null (или пустая строка после trim) и ничего
-    // больше: половинчатый «конфиг без ключа» не имеет смысла.
+    // Clearing the key is an explicit null (or an empty string after trim)
+    // and nothing else: a half-way "config without a key" makes no sense.
     if (v.aiApiKey === null || v.aiApiKey === '') {
       if (otherAiPresent) {
         ctx.addIssue({
@@ -109,8 +109,8 @@ const putBodySchema = z
       }
       return;
     }
-    // Смена провайдера, адреса или ключа — целиком, с явным вводом ключа.
-    // Сохранённый секрет не переносится автоматически на другой endpoint.
+    // Provider, base or key changes go as a whole, with the key entered
+    // explicitly. The stored secret is not carried over to another endpoint.
     if (v.aiApiKey === undefined) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -143,10 +143,10 @@ const putBodySchema = z
   .transform((v) => ({
     currentPassword: v.currentPassword,
     newPassword: v.newPassword,
-    // Пустая строка после trim эквивалентна null — это тоже очистка.
+    // An empty string after trim is equivalent to null — also a clear.
     aiApiKey: v.aiApiKey === undefined ? undefined : v.aiApiKey || null,
     aiProvider: v.aiProvider,
-    // Срез хвостового '/' — как в config.ts и setup.
+    // Trailing '/' stripped — same as config.ts and setup.
     aiApiBase: v.aiApiBase ? v.aiApiBase.replace(/\/+$/, '') : undefined,
     aiModel: v.aiModel,
   }));
@@ -176,17 +176,18 @@ settingsRouter.put('/', (req, res) => {
     if (modelOnly) {
       updateSettings({ aiModel });
     } else if (aiApiKey === null) {
-      // Очистка ключа — агент недоступен: провайдер и модель без ключа не
-      // имеют смысла, удаляются вместе (UI показывает дефолтный пресет).
+      // Clearing the key makes the agent unavailable: provider and model
+      // without a key are meaningless and removed together (the UI shows the
+      // default preset).
       updateSettings({ aiProvider: null, aiApiKey: null, aiApiBase: null, aiModel: null });
     } else if (aiApiKey !== undefined && aiProvider && aiApiBase && aiModel) {
-      // superRefine гарантирует все четыре поля при замене — guard тут только
-      // для типов.
+      // superRefine guarantees all four fields on replacement — this guard
+      // is only for types.
       updateSettings({ aiProvider, aiApiKey, aiApiBase, aiModel });
     }
   } catch (err) {
-    // Битый settings.json (corrupt-guard) — изменения невозможны до ручного
-    // исправления файла; 500 с текстом, а не молчаливая потеря.
+    // Broken settings.json (corrupt-guard) — changes are impossible until
+    // the file is fixed manually; a 500 with text, not a silent loss.
     res.status(500).json({ error: (err as Error).message });
     return;
   }

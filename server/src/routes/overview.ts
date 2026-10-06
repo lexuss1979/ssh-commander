@@ -3,7 +3,7 @@ import { collectOverview } from '../services/overview.js';
 
 export const overviewRouter = Router();
 
-// Сводный дашборд: агрегат метрик и docker-счётчиков по всем профилям.
+// Summary dashboard: aggregate of metrics and docker counters across all profiles.
 overviewRouter.get('/', async (_req, res) => {
   try {
     res.json(await collectOverview());

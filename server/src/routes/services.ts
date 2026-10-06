@@ -31,7 +31,7 @@ function profileFrom(req: { query: unknown }, res: import('express').Response): 
   }
 }
 
-/** Валидация имени unit'а из URL до всего остального (отказ → 400). */
+/** Validate the unit name from the URL before anything else (failure → 400). */
 function unitFrom(req: { params: Record<string, string> }, res: import('express').Response): string | null {
   const unit = String(req.params.unit ?? '');
   try {
@@ -44,12 +44,12 @@ function unitFrom(req: { params: Record<string, string> }, res: import('express'
 
 const actionSchema = z.object({
   action: z.enum(SERVICE_ACTIONS),
-  // Пароль не логируется, не сохраняется — только stdin для `sudo -S`
-  // в пределах одного запроса.
+  // The password is not logged, not persisted — only stdin for `sudo -S`,
+  // for the duration of a single request.
   sudoPassword: z.string().max(1024).optional(),
 });
 
-// Снимок служб
+// Services snapshot
 servicesRouter.get('/', async (req, res) => {
   const profile = profileFrom(req, res);
   if (!profile) return;
@@ -60,7 +60,7 @@ servicesRouter.get('/', async (req, res) => {
   }
 });
 
-// Деталь unit'а
+// Unit detail
 servicesRouter.get('/:unit', async (req, res) => {
   const profile = profileFrom(req, res);
   if (!profile) return;
@@ -77,7 +77,7 @@ servicesRouter.get('/:unit', async (req, res) => {
   }
 });
 
-// Действие: start|stop|restart|reload|enable|disable|reset-failed
+// Action: start|stop|restart|reload|enable|disable|reset-failed
 servicesRouter.post('/:unit/action', async (req, res) => {
   const profile = profileFrom(req, res);
   if (!profile) return;
@@ -95,8 +95,8 @@ servicesRouter.post('/:unit/action', async (req, res) => {
       parsed.data.action as ServiceAction,
       parsed.data.sudoPassword,
     );
-    // Мутация выполнилась — сброс кэша, чтобы немедленный refetch снимка
-    // не вернул устаревший кэш 2 с.
+    // The mutation has been applied — invalidate the cache so an immediate
+    // snapshot refetch does not get the stale 2 s cache.
     invalidateServicesCache(profile.id);
     res.json(result);
   } catch (err) {
@@ -108,7 +108,7 @@ servicesRouter.post('/:unit/action', async (req, res) => {
   }
 });
 
-// Журнал unit'а: разовый (text/plain) или follow-стрим (chunked)
+// Unit journal: one-shot (text/plain) or follow-stream (chunked)
 servicesRouter.get('/:unit/logs', async (req, res) => {
   const profile = profileFrom(req, res);
   if (!profile) return;
@@ -132,8 +132,9 @@ servicesRouter.get('/:unit/logs', async (req, res) => {
     return;
   }
 
-  // Follow-стримы — через общий лимитер на профиль (не на подсистему):
-  // журнал systemd, docker-логи и терминал делят каналы одного SSH.
+  // Follow-streams go through the shared per-profile limiter (not per
+  // subsystem): the systemd journal, docker logs and terminal share the
+  // channels of a single SSH connection.
   if (!acquireFollowSlot(profile.id)) {
     res.status(429).json({
       error: 'Достигнут лимит одновременных журналов на сервер — закройте часть просмотрщиков и повторите',
@@ -158,7 +159,7 @@ servicesRouter.get('/:unit/logs', async (req, res) => {
   void handle.code
     .then(() => {
       if (!closed) {
-        // Стрим закончился в состоянии дропа — маркер о потере.
+        // The stream ended in the drop state — emit the loss marker.
         write.finish();
         res.end();
       }

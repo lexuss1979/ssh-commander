@@ -15,13 +15,14 @@ import { probeSudo } from '../services/sudo.js';
 import type { Profile } from '../types.js';
 
 /**
- * Обновления пакетов (эпик 19).
+ * Package updates (epic 19).
  *
- * `GET /updates` — read-only снимок (кэш 60 с на сервере).
- * `POST /apply` — мутация: sudo-зонд до открытия канала (явный 400 при
- * неверном пароле/правах), далее стрим вывода через общий лимитер
- * follow-стримов (`stream-limits.ts`, 429) и backpressure-гейт; пароль —
- * только stdin канала, в argv/логах не появляется.
+ * `GET /updates` — read-only snapshot (cached 60 s per server).
+ * `POST /apply` — mutation: a sudo probe before the channel opens (explicit
+ * 400 on wrong password/permissions), then the output is streamed through
+ * the shared follow-stream limiter (`stream-limits.ts`, 429) and a
+ * backpressure gate; the password travels only as channel stdin and never
+ * appears in argv/logs.
  */
 
 export const packagesRouter = Router();
@@ -37,13 +38,13 @@ function profileFrom(req: { query: unknown }, res: import('express').Response): 
 }
 
 const applySchema = z.object({
-  // Пароль не логируется, не сохраняется — только stdin для `sudo -S`
-  // в пределах одного запроса.
+  // The password is not logged, not persisted — only stdin for `sudo -S`,
+  // for the duration of a single request.
   sudoPassword: z.string().max(1024).optional(),
 });
 
-// Read-only снимок: менеджер, список обновлений, признаки рестарта, возраст
-// индекса apt. `pm: null` — менеджера нет, штатная заглушка (не ошибка).
+// Read-only snapshot: package manager, update list, reboot indicators, apt
+// index age. `pm: null` — no package manager, a normal empty state (not an error).
 packagesRouter.get('/updates', async (req, res) => {
   const profile = profileFrom(req, res);
   if (!profile) return;
@@ -54,7 +55,7 @@ packagesRouter.get('/updates', async (req, res) => {
   }
 });
 
-// Применение обновлений: подтверждено в UI, вывод — стримом в просмотрщик.
+// Applying updates: confirmed in the UI, the output streams into a viewer.
 packagesRouter.post('/apply', async (req, res) => {
   const profile = profileFrom(req, res);
   if (!profile) return;
@@ -65,8 +66,8 @@ packagesRouter.post('/apply', async (req, res) => {
   }
   const sudoPassword = parsed.data.sudoPassword;
 
-  // Свежий детект менеджера — не из кэша снимка; применение без менеджера
-  // невозможно (400, не 502 — пользовательская причина).
+  // Fresh manager detection — not from the snapshot cache; applying without
+  // a manager is impossible (400, not 502 — a user-facing cause).
   let pm: PackageManager | null = null;
   try {
     pm = await detectPackageManager(profile);
@@ -75,7 +76,7 @@ packagesRouter.post('/apply', async (req, res) => {
       return;
     }
     if (sudoPassword !== undefined) {
-      // Зонд до стрима: явный 400 вместо потока sudo-ошибок в теле.
+      // Probe before the stream: an explicit 400 instead of a stream of sudo errors in the body.
       const probe = await probeSudo(profile, sudoPassword);
       if (probe === 'wrong-password') {
         res.status(400).json({ error: 'Неверный sudo-пароль' });
@@ -101,9 +102,9 @@ packagesRouter.post('/apply', async (req, res) => {
     return;
   }
 
-  // Применение — долгоживущий канал, как follow-стрим: слот общего лимитера
-  // на профиль (stream-limits.ts). Слот снимается идемпотентно на любом пути
-  // завершения — req close и settle handle.code.
+  // Applying is a long-lived channel, like a follow-stream: one slot of the
+  // shared per-profile limiter (stream-limits.ts). The slot is released
+  // idempotently on every completion path — req close and settled handle.code.
   if (!acquireFollowSlot(profile.id)) {
     res.status(429).json({
       error: 'Достигнут лимит одновременных потоков на сервер — закройте часть просмотрщиков и повторите',
@@ -120,8 +121,8 @@ packagesRouter.post('/apply', async (req, res) => {
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache');
   res.flushHeaders();
-  // Backpressure — общий гейт chunk-gate.ts (дроп середины с маркером при
-  // переполнении сокета), как у tail/journalctl.
+  // Backpressure — the shared chunk-gate.ts gate (mid-stream drop with a
+  // marker when the socket overflows), same as tail/journalctl.
   const write = createChunkGate(res);
   let closed = false;
   let handle: ReturnType<typeof execStream>;
@@ -146,7 +147,7 @@ packagesRouter.post('/apply', async (req, res) => {
         res.end();
       }
       release();
-      // Список после применения устарел — сброс кэша снимка.
+      // The update list is stale after applying — invalidate the snapshot cache.
       invalidatePackagesCache(profile.id);
     })
     .catch(() => {

@@ -11,8 +11,8 @@ const historyQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(MAX_HISTORY_LIMIT).default(DEFAULT_HISTORY_LIMIT),
 });
 
-// История shell-команд сервера (~/.bash_history, фолбэк ~/.zsh_history).
-// Пустая история — не ошибка: { commands: [] }.
+// Server shell command history (~/.bash_history, fallback ~/.zsh_history).
+// Empty history is not an error: { commands: [] }.
 terminalRouter.get('/history', async (req, res) => {
   const parsed = historyQuerySchema.safeParse(req.query);
   if (!parsed.success) {
@@ -31,7 +31,7 @@ terminalRouter.get('/history', async (req, res) => {
     const commands = await fetchHistory(profile, q.limit);
     res.json({ commands });
   } catch (err) {
-    // SSH/команда не сработали — сервер недоступен; фронт показывает плашку в палитре.
+    // SSH/command failed — the server is unreachable; the frontend shows a notice in the palette.
     res.status(502).json({ error: `Сервер недоступен: ${(err as Error).message}` });
   }
 });
@@ -40,9 +40,9 @@ const sessionsQuerySchema = z.object({
   profileId: z.string().min(1, 'Укажите профиль'),
 });
 
-// Живые терминальные сессии профиля (эпик 15): фронт после F5/чистки
-// localStorage восстанавливает по ним вкладки (tabId + контейнер) вместо того,
-// чтобы плодить новые. limit — для дизейбла «+» в UI (серверный лимит).
+// Live terminal sessions of a profile (epic 15): after F5/localStorage
+// cleanup the frontend restores tabs from them (tabId + container) instead
+// of spawning new ones. limit — to disable "+" in the UI (the server limit).
 terminalRouter.get('/sessions', (req, res) => {
   const parsed = sessionsQuerySchema.safeParse(req.query);
   if (!parsed.success) {

@@ -11,8 +11,8 @@ const alertsQuerySchema = z.object({
   load: z.coerce.number().min(0.5).max(16).default(DEFAULT_ALERT_THRESHOLDS.loadPerCore),
 });
 
-// Состояния правил алертов всех профилей. Поверх кэша collectOverview (4 с) —
-// новых SSH-вызовов не добавляет; вычисление правил см. services/alerts.ts.
+// Alert rule states for all profiles. Computed on top of the collectOverview
+// cache (4 s) — adds no new SSH calls; rule evaluation lives in services/alerts.ts.
 alertsRouter.get('/', async (req, res) => {
   const parsed = alertsQuerySchema.safeParse(req.query);
   if (!parsed.success) {

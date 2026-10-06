@@ -39,8 +39,9 @@ function profileFromQuery(req: { query: Record<string, unknown> }): Profile {
 }
 
 /**
- * Подключение → цель выполнения. Host-цель в модели есть, но реализация —
- * v2.x: нужен CLI-клиент на хосте, сейчас честно отказываем.
+ * Connection → exec target. The model does have a host target, but the
+ * implementation is v2.x: it needs a CLI client on the host itself, so for
+ * now we honestly refuse.
  */
 function toExecTarget(
   conn: Pick<DbConnection, 'engine' | 'target' | 'username' | 'password' | 'flavor' | 'defaultDatabase'>,
@@ -73,8 +74,8 @@ function connectionFromQuery(
   return { profile, connection, target: toExecTarget(connection) };
 }
 
-/** 404 — профиль/подключение не найдены, 400 — ошибка клиента БД и
- * неподдерживаемая цель, 504 — таймаут канала, 502 — прочие SSH/docker сбои. */
+/** 404 — profile/connection not found, 400 — DB client error and
+ * unsupported target, 504 — channel timeout, 502 — other SSH/docker failures. */
 function errorStatus(err: unknown): number {
   if (err instanceof DbQueryError) return 400;
   const message = (err as Error).message ?? '';
@@ -85,10 +86,10 @@ function errorStatus(err: unknown): number {
 }
 
 // ---------------------------------------------------------------------------
-// Подключения (CRUD + проверка)
+// Connections (CRUD + test)
 // ---------------------------------------------------------------------------
 
-/** Список подключений профиля (без паролей). */
+/** List of a profile's connections (no passwords). */
 dbRouter.get('/connections', (req, res) => {
   let profileId: string;
   try {
@@ -100,7 +101,7 @@ dbRouter.get('/connections', (req, res) => {
   res.json({ connections: listDbConnections(profileId).map(toSafeDbConnection) });
 });
 
-/** Создание подключения (креденшалы задаются явно, как в SQL-клиенте). */
+/** Create a connection (credentials are entered explicitly, as in an SQL client). */
 dbRouter.post('/connections', (req, res) => {
   const parsed = dbConnectionInputSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -115,7 +116,7 @@ dbRouter.post('/connections', (req, res) => {
   }
 });
 
-/** Изменение подключения; непереданный пароль сохраняется из хранилища. */
+/** Update a connection; an omitted password is kept from the store. */
 dbRouter.put('/connections/:id', (req, res) => {
   const parsed = dbConnectionInputSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -139,11 +140,11 @@ dbRouter.delete('/connections/:id', (req, res) => {
 });
 
 /**
- * Проверка креденшалов без сохранения (разовый SELECT 1, паттерн
- * `profiles/test-connection`). Опциональный `id` — существующее подключение:
- * при пустом пароле в форме берётся сохранённый (правка без перепечатки).
- * Ошибка клиента БД возвращается текстом как есть — «Access denied» виден
- * до сохранения.
+ * Test credentials without saving (a one-off SELECT 1, the
+ * `profiles/test-connection` pattern). Optional `id` — an existing
+ * connection: when the password field in the form is empty, the saved one
+ * is used (edit without retyping). A DB client error is returned verbatim —
+ * "Access denied" is visible before saving.
  */
 dbRouter.post('/connections/test', async (req, res) => {
   let input: DbConnectionInput;
@@ -159,8 +160,8 @@ dbRouter.post('/connections/test', async (req, res) => {
   }
   try {
     const profile = requireProfile(input.profileId);
-    // При правке существующего подключения пустой пароль в форме означает
-    // «не менялся» — проверяем сохранённый (id передаёт форма редактирования).
+    // When editing an existing connection, an empty password field means
+    // "unchanged" — test against the saved one (the edit form passes the id).
     const savedId = typeof req.body?.id === 'string' ? req.body.id : null;
     const password = input.password ?? (savedId ? requireDbConnection(savedId).password : '');
     await testDbConnection(profile, toExecTarget({ ...input, password }));
@@ -175,10 +176,10 @@ dbRouter.post('/connections/test', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Discovery — подсказки для формы подключения
+// Discovery — hints for the connection form
 // ---------------------------------------------------------------------------
 
-/** Контейнеры СУБД на профиле: автозаполнение формы подключения. */
+/** DB containers on a profile: autofill for the connection form. */
 dbRouter.get('/discovery', async (req, res) => {
   let profile: Profile;
   try {
@@ -195,10 +196,10 @@ dbRouter.get('/discovery', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Работа с БД через сохранённое подключение
+// Working with a DB through a saved connection
 // ---------------------------------------------------------------------------
 
-/** Обзор подключения: версия и базы с размерами/числом таблиц. */
+/** Connection overview: server version and databases with sizes/table counts. */
 dbRouter.get('/overview', async (req, res) => {
   try {
     const { profile, target } = connectionFromQuery(req);
@@ -208,7 +209,7 @@ dbRouter.get('/overview', async (req, res) => {
   }
 });
 
-/** Список имён баз подключения. */
+/** List of the connection's database names. */
 dbRouter.get('/databases', async (req, res) => {
   try {
     const { profile, target } = connectionFromQuery(req);
@@ -218,7 +219,7 @@ dbRouter.get('/databases', async (req, res) => {
   }
 });
 
-/** Список таблиц выбранной базы. */
+/** List of tables in the selected database. */
 dbRouter.get('/tables', async (req, res) => {
   const check = dbNameSchema.safeParse(String(req.query.database ?? ''));
   if (!check.success) {
@@ -233,7 +234,7 @@ dbRouter.get('/tables', async (req, res) => {
   }
 });
 
-/** Колонки таблиц базы (схема для промпта «Спросить агента»). */
+/** Table columns of a database (schema for the "Ask the agent" prompt). */
 dbRouter.get('/columns', async (req, res) => {
   const check = dbNameSchema.safeParse(String(req.query.database ?? ''));
   if (!check.success) {
@@ -243,16 +244,16 @@ dbRouter.get('/columns', async (req, res) => {
   try {
     const { profile, target } = connectionFromQuery(req);
     const columns = await fetchDbColumns(profile, target, check.data);
-    // Достигли лимита — схема в промпте обрезана, фронт показывает пометку.
+    // Limit reached — the schema in the prompt is truncated, the frontend shows a notice.
     res.json({ columns, truncated: columns.length >= DB_COLUMNS_LIMIT });
   } catch (err) {
     res.status(errorStatus(err)).json({ error: (err as Error).message });
   }
 });
 
-/** Детали таблицы: поля (имя, тип, nullable, default, ключ) + индексы (имя,
- * колонки, unique, primary). Требует schema + table (для PG — схема таблицы,
- * для MySQL — совпадает с именем базы). */
+/** Table detail: columns (name, type, nullable, default, key) + indexes (name,
+ * columns, unique, primary). Requires schema + table (for PG — the table
+ * schema, for MySQL — the same as the database name). */
 dbRouter.get('/table-detail', async (req, res) => {
   const db = dbNameSchema.safeParse(String(req.query.database ?? ''));
   const schema = dbTableComponentSchema.safeParse(String(req.query.schema ?? ''));
@@ -280,8 +281,8 @@ dbRouter.get('/table-detail', async (req, res) => {
 const querySchema = dbConnectionInputSchema.pick({ profileId: true }).extend({
   connectionId: z.string({ required_error: 'Укажите подключение' }).min(1, 'Укажите подключение'),
   database: dbNameSchema,
-  // Лимит в байтах, не символах: zod .max() считает UTF-16-кодпоинты и
-  // пропустил бы multibyte-запрос длиннее 64 КБ.
+  // Limit in bytes, not characters: zod .max() counts UTF-16 code points and
+  // would let a multibyte query longer than 64 KB through.
   sql: z
     .string()
     .min(1, 'Пустой запрос')
@@ -290,9 +291,9 @@ const querySchema = dbConnectionInputSchema.pick({ profileId: true }).extend({
 });
 
 /**
- * Выполнение SQL. Ошибка клиента БД (ненулевой exit code) — не 5xx: тело
- * `{error: {message, stderr, exitCode}}` со статусом 400, UI показывает
- * stderr mono-блоком.
+ * Run SQL. A DB client error (non-zero exit code) is not a 5xx: the body is
+ * `{error: {message, stderr, exitCode}}` with status 400, and the UI shows
+ * stderr as a mono block.
  */
 dbRouter.post('/query', async (req, res) => {
   const parsed = querySchema.safeParse(req.body);
@@ -318,7 +319,7 @@ dbRouter.post('/query', async (req, res) => {
   }
 });
 
-/** Дамп базы: стрим .sql.gz (в память не собирается). */
+/** Database dump: stream .sql.gz (never assembled in memory). */
 dbRouter.get('/dump', async (req, res) => {
   const check = dbNameSchema.safeParse(String(req.query.database ?? ''));
   if (!check.success) {
@@ -340,14 +341,15 @@ dbRouter.get('/dump', async (req, res) => {
     let head: Buffer[] = [];
     let streaming = false;
 
-    // Голову stdout буферизуем, не пайпим сразу: без pipefail exit code —
-    // всегда код gzip (0), и упавший pg_dump выглядел бы успешным. Ошибка
-    // ловится на 'close' по признаку «stdout < порога + непустой stderr»
-    // (pg_dump/mysqldump сами пишут ошибки в stderr и не пишут stdout) —
-    // а буфер гарантирует, что заголовки ответа ещё не отправлены. Реальный
-    // дамп превышает порог первым же куском (сотни байт SQL-заголовков) и
-    // дальше стримится как обычно. Известное ограничение: сбой ПОСЛЕ
-    // отправки головы (середина дампа) отдаёт обрезанный архив.
+    // Buffer the stdout head instead of piping right away: without pipefail
+    // the exit code is always gzip's (0), so a failed pg_dump would look
+    // successful. The failure is caught on 'close' by the signature
+    // "stdout < threshold + non-empty stderr" (pg_dump/mysqldump write errors
+    // to stderr themselves and produce no stdout) — and the buffer guarantees
+    // the response headers have not been sent yet. A real dump exceeds the
+    // threshold with its first chunk (hundreds of bytes of SQL headers) and
+    // then streams as usual. Known limitation: a failure AFTER the head is
+    // sent (mid-dump) yields a truncated archive.
     const startStreaming = () => {
       streaming = true;
       res.setHeader('Content-Type', 'application/gzip');
@@ -368,14 +370,14 @@ dbRouter.get('/dump', async (req, res) => {
       head.push(d);
       if (received >= EMPTY_GZIP_MAX_BYTES) {
         startStreaming();
-        // end: false — ответ завершаем сами по 'close'.
+        // end: false — we finish the response ourselves on 'close'.
         channel.pipe(res, { end: false });
       }
     });
     channel.on('close', (code: number | null) => {
       if (!streaming) {
-        // gzip пустого входа — валидный ~20-байтный пустой архив: порог +
-        // stderr отделяют его от настоящего дампа.
+        // gzip of empty input is a valid ~20-byte empty archive: threshold +
+        // stderr distinguish it from a real dump.
         const emptyDump = received < EMPTY_GZIP_MAX_BYTES && stderr.trim() !== '';
         if (code !== 0 || emptyDump) {
           res
@@ -383,7 +385,7 @@ dbRouter.get('/dump', async (req, res) => {
             .json({ error: stderr.trim() || `dump exited with code ${code ?? 'unknown'}` });
           return;
         }
-        // Крошечный валидный вывод без stderr — отдаём как есть.
+        // Tiny valid output with no stderr — serve as is.
         startStreaming();
       }
       res.end();

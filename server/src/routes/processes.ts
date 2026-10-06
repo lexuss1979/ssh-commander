@@ -14,10 +14,10 @@ import {
 import type { Profile } from '../types.js';
 
 /**
- * Действия над процессами (эпик 17): `POST /api/processes/:pid/signal` и
- * `POST /api/processes/:pid/renice`. Порядок проверок — паттерн
- * routes/services.ts: profileId → 404, pid из URL → 400, zod-body → 400,
- * действие → статус ProcessActionError (400/502), прочее → 502.
+ * Process actions (epic 17): `POST /api/processes/:pid/signal` and
+ * `POST /api/processes/:pid/renice`. The check order follows the
+ * routes/services.ts pattern: profileId → 404, pid from URL → 400, zod body
+ * → 400, action → ProcessActionError status (400/502), everything else → 502.
  */
 export const processesRouter = Router();
 
@@ -31,7 +31,7 @@ function profileFrom(req: { query: unknown }, res: import('express').Response): 
   }
 }
 
-/** Валидация pid из URL до всего остального (отказ → 400). */
+/** Validate the pid from the URL before anything else (failure → 400). */
 function pidFrom(req: { params: Record<string, string> }, res: import('express').Response): number | null {
   const pid = parsePid(String(req.params.pid ?? ''));
   if (pid === null) {
@@ -41,11 +41,11 @@ function pidFrom(req: { params: Record<string, string> }, res: import('express')
   return pid;
 }
 
-// Экспорт схем — под unit-тесты (валидация сигнала и nice).
+// Schemas exported for unit tests (signal and nice validation).
 export const signalSchema = z.object({
   signal: z.enum(PROCESS_SIGNALS),
-  // Пароль не логируется, не сохраняется — только stdin для `sudo -S`
-  // в пределах одного запроса.
+  // The password is not logged, not persisted — only stdin for `sudo -S`,
+  // for the duration of a single request.
   sudoPassword: z.string().max(1024).optional(),
 });
 
@@ -54,7 +54,7 @@ export const reniceSchema = z.object({
   sudoPassword: z.string().max(1024).optional(),
 });
 
-// Сигнал процессу: TERM | KILL | HUP
+// Signal a process: TERM | KILL | HUP
 processesRouter.post('/:pid/signal', async (req, res) => {
   const profile = profileFrom(req, res);
   if (!profile) return;
@@ -72,8 +72,9 @@ processesRouter.post('/:pid/signal', async (req, res) => {
       parsed.data.signal,
       parsed.data.sudoPassword,
     );
-    // Мутация выполнилась — сброс кэша метрик, чтобы немедленный refetch
-    // «Обзора» не вернул снимок с убитым процессом (кэш 2 с).
+    // The mutation has been applied — invalidate the metrics cache so an
+    // immediate overview refetch does not get a snapshot with the killed
+    // process (2 s cache).
     invalidateMetricsCache(profile.id);
     res.json(result);
   } catch (err) {
@@ -85,7 +86,7 @@ processesRouter.post('/:pid/signal', async (req, res) => {
   }
 });
 
-// Понижение приоритета процесса: nice −20..19
+// Lower the process priority: nice −20..19
 processesRouter.post('/:pid/renice', async (req, res) => {
   const profile = profileFrom(req, res);
   if (!profile) return;

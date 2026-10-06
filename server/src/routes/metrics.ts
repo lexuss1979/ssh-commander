@@ -16,7 +16,7 @@ metricsRouter.get('/', async (req, res) => {
   try {
     res.json(await collectMetrics(profile));
   } catch (err) {
-    // SSH/команда не сработали — сервер недоступен; фронт показывает заглушку.
+    // SSH/command failed — the server is unreachable; the frontend shows a stub.
     res.status(502).json({ error: `Сервер недоступен: ${(err as Error).message}` });
   }
 });

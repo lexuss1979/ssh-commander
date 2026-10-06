@@ -77,7 +77,7 @@ cronRouter.get('/', async (req, res) => {
   }
 });
 
-// Список пользователей для селектора (пусто, если чтение чужих crontab невозможно).
+// User list for the selector (empty when other users' crontabs cannot be read).
 cronRouter.get('/users', async (req, res) => {
   const profile = profileFrom(req, res);
   if (!profile) return;

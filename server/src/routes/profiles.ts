@@ -19,10 +19,11 @@ import { closeProfileConnection, testConnection } from '../ssh/manager.js';
 export const profilesRouter = Router();
 
 /**
- * Список профилей **без секретов** (`toSafeProfile`): пароль SSH и passphrase
- * наружу не отдаются — раньше они уезжали в браузер на каждой загрузке списка
- * и подставлялись в форму. Клиенту хватает `hasPassword`/`hasKeyPassphrase`:
- * пустое поле формы означает «не менять», сервер сохраняет прежнее значение.
+ * Profile list **without secrets** (`toSafeProfile`): the SSH password and
+ * key passphrase are never sent out — they used to travel to the browser on
+ * every list load and be pre-filled into the form. `hasPassword`/
+ * `hasKeyPassphrase` is enough for the client: an empty form field means
+ * "unchanged", and the server keeps the previous value.
  */
 profilesRouter.get('/', (_req, res) => {
   res.json(listProfiles().map(toSafeProfile));
@@ -36,9 +37,9 @@ profilesRouter.get('/', (_req, res) => {
  */
 profilesRouter.post('/test-connection', async (req, res) => {
   try {
-    // Секрет в форму больше не подставляется (toSafeProfile), поэтому при
-    // проверке сохранённого профиля он берётся из стора по savedId — тот же
-    // приём, что у подключений БД (routes/db.ts).
+    // The secret is no longer pre-filled into the form (toSafeProfile), so
+    // when testing a saved profile it is taken from the store by savedId —
+    // the same trick as for DB connections (routes/db.ts).
     const body = { ...(req.body as Record<string, unknown>) };
     const savedId = typeof body.savedId === 'string' ? body.savedId : '';
     const saved = savedId ? getProfile(savedId) : undefined;
@@ -49,8 +50,9 @@ profilesRouter.post('/test-connection', async (req, res) => {
     }
     const data = parseProfileInput(body);
     const result = await testConnection({ ...data, id: 'probe' });
-    // Отпечаток ключа хоста: пользователю есть что сверить с `ssh-keyscan`,
-    // а при первом подключении — увидеть, что именно запомнено (TOFU).
+    // Host key fingerprint: the user has something to verify against
+    // `ssh-keyscan`, and on the first connection can see exactly what gets
+    // remembered (TOFU).
     res.json({ ok: true, ...result });
   } catch (err) {
     const message =
@@ -72,16 +74,18 @@ profilesRouter.post('/:id/reconnect', (req, res) => {
 });
 
 /**
- * Экспорт всех профилей в файл бэкапа (POST, чтобы пароль шифрования не
- * попадал в URL/логи). Секреты включаются только при includeSecrets=true;
- * с passphrase бэкап шифруется (scrypt + AES-256-GCM). Ключи из KEYS_DIR,
- * на которые ссылаются профили, вкладываются вместе с секретами.
+ * Export all profiles to a backup file (POST so the encryption passphrase
+ * never lands in URLs/logs). Secrets are included only with
+ * includeSecrets=true; with a passphrase the backup is encrypted
+ * (scrypt + AES-256-GCM). Keys from KEYS_DIR referenced by profiles are
+ * embedded together with the secrets.
  */
 profilesRouter.post('/export', (req, res) => {
   try {
-    // Секреты — только по явному запросу и только в шифрованном файле:
-    // дефолт «включить» + необязательный пароль давал открытый файл с паролями
-    // SSH и содержимым приватных ключей на пустом теле запроса.
+    // Secrets only on an explicit request and only in an encrypted file:
+    // the "include by default" + optional passphrase combo used to produce a
+    // plaintext file with SSH passwords and private key contents on an empty
+    // request body.
     const includeSecrets = req.body?.includeSecrets === true;
     const passphrase = typeof req.body?.passphrase === 'string' && req.body.passphrase
       ? req.body.passphrase
@@ -101,9 +105,9 @@ profilesRouter.post('/export', (req, res) => {
 });
 
 /**
- * Импорт бэкапа: { backup: <текст файла>, passphrase? }. Профили и ключи
- * валидируются до первой записи; конфликты имён разрешаются суффиксом
- * « (2)», существующие ключи не затираются. Ответ — ImportSummary.
+ * Import a backup: { backup: <file text>, passphrase? }. Profiles and keys
+ * are validated before the first write; name conflicts are resolved with the
+ * " (2)" suffix, existing keys are not overwritten. Response — ImportSummary.
  */
 profilesRouter.post('/import', (req, res) => {
   try {
@@ -122,12 +126,13 @@ profilesRouter.post('/import', (req, res) => {
 });
 
 /**
- * Bootstrap свежего сервера (root + пароль → ключ): генерирует отдельный
- * ed25519-ключ, прописывает его на сервере, опционально закрывает парольный
- * вход SSH и создаёт профиль с authType=key. Запрос живёт десятки секунд
- * (3 SSH-подключения + exec'и) — таймаутов меньше ~120 с в цепочке нет.
- * Пароль не логируется и не persist'ится (живёт только в памяти запроса).
- * Ошибки возвращают {error, steps} с отчётом по шагам.
+ * Bootstrap a fresh server (root + password → key): generates a dedicated
+ * ed25519 key, installs it on the server, optionally closes SSH password
+ * login and creates a profile with authType=key. The request lives for tens
+ * of seconds (3 SSH connections + execs) — no timeouts shorter than ~120 s
+ * anywhere in the chain. The password is not logged and not persisted
+ * (lives only in request memory). Errors return {error, steps} with a
+ * per-step report.
  */
 const bootstrapInputSchema = z.object({
   name: z.string().min(1, 'Name is required'),
@@ -171,10 +176,10 @@ profilesRouter.put('/:id', (req, res) => {
 });
 
 /**
- * Замена списка закреплённых путей логов (эпик 14). Отдельный маршрут, а не
- * PUT /:id: полный апдейт вызывает closeProfileConnection и оборвал бы тот
- * самый tail-стрим, из которого пользователь жмёт «Закрепить». Подключение
- * не трогает — меняется только поле в profiles.json.
+ * Replace the pinned log paths list (epic 14). A dedicated route instead of
+ * PUT /:id: a full update calls closeProfileConnection and would tear down
+ * the very tail stream the user pins from. The connection is untouched —
+ * only the field in profiles.json changes.
  */
 const logPathsSchema = z.object({ paths: z.array(z.string()).max(50) });
 
