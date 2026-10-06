@@ -13,6 +13,13 @@ const dataDirB = mkdtempSync(path.join(tmpdir(), 'sc-setup-b-'));
 const dataDirC = mkdtempSync(path.join(tmpdir(), 'sc-setup-go-'));
 process.env.DATA_DIR = dataDirA;
 
+// Generous timeout for this file: every stack boot does vi.resetModules +
+// dynamic re-imports and each setup POST runs scrypt — under the CPU
+// contention of a full parallel run this can exceed the 5 s default (seen
+// on WSL). A timed-out test does not cancel the in-flight POST, and its late
+// completion pollutes the next phase — the cascade took the whole file down.
+const itS = (name: string, fn: () => Promise<void> | void) => it(name, { timeout: 30_000 }, fn);
+
 type SettingsModule = typeof import('../src/services/settings.js');
 
 interface Stack {
@@ -69,7 +76,7 @@ function onDisk(dir: string): Record<string, unknown> {
 }
 
 describe('setup with OpenCode Go', () => {
-  it('saves the preset, sets the official URL and performs the auto-login', async () => {
+  itS('saves the preset, sets the official URL and performs the auto-login', async () => {
     const stack = await freshStack(dataDirC);
     try {
       const res = await post(stack.base, {
@@ -114,26 +121,26 @@ describe('phase A: setup without a key — the seeded AI fields are kept', () =>
     await new Promise<void>((resolve) => stack.server.close(() => resolve()));
   });
 
-  it('GET /status: the AI fields are seeded, no password → required: true', async () => {
+  itS('GET /status: the AI fields are seeded, no password → required: true', async () => {
     const res = await fetch(`${base}/status`);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ required: true });
   });
 
   describe('validation', () => {
-    it('a short password → 400', async () => {
+    itS('a short password → 400', async () => {
       const res = await post(base, { password: 'short' }, '10.0.0.2');
       expect(res.status).toBe(400);
       expect(((await res.json()) as { error: string }).error).toContain('8 символов');
     });
 
-    it('a newline in the password → 400', async () => {
+    itS('a newline in the password → 400', async () => {
       const res = await post(base, { password: '12345678\n' }, '10.0.0.3');
       expect(res.status).toBe(400);
       expect(((await res.json()) as { error: string }).error).toContain('перевод строки');
     });
 
-    it('a bad base URL (not http/https) → 400', async () => {
+    itS('a bad base URL (not http/https) → 400', async () => {
       const res = await post(
         base,
         { password: 'password123', aiApiKey: 'sk', aiApiBase: 'ftp://example.com' },
@@ -143,13 +150,13 @@ describe('phase A: setup without a key — the seeded AI fields are kept', () =>
       expect(((await res.json()) as { error: string }).error).toContain('http');
     });
 
-    it('an API key with a space → 400', async () => {
+    itS('an API key with a space → 400', async () => {
       const res = await post(base, { password: 'password123', aiApiKey: 'sk with space' }, '10.0.0.5');
       expect(res.status).toBe(400);
       expect(((await res.json()) as { error: string }).error).toContain('пробелы');
     });
 
-    it('a key without aiProvider → 400', async () => {
+    itS('a key without aiProvider → 400', async () => {
       const res = await post(
         base,
         { password: 'password123', aiApiKey: 'sk-test', aiModel: 'test-model' },
@@ -159,7 +166,7 @@ describe('phase A: setup without a key — the seeded AI fields are kept', () =>
       expect(((await res.json()) as { error: string }).error).toContain('Провайдер');
     });
 
-    it('a key without aiModel → 400 (a preset without a model does not work)', async () => {
+    itS('a key without aiModel → 400 (a preset without a model does not work)', async () => {
       const res = await post(
         base,
         { password: 'password123', aiApiKey: 'sk-test', aiProvider: 'deepseek' },
@@ -169,7 +176,7 @@ describe('phase A: setup without a key — the seeded AI fields are kept', () =>
       expect(((await res.json()) as { error: string }).error).toContain('Модель');
     });
 
-    it('an unknown aiProvider → 400', async () => {
+    itS('an unknown aiProvider → 400', async () => {
       const res = await post(
         base,
         { password: 'password123', aiApiKey: 'sk-test', aiProvider: 'anthropic', aiModel: 'm' },
@@ -179,7 +186,7 @@ describe('phase A: setup without a key — the seeded AI fields are kept', () =>
       expect(((await res.json()) as { error: string }).error).toContain('Провайдер');
     });
 
-    it('a model with a space → 400', async () => {
+    itS('a model with a space → 400', async () => {
       const res = await post(
         base,
         { password: 'password123', aiApiKey: 'sk-test', aiProvider: 'deepseek', aiModel: 'deep seek' },
@@ -189,7 +196,7 @@ describe('phase A: setup without a key — the seeded AI fields are kept', () =>
       expect(((await res.json()) as { error: string }).error).toContain('пробелы');
     });
 
-    it('custom without a base URL → 400 (otherwise the key would go to the default OpenAI base)', async () => {
+    itS('custom without a base URL → 400 (otherwise the key would go to the default OpenAI base)', async () => {
       const res = await post(
         base,
         { password: 'password123', aiApiKey: 'sk-test', aiProvider: 'custom', aiModel: 'm' },
@@ -201,7 +208,7 @@ describe('phase A: setup without a key — the seeded AI fields are kept', () =>
   });
 
   describe('rate-limit', () => {
-    it('the 11th failed attempt from one IP → 429', async () => {
+    itS('the 11th failed attempt from one IP → 429', async () => {
       const ip = '10.0.0.6';
       for (let i = 0; i < 10; i++) {
         const res = await post(base, { password: 'x' }, ip);
@@ -213,7 +220,7 @@ describe('phase A: setup without a key — the seeded AI fields are kept', () =>
   });
 
   describe('success and auto-login', () => {
-    it('a body without AI fields → the hash written, the seeded AI fields kept (a merge, not an overwrite)', async () => {
+    itS('a body without AI fields → the hash written, the seeded AI fields kept (a merge, not an overwrite)', async () => {
       const res = await post(base, { password: 'password123' }, '10.0.0.7');
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ ok: true });
@@ -227,18 +234,18 @@ describe('phase A: setup without a key — the seeded AI fields are kept', () =>
       expect(disk.aiModel).toBe('deepseek-chat');
     });
 
-    it('a repeated POST after success → 409 (protection against an unauthorized overwrite)', async () => {
+    itS('a repeated POST after success → 409 (protection against an unauthorized overwrite)', async () => {
       const res = await post(base, { password: 'another-pass-123' }, '10.0.0.8');
       expect(res.status).toBe(409);
     });
 
-    it('GET status after the setup → required: false', async () => {
+    itS('GET status after the setup → required: false', async () => {
       const res = await fetch(`${base}/status`);
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ required: false });
     });
 
-    it('logging in with the new password works (verifyPassword via the settings hash)', async () => {
+    itS('logging in with the new password works (verifyPassword via the settings hash)', async () => {
       const ok = await fetch(`${authBase}/login`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -255,7 +262,7 @@ describe('phase A: setup without a key — the seeded AI fields are kept', () =>
       expect(bad.status).toBe(401);
     });
 
-    it('no tmp file is left after a successful write', () => {
+    itS('no tmp file is left after a successful write', () => {
       expect(readdirSync(dataDirA).some((f) => f.startsWith('settings.json.tmp'))).toBe(false);
     });
   });
@@ -281,7 +288,7 @@ describe('phase B: setup with a key — all four AI fields from the body overwri
     await new Promise<void>((resolve) => stack.server.close(() => resolve()));
   });
 
-  it('a key + provider + base + model → the body values on disk, the trailing / trimmed', async () => {
+  itS('a key + provider + base + model → the body values on disk, the trailing / trimmed', async () => {
     const res = await post(
       base,
       {
