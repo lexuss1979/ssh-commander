@@ -4,7 +4,7 @@ import { dockerExec, parseDockerJsonOutput, type DockerEntity } from './docker.j
 export interface ContainerPortBinding {
   containerPort: number;
   proto: 'tcp' | 'udp';
-  /** null — порт не опубликован наружу (только сеть контейнера). */
+  /** null — the port is not published outward (container network only). */
   hostIp: string | null;
   hostPort: number | null;
 }
@@ -14,15 +14,15 @@ export interface ContainerPortEntry {
   name: string;
   /** HostConfig.NetworkMode: bridge, host, none, custom network name. */
   networkMode: string;
-  /** IP-адрес контейнера в основной сети (null для host-network). */
+  /** The container's IP in its main network (null for host-network). */
   ip: string | null;
   ports: ContainerPortBinding[];
 }
 
 /**
- * Извлекает runtime-биндинги портов из `NetworkSettings.Ports` inspect'а.
- * Формат: `{ "80/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8080"}], "5432/tcp": null }`.
- * null-значение — порт exposed, но не опубликован.
+ * Extracts runtime port bindings from the inspect's `NetworkSettings.Ports`.
+ * Format: `{ "80/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8080"}], "5432/tcp": null }`.
+ * A null value — the port is exposed but not published.
  */
 export function parseInspectPorts(entity: DockerEntity): ContainerPortBinding[] {
   const portsObj = (entity.NetworkSettings as DockerEntity | undefined)?.Ports as
@@ -52,7 +52,7 @@ export function parseInspectPorts(entity: DockerEntity): ContainerPortBinding[] 
   return bindings;
 }
 
-/** IP-адрес контейнера из основной сети (первая запись в Networks). */
+/** The container's IP from its main network (the first Networks entry). */
 function extractIp(entity: DockerEntity): string | null {
   const networks = (entity.NetworkSettings as DockerEntity | undefined)?.Networks as
     Record<string, DockerEntity> | undefined;
@@ -65,8 +65,8 @@ function extractIp(entity: DockerEntity): string | null {
 }
 
 /**
- * Маппинг inspect-объекта в `ContainerPortEntry`. Чистая функция — удобна
- * для тестирования без моков SSH.
+ * Maps an inspect object into a `ContainerPortEntry`. Pure function —
+ * convenient for testing without SSH mocks.
  */
 export function toContainerPortEntry(entity: DockerEntity): ContainerPortEntry {
   const networkMode = ((entity.HostConfig as DockerEntity | undefined)?.NetworkMode as string) || 'bridge';
@@ -83,10 +83,11 @@ const CACHE_TTL_MS = 2000;
 const cache = new Map<string, { at: number; promise: Promise<ContainerPortEntry[]> }>();
 
 /**
- * Список портов запущенных контейнеров. Два exec'а: `docker ps` (id-шки
- * running-контейнеров) + батч-`docker inspect` по всем id разом. Кэш 2 с
- * на профиль (параллельные вызовы делят один exec). Docker недоступен →
- * промис.reject'ится, вызывающий код решает, деградировать или нет.
+ * The list of ports of running containers. Two execs: `docker ps` (ids of
+ * running containers) + a batch `docker inspect` over all ids at once.
+ * Cache 2 s per profile (parallel calls share one exec). Docker
+ * unavailable → the promise rejects; the caller decides whether to
+ * degrade.
  */
 export function collectContainerPorts(profile: Profile): Promise<ContainerPortEntry[]> {
   const now = Date.now();

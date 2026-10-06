@@ -26,17 +26,17 @@ export interface SearchOptions {
 }
 
 /**
- * pattern — glob для -iname (например `*.log`), передаётся строго
- * отдельным экранированным аргументом.
+ * pattern — a glob for -iname (e.g. `*.log`), passed strictly as a
+ * separate escaped argument.
  */
 export function buildNameSearchCommand(path: string, pattern: string): string {
   return `find ${shq(path)} -maxdepth ${SEARCH_MAX_DEPTH} -iname ${shq(pattern)}`;
 }
 
 /**
- * -F: шаблон трактуется как фиксированная строка, а не regex — предсказуемо
- * и безопаснее (спецсимволы не ломают поиск); -e защищает шаблон,
- * начинающийся с '-'; `--` отделяет путь от флагов.
+ * -F: the pattern is treated as a fixed string, not a regex — predictable
+ * and safer (special characters do not break the search); -e guards a
+ * pattern starting with '-'; `--` separates the path from the flags.
  */
 export function buildContentSearchCommand(path: string, pattern: string, glob?: string): string {
   const include = glob?.trim() ? ` --include=${shq(glob.trim())}` : '';
@@ -55,9 +55,9 @@ export function parseNameSearchOutput(stdout: string, limit: number): FileSearch
 }
 
 /**
- * Формат grep -n: `path:lineno:text`. Путь с ':' внутри разбирается
- * нежадным совпадением (берётся последний вариант `path:число:`), крайний
- * случай «имя файла заканчивается на :число» остаётся неоднозначным.
+ * The grep -n format: `path:lineno:text`. A path containing ':' is parsed
+ * by the non-greedy match (the last `path:number:` variant wins); the edge
+ * case of «a file name ending in :number» stays ambiguous.
  */
 export function parseContentSearchOutput(stdout: string, limit: number): FileSearchResult[] {
   const results: FileSearchResult[] = [];
@@ -90,7 +90,7 @@ export async function searchFiles(profile: Profile, opts: SearchOptions): Promis
         timeoutMs: SEARCH_TIMEOUT_MS,
       });
       const results = parseNameSearchOutput(result.stdout, limit);
-      // find возвращает 1 при частичных ошибках доступа — отдаём то, что нашлось
+      // find returns 1 on partial access errors — return what was found
       if (result.code !== 0 && results.length === 0) {
         throw new Error(result.stderr.trim() || `find exited with code ${result.code}`);
       }
@@ -99,7 +99,7 @@ export async function searchFiles(profile: Profile, opts: SearchOptions): Promis
     const result = await exec(profile, buildContentSearchCommand(opts.path, opts.pattern, opts.glob), {
       timeoutMs: SEARCH_TIMEOUT_MS,
     });
-    // grep: 0 — есть совпадения, 1 — не найдено (не ошибка), >=2 — ошибка
+    // grep: 0 — matches found, 1 — not found (not an error), >=2 — error
     if (result.code !== null && result.code >= 2) {
       throw new Error(result.stderr.trim() || `grep exited with code ${result.code}`);
     }

@@ -4,9 +4,9 @@ import type { PromptLang } from '../ai/prompts.js';
 import type { Profile } from '../types.js';
 
 /**
- * Язык сессии агента из query-параметра WS-подключения (`lang`): язык агента
- * = язык интерфейса. Известное значение берётся как есть; `ru`/мусор/
- * отсутствие — дефолт `ru` (не валимся).
+ * Agent session language from the WS connection's query parameter (`lang`):
+ * agent language = interface language. A known value is taken as is; `ru`,
+ * garbage or absence — the default `ru` (no failure).
  */
 export function parseAgentLang(param: string | null): PromptLang {
   return param === 'en' ? 'en' : 'ru';

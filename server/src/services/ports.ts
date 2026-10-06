@@ -3,31 +3,31 @@ import type { Profile } from '../types.js';
 
 export interface PortListener {
   proto: 'tcp' | 'udp';
-  /** Адрес прослушивания без порта: 0.0.0.0, 127.0.0.1, ::, конкретный IP. */
+  /** Listen address without the port: 0.0.0.0, 127.0.0.1, ::, a specific IP. */
   host: string;
   port: number;
   pid: number | null;
-  /** Имя процесса (для ss — список через запятую, если слушателей несколько). */
+  /** Process name (for ss — a comma-separated list when there are several listeners). */
   process: string | null;
-  /** public — 0.0.0.0/::/* (торчит наружу), loopback — 127.x/::1, interface — конкретный IP. */
+  /** public — 0.0.0.0/::/* (exposed outward), loopback — 127.x/::1, interface — a specific IP. */
   scope: 'public' | 'loopback' | 'interface';
-  /** Аннотация: слушатель принадлежит docker-контейнеру (опубликованный порт). */
+  /** Annotation: the listener belongs to a docker container (published port). */
   container?: { id: string; name: string };
 }
 
 export interface PortsSnapshot {
-  /** Момент снимка (мс, серверное время ssh-commander). */
+  /** Snapshot time (ms, ssh-commander server clock). */
   timestamp: number;
   ports: PortListener[];
 }
 
-// ss (iproute2) есть почти везде; netstat — фолбэк для старых/minimal систем.
-// -p без root показывает только процессы текущего пользователя — это ожидаемо,
-// недостающие процессы просто остаются пустыми.
+// ss (iproute2) is present almost everywhere; netstat is the fallback for
+// old/minimal systems. Without root, -p shows only the current user's
+// processes — this is expected, the missing processes simply stay empty.
 const COLLECT_CMD = 'ss -tulpn 2>/dev/null || netstat -tulpn 2>/dev/null';
 
 function normalizeHost(host: string): string {
-  // ss пишет IPv6 в скобках ([::]:80) — убираем их; %iface (127.0.0.53%lo) оставляем.
+  // ss writes IPv6 in brackets ([::]:80) — strip them; %iface (127.0.0.53%lo) is kept.
   return host.replace(/^\[(.*)\]$/, '$1');
 }
 
@@ -46,7 +46,7 @@ function splitHostPort(addr: string): { host: string; port: number } | null {
   return { host: normalizeHost(addr.slice(0, idx)), port };
 }
 
-/** Процессы из колонки ss `users:(("sshd",pid=1234,fd=3),(...))`. */
+/** Processes from the ss column `users:(("sshd",pid=1234,fd=3),(...))`. */
 function parseSsUsers(tail: string): { pid: number | null; process: string | null } {
   const pairs = [...tail.matchAll(/"([^"]+)",pid=(\d+)/g)];
   if (pairs.length === 0) return { pid: null, process: null };
@@ -54,7 +54,7 @@ function parseSsUsers(tail: string): { pid: number | null; process: string | nul
   return { pid: Number(pairs[0][2]), process: names.join(', ') };
 }
 
-/** Хвост netstat `1234/sshd` (или `-`, если нет прав/данных). */
+/** The netstat tail `1234/sshd` (or `-` when there are no permissions/data). */
 function parseNetstatProc(field: string | undefined): { pid: number | null; process: string | null } {
   const m = field?.match(/^(\d+)\/(.+)$/);
   if (!m) return { pid: null, process: null };
@@ -62,9 +62,10 @@ function parseNetstatProc(field: string | undefined): { pid: number | null; proc
 }
 
 /**
- * Разбор вывода `ss -tulpn` или `netstat -tulpn` (формат определяется по
- * строке: у ss второе поле — состояние, у netstat — число). Заголовки и
- * строки без порта (напр. local `*:*`) пропускаются.
+ * Parses the output of `ss -tulpn` or `netstat -tulpn` (the format is
+ * detected per line: for ss the second field is the state, for netstat a
+ * number). Headers and lines without a port (e.g. local `*:*`) are
+ * skipped.
  */
 export function parseListeners(raw: string): PortListener[] {
   const out: PortListener[] = [];
@@ -102,9 +103,9 @@ const CACHE_TTL_MS = 2000;
 const cache = new Map<string, { at: number; promise: Promise<PortsSnapshot> }>();
 
 /**
- * Список прослушиваемых портов сервера. Кэш 2 c на профиль (параллельные
- * вызовы делят один exec) — как у метрик, чтобы polling с вкладки не плодил
- * SSH-команды. Ошибочный промис из кэша удаляется.
+ * The list of server listening ports. Cache 2 s per profile (parallel
+ * calls share one exec) — like metrics, so that tab polling does not spawn
+ * SSH commands. A rejected promise is removed from the cache.
  */
 export function collectPorts(profile: Profile): Promise<PortsSnapshot> {
   const now = Date.now();

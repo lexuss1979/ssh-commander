@@ -1,32 +1,36 @@
 import type { ServerResponse } from 'node:http';
 
 /**
- * Гейт backpressure для follow-стримов (эпик 13, по плану эпика 14).
+ * Backpressure chunk gate for follow-streams (epic 13, per the epic 14
+ * plan).
  *
- * План эпика 14 рассмотрел паузу SSH-канала по `res.write() === false` с
- * возобновлением по `drain` и **отклонил**: это требует вывода канала наружу
- * через API `execStream`. Принятый механизм — гейт на стороне роута: при
- * `res.writableLength > 1 МБ` чанки дропаются с подсчётом, при возврате в
- * норму в тело пишется маркер «пропущено N байт». Для просмотрщика с
- * кольцевым буфером потеря середины — честная цена (без гейта болтливый
- * unit/контейнер раздувает память Node безгранично).
+ * The epic 14 plan considered pausing the SSH channel on
+ * `res.write() === false` with resumption on `drain` and **rejected** it:
+ * that would require exposing the channel through the `execStream` API.
+ * The accepted mechanism is a gate on the route side: when
+ * `res.writableLength > 1 MB`, chunks are dropped with a running count,
+ * and once back to normal a «пропущено N байт» marker is written to the
+ * body. For a viewer with a ring buffer, losing the middle is an honest
+ * price (without the gate a chatty unit/container inflates Node memory
+ * without bound).
  */
 const GATE_LIMIT_BYTES = 1024 * 1024;
 
 export interface ChunkWriter {
   (chunk: string): void;
   /**
-   * Маркер для байтов, дропнутых до самого конца стрима (новые чанки их уже
-   * не вернут). Роут зовёт на settle `handle.code`, иначе пользователь не
-   * узнает о потере.
+   * Marker for bytes dropped all the way to the end of the stream (new
+   * chunks will not bring them back). The route calls it on settle of
+   * `handle.code`, otherwise the user never learns about the loss.
    */
   finish(): void;
 }
 
 /**
- * Возвращает функцию записи чанка в response с дропом при переполнении
- * сокета и маркером «пропущено N байт» при возврате в норму. Метод
- * `finish()` закрывает маркером стрим, завершившийся в состоянии дропа.
+ * Returns a chunk-writing function for the response that drops on socket
+ * overflow and writes a «пропущено N байт» marker once back to normal.
+ * The `finish()` method closes with the marker a stream that ended in the
+ * dropped state.
  */
 export function createChunkGate(res: ServerResponse): ChunkWriter {
   let dropped = 0;

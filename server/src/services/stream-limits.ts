@@ -1,23 +1,24 @@
 /**
- * Общий лимитер follow-стримов на профиль (эпик 13, по плану эпика 14).
+ * Shared follow-stream limiter per profile (epic 13, per the epic 14 plan).
  *
- * SSH-соединение на профиль одно (`ssh/manager.ts`), на нём висят постоянный
- * SFTP-канал (getSftp кешируется), shell терминала, docker-логи, транзитные
- * exec'ы метрик — при `MaxSessions 10` у OpenSSH каналы кончаются быстро.
- * Поэтому лимит считает активные follow-стримы **на профиль**, а не на
- * подсистему: `/api/services/:unit/logs?follow=1` и `/api/docker/.../logs`
- * делят один счётчик.
+ * There is a single SSH connection per profile (`ssh/manager.ts`); it
+ * carries the persistent SFTP channel (getSftp is cached), the terminal
+ * shell, docker logs, and transit metric execs — with `MaxSessions 10`
+ * OpenSSH runs out of channels quickly. That is why the limit counts
+ * active follow-streams **per profile**, not per subsystem:
+ * `/api/services/:unit/logs?follow=1` and `/api/docker/.../logs` share one
+ * counter.
  *
- * Модуль намеренно отдельный (не внутри `file-tail.ts`): иначе роуты
- * импортировали бы счётчик из чужой подсистемы.
+ * The module is deliberately separate (not inside `file-tail.ts`):
+ * otherwise routes would import a counter from someone else's subsystem.
  */
 
-/** Лимит одновременных follow-стримов на профиль. */
+/** Limit of concurrent follow-streams per profile. */
 export const FOLLOW_STREAM_LIMIT = 3;
 
 const active = new Map<string, number>();
 
-/** Захват слота follow-стрима профиля. false — лимит исчерпан (429). */
+/** Acquire a profile follow-stream slot. false — the limit is exhausted (429). */
 export function acquireFollowSlot(profileId: string): boolean {
   const n = active.get(profileId) ?? 0;
   if (n >= FOLLOW_STREAM_LIMIT) return false;
@@ -25,7 +26,7 @@ export function acquireFollowSlot(profileId: string): boolean {
   return true;
 }
 
-/** Освобождение слота; идемпотентно — повторный вызов не ломает счётчик. */
+/** Release the slot; idempotent — a repeated call does not break the counter. */
 export function releaseFollowSlot(profileId: string): void {
   const n = active.get(profileId) ?? 0;
   if (n <= 1) {
@@ -35,7 +36,7 @@ export function releaseFollowSlot(profileId: string): void {
   }
 }
 
-/** Текущее число активных follow-стримов профиля (для тестов/отладки). */
+/** Current number of active follow-streams of the profile (for tests/debugging). */
 export function followStreamCount(profileId: string): number {
   return active.get(profileId) ?? 0;
 }

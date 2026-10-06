@@ -54,8 +54,8 @@
 | S9 ✅ | `services/db-query.ts`, `services/disk-usage.ts`, `services/cron.ts` | ~11k |
 | S10 ✅ | `services/packages.ts`, `services/nginx.ts`, `services/nginx-parser.ts`, `services/settings.ts`, `services/processes.ts` | ~10.7k |
 | S11 ✅ | `services/snippets.ts`, `services/security-audit.ts`, `services/tunnels.ts`, `services/db-discovery.ts`, `services/db-connections.ts`, `services/profile-transfer.ts`, `services/known-hosts.ts`, `services/keys.ts`, `services/metrics-history.ts`, `services/metrics.ts`, `services/db-dump.ts` | ~14k |
-| S12 | `services/alerts.ts`, `services/ports.ts`, `services/history.ts`, `services/overview.ts`, `services/chunk-gate.ts`, `services/stream-limits.ts`, `services/file-search.ts`, `services/sudo.ts`, `services/container-ports.ts`, `services/external-ip.ts`, `services/docker.ts`, `services/file-tail.ts`, `services/transfer.ts` | ~6.4k |
-| S13 | `ws/terminal.ts`, `ws/agent.ts` | ~1.5k |
+| S12 ✅ | `services/alerts.ts`, `services/ports.ts`, `services/history.ts`, `services/overview.ts`, `services/chunk-gate.ts`, `services/stream-limits.ts`, `services/file-search.ts`, `services/sudo.ts`, `services/container-ports.ts`, `services/external-ip.ts`, `services/docker.ts`, `services/file-tail.ts`, `services/transfer.ts` | ~6.4k |
+| S13 ✅ | `ws/terminal.ts`, `ws/agent.ts` | ~1.5k |
 
 ## Батчи: web/src (~48k кириллицы, без `i18n/ru.ts`)
 

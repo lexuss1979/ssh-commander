@@ -1,6 +1,6 @@
 import type { OverviewResponse } from './overview.js';
 
-/** Пороги алертов: проценты и load на ядро. Диапазоны валидирует роут. */
+/** Alert thresholds: percentages and load per core. Ranges are validated by the route. */
 export interface AlertThresholds {
   diskPercent: number; // 50..99
   memPercent: number; // 50..99
@@ -18,32 +18,32 @@ export type AlertKind = 'server-down' | 'disk' | 'memory' | 'load';
 export type AlertSeverity = 'crit' | 'warn';
 
 /**
- * Состояние одного правила на один тик опроса. Отдаётся и для неактивных
- * правил: гистерезис на клиенте должен видеть значение ниже порога, а не
- * только факт срабатывания.
+ * State of one rule for one polling tick. Returned for inactive rules too:
+ * client-side hysteresis needs to see the value below the threshold, not
+ * just the fact of firing.
  */
 export interface AlertRuleState {
   profileId: string;
   kind: AlertKind;
-  /** Точка монтирования (kind='disk'). */
+  /** Mount point (kind='disk'). */
   subject?: string;
   severity: AlertSeverity;
   active: boolean;
-  /** server-down: 0/1; disk/memory: %; load: load1/cores (2 знака). */
+  /** server-down: 0/1; disk/memory: %; load: load1/cores (2 decimals). */
   value: number;
-  /** server-down: 1; disk/mem: %; load: на ядро. */
+  /** server-down: 1; disk/mem: %; load: per core. */
   threshold: number;
   /**
-   * Текст о текущем значении — заполняется всегда (и для неактивных):
-   * алерт, который держится гистерезисом, показывает свежую цифру,
-   * а не ту, при которой сработал.
+   * Message about the current value — always filled (for inactive rules
+   * too): an alert held by hysteresis shows the fresh figure, not the one
+   * at which it fired.
    */
   message: string;
 }
 
 const round2 = (x: number): number => Math.round(x * 100) / 100;
 
-/** Предложный падеж для «при N …»: «при 1 ядре», «при 2 ядрах», «при 5 ядрах». */
+/** Prepositional case for «при N …»: «при 1 ядре», «при 2 ядрах», «при 5 ядрах». */
 function pluralCoresPrepositional(n: number): string {
   const mod10 = n % 10;
   const mod100 = n % 100;
@@ -52,10 +52,11 @@ function pluralCoresPrepositional(n: number): string {
 }
 
 /**
- * Чистая оценка правил по снимку overview. SSH не трогает, своего кэша нет —
- * роут ходит через кэшированный collectOverview. Отсутствующая метрика
- * (null) означает отсутствие правила: вселенная состояний определяется
- * ответом, «пропавшее» правило клиент снимает молча.
+ * Pure evaluation of rules over an overview snapshot. Touches no SSH, has
+ * no cache of its own — the route goes through the cached collectOverview.
+ * A missing metric (null) means the rule is absent: the universe of states
+ * is defined by the response, a «vanished» rule is silently cleared by the
+ * client.
  */
 export function evaluateAlertRules(
   overview: OverviewResponse,
@@ -63,7 +64,7 @@ export function evaluateAlertRules(
 ): AlertRuleState[] {
   const rules: AlertRuleState[] = [];
   for (const e of overview.servers) {
-    // Недоступность — единственное crit-правило, булево (value 0/1).
+    // Unavailability — the only crit rule, boolean (value 0/1).
     rules.push({
       profileId: e.id,
       kind: 'server-down',
@@ -100,7 +101,7 @@ export function evaluateAlertRules(
         message: `Память занята на ${used.toFixed(1)}% (порог ${thresholds.memPercent}%)`,
       });
     }
-    // Делить не на что (ядра неизвестны) — правила нет вовсе.
+    // Nothing to divide by (cores unknown) — no rule at all.
     const cores = m.cpu.cores;
     if (m.loadAverage !== null && cores !== null && Number.isInteger(cores) && cores > 0) {
       const value = round2(m.loadAverage[0] / cores);

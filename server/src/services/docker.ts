@@ -199,7 +199,7 @@ export async function containerStats(profile: Profile): Promise<DockerEntity[]> 
 
 export type PruneTarget = 'containers' | 'images' | 'volumes' | 'system';
 
-/** `docker <obj> prune -f`; `system` maps to `system prune -f` (без --all). */
+/** `docker <obj> prune -f`; `system` maps to `system prune -f` (no --all). */
 export function pruneArgs(target: PruneTarget): string[] {
   const obj =
     target === 'containers' ? 'container'
@@ -209,7 +209,7 @@ export function pruneArgs(target: PruneTarget): string[] {
   return [obj, 'prune', '-f'];
 }
 
-/** Returns the raw prune output (содержит строку «Total reclaimed space: …»). */
+/** Returns the raw prune output (contains the «Total reclaimed space: …» line). */
 export async function prune(profile: Profile, target: PruneTarget): Promise<string> {
   const result = await dockerExec(profile, pruneArgs(target), { timeoutMs: 300000 });
   checkCode(result);
@@ -220,18 +220,18 @@ export type ComposeKind = 'v2' | 'v1';
 
 interface ComposeInfo {
   kind: ComposeKind;
-  /** Shell-префикс команды: `<dockerCommand> compose` (v2) или `docker-compose` (v1). */
+  /** Shell prefix of the command: `<dockerCommand> compose` (v2) or `docker-compose` (v1). */
   base: string;
 }
 
-// Детект compose на профиль кэшируется: `compose version` — дорогой лишний
-// SSH-exec на каждый запрос.
+// The per-profile compose detection is cached: `compose version` would be
+// an extra costly SSH-exec on every request.
 const composeCache = new Map<string, ComposeInfo | null>();
 
 /**
- * Определяет доступность compose на профиле: сначала плагин v2
- * (`<dockerCommand> compose version`), затем standalone v1
- * (`docker-compose version`). null — compose недоступен.
+ * Detects compose availability on the profile: first the v2 plugin
+ * (`<dockerCommand> compose version`), then standalone v1
+ * (`docker-compose version`). null — compose is unavailable.
  */
 export async function detectCompose(profile: Profile): Promise<ComposeInfo | null> {
   if (composeCache.has(profile.id)) {
@@ -252,10 +252,10 @@ export async function detectCompose(profile: Profile): Promise<ComposeInfo | nul
 }
 
 /**
- * Аргументы compose-команды для проекта в `path`. Только v2: у v1
- * (`docker-compose`) нет `--project-directory` до ps и нет `--format json`
- * у ps — текстовый вывод парсить хрупко, поэтому v1 не поддерживается
- * (роут возвращает понятную ошибку).
+ * Arguments of the compose command for the project at `path`. v2 only: v1
+ * (`docker-compose`) has no `--project-directory` before ps and no
+ * `--format json` in ps — parsing the text output is fragile, so v1 is not
+ * supported (the route returns a comprehensible error).
  */
 export function composeArgs(path: string, actionArgs: string[]): string[] {
   return ['--project-directory', path, ...actionArgs];

@@ -17,7 +17,7 @@ export function buildTailOnceCommand(path: string, lines: number): string {
   return `tail -n ${clampTailLines(lines)} -- ${shq(path)}`;
 }
 
-// Именно -F, не -f: следит за именем и переживает ротацию (logrotate «mv + create»).
+// Exactly -F, not -f: follows the name and survives rotation (logrotate «mv + create»).
 export function buildTailFollowCommand(path: string, lines: number): string {
   return `tail -n ${clampTailLines(lines)} -F -- ${shq(path)}`;
 }
@@ -33,11 +33,11 @@ export function looksBinary(head: Buffer): boolean {
 }
 
 /**
- * Предпроверка перед открытием tail-стрима: файл существует (stat по симлинку
- * следует по ссылке), не директория и не бинарный. Обе проверки — до
- * flushHeaders маршрута, чтобы отказ шёл обычной JSON-ошибкой. Заодно
- * закрывает вечный пустой стрим: tail -F на отсутствующем файле не падает,
- * а молча ждёт его появления.
+ * Precheck before opening a tail-stream: the file exists (stat follows the
+ * symlink), is not a directory and not binary. Both checks run before the
+ * route's flushHeaders, so a rejection goes as a regular JSON error. This
+ * also closes off an eternal empty stream: tail -F on a missing file does
+ * not fail, it silently waits for it to appear.
  */
 export async function precheckTailable(profile: Profile, path: string): Promise<void> {
   await withSftp(profile, async (sftp) => {

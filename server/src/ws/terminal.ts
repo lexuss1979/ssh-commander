@@ -11,14 +11,15 @@ interface WsMessage {
 }
 
 /**
- * Лимит живых терминальных сессий на профиль (суммарно системных и
- * контейнерных). Бюджет SSH-каналов: OpenSSH MaxSessions по умолчанию 10,
- * из них постоянные потребители — SFTP (1) + follow-стримы (до 3, общий
- * лимитер эпика 14); 4 терминала оставляют транзитным exec'ам запас 2.
+ * Limit of live terminal sessions per profile (host and container ones
+ * combined). SSH channel budget: OpenSSH MaxSessions defaults to 10, of
+ * which the permanent consumers are SFTP (1) + follow-streams (up to 3,
+ * the shared limiter of epic 14); 4 terminals leave a margin of 2 for
+ * transit execs.
  */
 export const MAX_TERMINAL_SESSIONS_PER_PROFILE = 4;
 
-/** Запись о живой терминальной сессии для `GET /api/terminal/sessions`. */
+/** A live terminal session record for `GET /api/terminal/sessions`. */
 export interface TerminalSessionInfo {
   tabId: number;
   container: string | null;
@@ -43,7 +44,7 @@ class TerminalSession {
     private containerName?: string | null,
   ) {}
 
-  /** Живая ли сессия: shell держит SSH-канал или канал открывается. */
+  /** Whether the session is live: the shell holds an SSH channel or a channel is being opened. */
   isAlive(): boolean {
     return this.shell !== null || this.spawning;
   }
@@ -89,20 +90,21 @@ class TerminalSession {
         this.shell = null;
         this.broadcast({ type: 'close' });
         this.cleanupAttachments();
-        // Выход из shell закрывает SSH-канал — реанимировать нечего, grace не
-        // нужен. Запись убирается из реестра сразу: с ключом по вкладке мапа
-        // иначе копит призраки на каждый `exit`, и они всплывают в
-        // /api/terminal/sessions. Клиент по close-фрейму переподключается тем
-        // же tabId и получает свежую запись.
+        // Exiting the shell closes the SSH channel — nothing to revive, no
+        // grace needed. The record is removed from the registry right away:
+        // with the per-tab key the map would otherwise accumulate a ghost
+        // on every `exit`, and they surface in /api/terminal/sessions. On
+        // the close frame the client reconnects with the same tabId and
+        // gets a fresh record.
         sessions.delete(this.sessionKey);
       });
       shell.channel.on('error', () => {
         /* close follows */
       });
       if (this.container) {
-        // Контейнерная сессия: `exec` заменяет логин-shell на docker exec,
-        // поэтому выход из контейнера закрывает канал и сессию.
-        // bash предпочтителен, sh — запасной вариант (alpine и т.п.).
+        // Container session: `exec` replaces the login shell with docker
+        // exec, so exiting the container closes the channel and the session.
+        // bash is preferred, sh is the fallback (alpine etc.).
         const cmd = dockerCommand(this.profile, [
           'exec', '-it', this.container, 'sh', '-c', 'exec bash || exec sh',
         ]);
@@ -124,11 +126,12 @@ class TerminalSession {
       this.broadcast({ type: 'error', data: String((err as Error).message ?? err) });
       this.shell = null;
       this.cleanupAttachments();
-      // Канал не открылся — реанимировать нечего, запись убирается сразу
-      // (та же семантика, что у close канала): иначе при недоступном сервере
-      // мапа копит мёртвые записи по одной на каждую пару (container, tabId)
-      // и не освобождается до рестарта. Клиент по error-фрейму переподключится
-      // тем же tabId и получит свежую запись.
+      // The channel never opened — nothing to revive, the record is removed
+      // right away (the same semantics as the channel close): otherwise,
+      // with an unreachable server, the map accumulates dead records, one
+      // per (container, tabId) pair, and is not freed until restart. On the
+      // error frame the client will reconnect with the same tabId and get a
+      // fresh record.
       sessions.delete(this.sessionKey);
     } finally {
       this.spawning = false;
@@ -232,16 +235,18 @@ class TerminalSession {
 
 const sessions = new Map<string, TerminalSession>();
 
-// Системный shell и shell контейнера — разные сессии, ключ включает container
-// и tabId вкладки (эпик 15): `${profileId}::${container|host}::${tabId}`.
+// The host shell and a container shell are different sessions; the key
+// includes the container and the tab's tabId (epic 15):
+// `${profileId}::${container|host}::${tabId}`.
 export function sessionKey(profileId: string, container?: string, tabId = 0): string {
   return `${profileId}::${container ?? 'host'}::${tabId}`;
 }
 
 /**
- * Разбор tabId из query. Отсутствие параметра — 0 (бесшовный деплой: вкладка
- * старого клиента без tabId продолжает работать с единственной сессией
- * `…::host::0`). Невалидное значение (не целое, вне 0..9999) — null → отказ.
+ * Parses tabId from the query. A missing parameter means 0 (seamless
+ * deploy: an old client's tab without tabId keeps working with the single
+ * session `…::host::0`). An invalid value (not an integer, outside
+ * 0..9999) — null → rejection.
  */
 export function parseTabId(raw: string | null): number | null {
   if (raw === null) return 0;
@@ -249,8 +254,8 @@ export function parseTabId(raw: string | null): number | null {
   return Number(raw);
 }
 
-/** Живые записи профиля: grace-сессии (shell жив) считаются, записи после
- * exit/ошибки spawn — нет (канал освобождён или не открывался). */
+/** Live records of the profile: grace sessions (shell alive) count, records
+ * after exit/spawn error do not (the channel is freed or never opened). */
 function countAliveSessions(profileId: string): number {
   let count = 0;
   for (const session of sessions.values()) {
@@ -259,7 +264,7 @@ function countAliveSessions(profileId: string): number {
   return count;
 }
 
-/** Живые терминальные сессии профиля — восстановление вкладок после F5. */
+/** Live terminal sessions of the profile — tab restoration after F5. */
 export function listTerminalSessions(profileId: string): TerminalSessionInfo[] {
   const result: TerminalSessionInfo[] = [];
   for (const session of sessions.values()) {
@@ -287,8 +292,8 @@ export function attachTerminal(
   const key = sessionKey(profile.id, container, tabId);
   let session = sessions.get(key);
   if (!session) {
-    // Лимит считают только живые записи — они держат SSH-канал. Существующая
-    // сессия (переподключение вкладки) проверку не проходит повторно.
+    // Only live records count toward the limit — they hold an SSH channel.
+    // An existing session (tab reconnect) does not pass the check again.
     if (countAliveSessions(profile.id) >= MAX_TERMINAL_SESSIONS_PER_PROFILE) {
       ws.send(
         JSON.stringify({
@@ -306,8 +311,8 @@ export function attachTerminal(
       rows || 24,
       tabId,
       container,
-      // containerName — только отображение (заголовок вкладки после F5), в
-      // ключ и shell-команду не попадает.
+      // containerName is display-only (the tab title after F5); it never
+      // reaches the key or the shell command.
       containerName ? containerName.slice(0, 200) : null,
     );
     sessions.set(key, session);
