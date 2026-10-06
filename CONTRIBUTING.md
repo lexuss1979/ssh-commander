@@ -1,18 +1,18 @@
-# Участие в разработке
+# Contributing
 
-Небольшие исправления и улучшения документации можно предлагать сразу. Крупные изменения сначала обсудите в issue: опишите задачу пользователя и ожидаемое поведение. Создание issue не означает обещания реализации. PR должен решать одну понятную задачу и объяснять, что изменилось и как это проверено.
+Small fixes and documentation improvements can be proposed directly. For large changes, discuss in an issue first: describe the user's task and the expected behavior. Opening an issue is not a promise of implementation. A PR should solve one clear task and explain what changed and how it was verified.
 
-## Окружение
+## Environment
 
-Нужны Git, Node.js 22 LTS и npm. Для запуска в контейнере — Docker с Compose v2. Клонируйте репозиторий и выполните `npm ci` отдельно в `server/` и `web/`. Установите хук: `bash scripts/install-hooks.sh`.
+You need Git, Node.js 22 LTS, and npm. To run in a container — Docker with Compose v2. Clone the repository and run `npm ci` separately in `server/` and `web/`. Install the git hook: `bash scripts/install-hooks.sh`.
 
-Для hot-reload используйте `bash scripts/docker-dev.sh up`: API на `:8081`, web на `:5173`. Если эти порты заняты, сначала выберите свободные в отдельной конфигурации. Изменение package.json/lock требует повторного `up` для пересборки зависимостей. Dev-контейнер использует собственные данные, но монтирует `keys/` для чтения; для проверки с вымышленными данными используйте отдельный клон без реальных ключей.
+For hot-reload use `bash scripts/docker-dev.sh up`: API on `:8081`, web on `:5173`. If those ports are busy, pick free ones in a separate configuration first. Changing package.json/lock requires running `up` again to rebuild dependencies. The dev container uses its own data but mounts `keys/` read-only; to test with fictional data, use a separate clone without real keys.
 
-Локальный запуск без Docker: `npm run dev` в `server/` и `web/` в двух терминалах. Задайте отдельные `DATA_DIR` и `KEYS_DIR`, чтобы не использовать рабочую установку. Подробные правила — [AGENTS.md](AGENTS.md), устройство подсистем — [архитектура](docs/architecture.md).
+To run locally without Docker: `npm run dev` in `server/` and `web/` in two terminals. Set separate `DATA_DIR` and `KEYS_DIR` so you don't touch your working installation. Detailed rules — [AGENTS.md](AGENTS.md); subsystem internals — the [architecture doc](docs/architecture.md).
 
-## Проверки перед PR
+## Checks before a PR
 
-Из корня репозитория (каждая команда выполняется в указанном каталоге):
+From the repository root (run each command in the given directory):
 
 ```bash
 cd server
@@ -27,10 +27,10 @@ npm run lint
 npm audit --audit-level=low
 ```
 
-Этот же набор выполняет CI. Unit-тестам не нужны SSH-сервер, sudo-пароль и платный AI API. Ошибка сети при audit не означает отсутствие уязвимостей. Docker-сборка из исходников: `docker compose up -d --build`. Smoke-проверка отдельно собранного образа: `node scripts/smoke-image.mjs IMAGE linux/amd64` — использует временные данные и свободный loopback-порт.
+CI runs the same set. Unit tests need no SSH server, sudo password, or paid AI API. A network error during audit does not mean there are no vulnerabilities. Build the Docker image from source with `docker compose up -d --build`. To smoke-check a separately built image: `node scripts/smoke-image.mjs IMAGE linux/amd64` — it uses temporary data and a free loopback port.
 
-TypeScript — strict; относительные серверные импорты — с `.js`. Новые строки UI добавляйте одновременно в ru/en. Комментарии и техническая документация — по-русски, сообщения коммитов — по-английски. Не расширяйте read-only инструменты агента без проверки guard и тестов.
+TypeScript is strict; relative server imports use the `.js` extension. Add new UI strings to ru and en at the same time. Code comments and internal technical documentation are currently written in English; commit messages are in English too. Do not extend the agent's read-only tools without guard checks and tests.
 
-## Данные в примерах
+## Data in examples
 
-Используйте вымышленные профили и тестовые серверы. Не добавляйте `.env`, приватные ключи, пароли, содержимое `data/` и неочищенные диагностические архивы в коммиты, issues, PR или скриншоты. Проверьте diff перед отправкой. Уязвимости сообщайте [приватно](SECURITY.md), обычные ошибки — через форму bug report.
+Use fictional profiles and test servers. Do not put `.env`, private keys, passwords, `data/` contents, or unredacted diagnostic archives into commits, issues, PRs, or screenshots. Review the diff before submitting. Report vulnerabilities [privately](SECURITY.md); ordinary bugs go through the bug report form.
