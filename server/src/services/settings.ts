@@ -5,20 +5,22 @@ import { z } from 'zod';
 import { config } from '../config.js';
 
 /**
- * Настройки приложения (`data/settings.json`), план — docs/settings-model-plan.md.
+ * Application settings (`data/settings.json`), plan in
+ * docs/settings-model-plan.md.
  *
- * Паттерн `db-connections.ts`/`profiles.ts`: zod-валидация, атомарная запись
- * tmp+rename, corrupt-guard (битый файл → `*.corrupt-<timestamp>`, persist
- * отказывается перезаписывать до рестарта). Пароль хранится хешем scrypt
- * (формат `scrypt$<saltHex>$<hashHex>` — самодостаточный, допускает будущую
- * смену KDF), ключ AI — открытым текстом: тот же trust domain, что у
- * SSH-паролей `profiles.json` (осознанный компромисс локального инструмента).
+ * The `db-connections.ts`/`profiles.ts` pattern: zod validation, atomic
+ * tmp+rename write, corrupt-guard (a broken file → `*.corrupt-<timestamp>`,
+ * persist refuses to overwrite until restart). The password is stored as an
+ * scrypt hash (the format `scrypt$<saltHex>$<hashHex>` is self-contained and
+ * allows a future KDF change), the AI key in plain text: the same trust
+ * domain as the SSH passwords of `profiles.json` (a deliberate compromise of
+ * a local tool).
  *
- * Единая модель конфигурации: env (`APP_PASSWORD`/`AI_API_KEY`/…) читается
- * один раз при первом старте — `seedSettingsFromEnv()` сеет его в settings.json
- * (пароль сразу хешем). После первого старта env не читается никогда, источник
- * правды в рантайме — только этот файл; правка — страница «Настройки» (эпик 23)
- * или файл + рестарт.
+ * Unified configuration model: env (`APP_PASSWORD`/`AI_API_KEY`/…) is read
+ * once at first start — `seedSettingsFromEnv()` seeds it into settings.json
+ * (the password immediately as a hash). After the first start env is never
+ * read again; the runtime source of truth is this file only; editing — the
+ * "Settings" page (epic 23) or the file + a restart.
  */
 
 export type AiProvider = 'deepseek' | 'openai' | 'opencode-go' | 'custom';
@@ -27,16 +29,16 @@ export const OPENCODE_GO_API_BASE = 'https://opencode.ai/zen/go/v1';
 export const OPENCODE_GO_MODEL = 'glm-5.3-flash';
 
 export interface AppSettings {
-  /** Опционален: seed при заданном только AI-ключе пишет AI-поля без пароля,
-   * и onboarding остаётся доступным (дозаписывает хеш мержем). */
+  /** Optional: a seed with only the AI key set writes the AI fields without
+   * a password, and onboarding stays available (appends the hash via merge). */
   passwordHash?: string;
-  /** Пресет провайдера: UI, статус веб-поиска и заголовки API. */
+  /** Provider preset: the UI, web-search status and API headers. */
   aiProvider?: AiProvider;
-  /** Ключ OpenAI-совместимого API (агент); без него агент недоступен. */
+  /** OpenAI-compatible API key (the agent); without it the agent is unavailable. */
   aiApiKey?: string;
-  /** Базовый URL API (без хвостового `/`). */
+  /** API base URL (without a trailing `/`). */
   aiApiBase?: string;
-  /** Модель агента: пресет провайдера без модели не работает. */
+  /** Agent model: a provider preset without a model does not work. */
   aiModel?: string;
 }
 
@@ -48,10 +50,10 @@ const settingsSchema = z.object({
   aiModel: z.string().optional(),
 });
 
-// undefined — ещё не читали; null — файла нет (или битый → corrupt = true).
+// undefined — not read yet; null — no file (or a broken one → corrupt = true).
 let cache: AppSettings | null | undefined;
-// Файл не прочитался: перенесён в *.corrupt-*, и persist() отказывается
-// работать до рестарта — молчаливого затирания битого файла нет.
+// The file failed to load: moved to *.corrupt-*, and persist() refuses to
+// work until restart — no silent overwriting of a broken file.
 let corrupt = false;
 
 function storePath(): string {
@@ -85,13 +87,13 @@ function load(): AppSettings | null {
   return cache;
 }
 
-/** Чтение настроек с диска; null — файла нет или он битый (corrupt-guard). */
+/** Read settings from disk; null — no file or it is broken (corrupt-guard). */
 export function getSettings(): AppSettings | null {
   const s = load();
   return s ? { ...s } : null;
 }
 
-/** Атомарная запись настроек (tmp+rename). Отказывается при битом файле. */
+/** Atomic settings write (tmp+rename). Refuses on a broken file. */
 export function saveSettings(s: AppSettings): void {
   if (corrupt) {
     throw new Error(
@@ -100,7 +102,7 @@ export function saveSettings(s: AppSettings): void {
   }
   fs.mkdirSync(config.dataDir, { recursive: true });
   const tmp = `${storePath()}.tmp`;
-  // 0600: файл содержит хеш пароля и ключ API; при rename права переезжают с tmp.
+  // 0600: the file holds the password hash and the API key; on rename the mode moves with tmp.
   fs.writeFileSync(tmp, JSON.stringify(s, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, storePath());
   cache = { ...s };
@@ -108,7 +110,7 @@ export function saveSettings(s: AppSettings): void {
 
 const SCRYPT_KEYLEN = 64;
 
-/** Хеш пароля: `scrypt$<saltHex>$<hashHex>` — соль и хеш в одной строке. */
+/** Password hash: `scrypt$<saltHex>$<hashHex>` — salt and hash in one string. */
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16);
   const hash = crypto.scryptSync(password, salt, SCRYPT_KEYLEN);
@@ -125,10 +127,11 @@ function parseHash(encoded: string): { salt: Buffer; hash: Buffer } | null {
 }
 
 /**
- * Проверка пароля: только хеш из settings.json → scrypt + `timingSafeEqual`.
- * Настроек нет (или пароль не сеялся) → false: env-фолбэка больше нет, env-пароль
- * при первом старте записывается хешем через `seedSettingsFromEnv`. Битый или
- * незнакомый формат хеша — fail-closed (false), а не пропуск.
+ * Password check: the hash from settings.json only → scrypt +
+ * `timingSafeEqual`. No settings (or the password was never seeded) → false:
+ * there is no env fallback anymore, an env password at first start is
+ * written as a hash via `seedSettingsFromEnv`. A broken or unknown hash
+ * format fails closed (false), not open.
  */
 export function verifyPassword(candidate: string): boolean {
   const settings = load();
@@ -139,7 +142,7 @@ export function verifyPassword(candidate: string): boolean {
   return crypto.timingSafeEqual(hash, parsed.hash);
 }
 
-/** Точный адрес Go: подстрока в чужом домене или пути не включает его заголовки. */
+/** Exact Go address: a substring match inside a foreign domain or path must not count. */
 export function isOpenCodeGoBase(base: string): boolean {
   try {
     const url = new URL(base);
@@ -149,7 +152,7 @@ export function isOpenCodeGoBase(base: string): boolean {
   }
 }
 
-/** Провайдер по base URL — для seed'а и совместимости со старым custom-конфигом. */
+/** Provider from the base URL — for seeding and compatibility with an old custom config. */
 export function providerFromBase(base: string): AiProvider {
   if (isOpenCodeGoBase(base)) return 'opencode-go';
   if (base.includes('api.deepseek.com')) return 'deepseek';
@@ -158,18 +161,19 @@ export function providerFromBase(base: string): AiProvider {
 }
 
 /**
- * Seed из env при первом старте (docs/settings-model-plan.md): если
- * settings.json ещё нет, а env задан — значения копируются в settings
- * (пароль — сразу хешем). Для существующих установок это «скрытая миграция»:
- * settings.json у них нет, env задан → файл создаётся сам при рестарте.
- * Битый файл (corrupt-guard) не трогаем и старт не блокируем — saveSettings
- * бросит, ловим и warn.
+ * Seed from env at first start (docs/settings-model-plan.md): if
+ * settings.json does not exist yet and env is set — the values are copied
+ * into settings (the password immediately as a hash). For existing
+ * installations this is a "hidden migration": they have no settings.json,
+ * env is set → the file is created by itself on restart. A broken file
+ * (corrupt-guard) is left alone and the start is not blocked — saveSettings
+ * throws, we catch and warn.
  */
 export function seedSettingsFromEnv(): void {
-  if (getSettings() !== null) return; // settings есть → env игнорируем
+  if (getSettings() !== null) return; // settings exist → ignore env
   const hasPassword = Boolean(config.appPassword);
   const hasAi = Boolean(config.ai.apiKey);
-  if (!hasPassword && !hasAi) return; // сеять нечего → onboarding
+  if (!hasPassword && !hasAi) return; // nothing to seed → onboarding
   try {
     saveSettings({
       passwordHash: hasPassword ? hashPassword(config.appPassword) : undefined,
@@ -184,19 +188,20 @@ export function seedSettingsFromEnv(): void {
   }
 }
 
-// Дефолты base/model — константы кода, не env: env-значения при первом старте
-// уже посеяны в settings.json, после него env не читается.
+// base/model defaults are code constants, not env: env values at first start
+// are already seeded into settings.json; after that env is never read.
 const DEFAULT_API_BASE = 'https://api.openai.com/v1';
 const DEFAULT_MODEL = 'gpt-4.1-mini';
 
 /**
- * AI-конфиг только из settings.json (мерж «settings поверх env» умер,
- * docs/settings-model-plan.md). apiKey '' — агент недоступен; provider null —
- * пресет не выбран (установка без seed'а AI-полей).
+ * AI config from settings.json only (the "settings over env" merge is dead,
+ * docs/settings-model-plan.md). apiKey '' — the agent is unavailable;
+ * provider null — no preset selected (an installation seeded without the AI
+ * fields).
  */
 export function getAiSettings(): {
   provider: AiProvider | null;
-  apiKey: string; // '' — агент недоступен
+  apiKey: string; // '' — the agent is unavailable
   apiBase: string;
   model: string;
 } {
@@ -210,23 +215,25 @@ export function getAiSettings(): {
 }
 
 /**
- * Триггер onboarding: пароля хешем в settings.json нет. Env-пароль не
- * участвует: заданный env уже записан seed'ом хешем, а отсутствие APP_PASSWORD
- * теперь честное «не задан» (дефолта 'admin' в config.ts больше нет).
+ * Onboarding trigger: no password hash in settings.json. The env password
+ * does not participate: a set env was already written as a hash by the seed,
+ * and the absence of APP_PASSWORD is now an honest "not set" (there is no
+ * 'admin' default in config.ts anymore).
  */
 export function onboardingRequired(): boolean {
   return !load()?.passwordHash;
 }
 
-/** Патч настроек: значение null/undefined у поля удаляет его из объекта. */
+/** Settings patch: a null/undefined field value removes the field from the object. */
 export type SettingsPatch = { [K in keyof AppSettings]?: AppSettings[K] | null };
 
 /**
- * Мерж-патч поверх текущих настроек (эпик 23, routes/settings.ts): переданное
- * поле перезаписывается, null/undefined — удаляется (очистка AI-полей = «агент
- * недоступен», возврата к env нет — он читался только при первом старте).
- * Поля, которых нет в патче, сохраняются. Атомарность и corrupt-guard — в
- * saveSettings. Возвращает сохранённый объект (копию).
+ * Merge patch over the current settings (epic 23, routes/settings.ts): a
+ * passed field is overwritten, null/undefined — removed (clearing the AI
+ * fields = "the agent is unavailable", there is no return to env — it was
+ * read only at first start). Fields missing from the patch are preserved.
+ * Atomicity and the corrupt-guard live in saveSettings. Returns the saved
+ * object (a copy).
  */
 export function updateSettings(patch: SettingsPatch): AppSettings {
   const next: Record<string, unknown> = { ...(getSettings() ?? {}) };

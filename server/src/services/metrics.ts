@@ -3,7 +3,7 @@ import type { Profile } from '../types.js';
 import { appendSample } from './metrics-history.js';
 
 export interface CpuMetrics {
-  /** Загрузка CPU в процентах (0–100, 1 знак после запятой) или null, если не удалось посчитать. */
+  /** CPU load in percent (0–100, 1 decimal place) or null if it could not be computed. */
   percent: number | null;
   cores: number | null;
 }
@@ -33,7 +33,7 @@ export interface ProcessInfo {
 }
 
 export interface ServerMetrics {
-  /** Момент снимка (мс, серверное время ssh-commander). */
+  /** Snapshot time (ms, ssh-commander server clock). */
   timestamp: number;
   cpu: CpuMetrics;
   memory: MemoryMetrics;
@@ -43,14 +43,17 @@ export interface ServerMetrics {
   processes: ProcessInfo[];
 }
 
-// Один exec на весь снимок. Секции разделены маркерами @@NAME@@, чтобы
-// вывод утилит не смешивался. Источники читаем из /proc, а не из локализуемых
-// команд (uptime, free): формат /proc не зависит от локали сервера.
-// CPU считаем по двум чтениям /proc/stat с паузой 0.5 c внутри того же exec —
-// снимок самодостаточен и не зависит от истории опросов.
-// df: -P заставляет писать по строке на ФС (без переносов длинных имён),
-// -k — килобайты (портируемо, включая busybox). -x исключает псевдо-ФС там,
-// где df это понимает; парсер дополнительно фильтрует их по имени устройства.
+// One exec for the whole snapshot. Sections are separated by @@NAME@@
+// markers so that utility outputs do not mix. Sources are read from /proc
+// rather than from localizable commands (uptime, free): the /proc format
+// does not depend on the server locale.
+// CPU is computed from two /proc/stat reads with a 0.5 s pause inside the
+// same exec — the snapshot is self-contained and does not depend on polling
+// history.
+// df: -P forces one line per filesystem (no wrapping of long names), -k —
+// kilobytes (portable, including busybox). -x excludes pseudo-filesystems
+// where df understands it; the parser additionally filters them by device
+// name.
 const COLLECT_CMD = [
   `printf '@@STAT1@@\\n'; head -n 1 /proc/stat`,
   `sleep 0.5`,
@@ -65,7 +68,7 @@ const COLLECT_CMD = [
 
 function toNum(s: string | undefined): number | null {
   if (!s) return null;
-  // Числа с запятой встречаются в локализованном выводе (напр. ps в ru_RU).
+  // Numbers with a comma occur in localized output (e.g. ps in ru_RU).
   const n = Number(s.replace(',', '.'));
   return Number.isFinite(n) ? n : null;
 }
@@ -83,8 +86,9 @@ function cpuLineFields(text: string): number[] | null {
 }
 
 /**
- * Процент загрузки CPU по двум снимкам агрегированной строки `cpu` из
- * /proc/stat: доля не-idle времени между снимками. idle включает iowait.
+ * CPU load percent from two snapshots of the aggregated `cpu` line of
+ * /proc/stat: the share of non-idle time between the snapshots. idle
+ * includes iowait.
  */
 export function parseCpuPercent(before: string, after: string): number | null {
   const a = cpuLineFields(before);
@@ -99,7 +103,7 @@ export function parseCpuPercent(before: string, after: string): number | null {
   return Math.round(Math.min(100, Math.max(0, pct)) * 10) / 10;
 }
 
-/** Количество ядер — вывод `grep -c '^cpu[0-9]' /proc/stat`. */
+/** The core count — the output of `grep -c '^cpu[0-9]' /proc/stat`. */
 export function parseCores(grepCount: string): number | null {
   const n = Number(grepCount.trim());
   return Number.isInteger(n) && n > 0 ? n : null;
@@ -113,7 +117,7 @@ export function parseMeminfo(text: string): MemoryMetrics {
   const total = get('MemTotal');
   let available = get('MemAvailable');
   if (available === null) {
-    // Старые ядра без MemAvailable: приближение free + buffers + cached.
+    // Old kernels without MemAvailable: the free + buffers + cached estimate.
     const free = get('MemFree');
     if (free !== null) {
       available = free + (get('Buffers') ?? 0) + (get('Cached') ?? 0);
@@ -131,23 +135,24 @@ export function parseMeminfo(text: string): MemoryMetrics {
   };
 }
 
-// Псевдо-ФС: не диски, в списке не нужны (дублирует -x флаги df — страховка
-// для систем, где df не понимает -x и отработал фолбэк).
+// Pseudo-filesystems: not disks, not needed in the list (duplicates the -x
+// flags of df — a safeguard for systems where df does not understand -x and
+// the fallback ran).
 const SKIP_FS = /^(tmpfs|devtmpfs|overlay|squashfs|shm|none)$/;
 
-/** Вывод `df -P -k`: по строке на ФС, размеры в килобайтах. */
+/** The output of `df -P -k`: one line per filesystem, sizes in kilobytes. */
 export function parseDf(text: string): DiskMetrics[] {
   const disks: DiskMetrics[] = [];
   for (const line of text.split('\n')) {
     const parts = line.trim().split(/\s+/);
     if (parts.length < 6) continue;
     const [fs, totalKb, usedKb, availKb, cap] = parts;
-    // Точка монтирования может содержать пробелы — собираем хвост строки.
+    // The mount point may contain spaces — the line tail is assembled.
     const mount = parts.slice(5).join(' ');
     const total = Number(totalKb);
     const used = Number(usedKb);
     const avail = Number(availKb);
-    // Заголовок (в любой локали) и мусорные строки отбрасываются по числам.
+    // The header (in any locale) and garbage lines are dropped by the numbers.
     if (![total, used, avail].every((n) => Number.isFinite(n))) continue;
     if (!/%$/.test(cap)) continue;
     if (SKIP_FS.test(fs)) continue;
@@ -165,13 +170,13 @@ export function parseDf(text: string): DiskMetrics[] {
   return disks;
 }
 
-/** /proc/uptime: "секунды_аптайма секунды_idle". */
+/** /proc/uptime: "uptime_seconds idle_seconds". */
 export function parseProcUptime(text: string): number | null {
   const n = toNum(text.trim().split(/\s+/)[0]);
   return n !== null ? Math.floor(n) : null;
 }
 
-/** /proc/loadavg: "1мин 5мин 15мин running/total last_pid". */
+/** /proc/loadavg: "1min 5min 15min running/total last_pid". */
 export function parseLoadavg(text: string): [number, number, number] | null {
   const parts = text.trim().split(/\s+/);
   const a = toNum(parts[0]);
@@ -180,7 +185,7 @@ export function parseLoadavg(text: string): [number, number, number] | null {
   return a !== null && b !== null && c !== null ? [a, b, c] : null;
 }
 
-/** Вывод `ps aux` (с заголовком), до 10 процессов. */
+/** The output of `ps aux` (with the header), up to 10 processes. */
 export function parsePsAux(text: string): ProcessInfo[] {
   const out: ProcessInfo[] = [];
   for (const line of text.split('\n')) {
@@ -217,7 +222,7 @@ function splitSections(raw: string): Map<string, string> {
   return sections;
 }
 
-/** Разбор полного вывода COLLECT_CMD в типизированный снимок. */
+/** Parse the full COLLECT_CMD output into a typed snapshot. */
 export function parseMetricsOutput(raw: string): ServerMetrics {
   const s = splitSections(raw);
   return {
@@ -238,10 +243,10 @@ const CACHE_TTL_MS = 2000;
 const cache = new Map<string, { at: number; promise: Promise<ServerMetrics> }>();
 
 /**
- * Снимок метрик сервера. Последний результат кэшируется на 2 c на профиль
- * (и параллельные вызовы делят один exec), чтобы частые опросы с нескольких
- * вкладок не плодили SSH-команды. Ошибочный промис из кэша удаляется —
- * следующий опрос попробует снова.
+ * Server metrics snapshot. The last result is cached for 2 s per profile
+ * (and parallel calls share one exec), so frequent polling from several
+ * tabs does not multiply SSH commands. A failed promise is evicted from the
+ * cache — the next poll will try again.
  */
 export function collectMetrics(profile: Profile): Promise<ServerMetrics> {
   const now = Date.now();
@@ -255,8 +260,8 @@ export function collectMetrics(profile: Profile): Promise<ServerMetrics> {
       throw new Error(`metrics command exited with code ${result.code}${detail ? `: ${detail}` : ''}`);
     }
     const snapshot = parseMetricsOutput(result.stdout);
-    // Каждое реальное снятие метрик (любой из опрашивающих роутов) кормит
-    // историю нагрузки; дубли по timestamp отсеивает appendSample.
+    // Every real metrics collection (by any of the polling routes) feeds the
+    // load history; appendSample filters out timestamp duplicates.
     appendSample(profile.id, snapshot);
     return snapshot;
   });
@@ -270,9 +275,10 @@ export function collectMetrics(profile: Profile): Promise<ServerMetrics> {
 }
 
 /**
- * Сброс кэша снимка после мутации (действия над процессами, эпик 17) —
- * немедленный refetch «Обзора» и сайдбара (`/api/overview`) вернёт свежие
- * данные, а не кэш 2 с. Паттерн `invalidateServicesCache` из systemd.ts.
+ * Snapshot cache invalidation after a mutation (process actions, epic 17) —
+ * an immediate refetch of "Overview" and the sidebar (`/api/overview`)
+ * returns fresh data, not the 2 s cache. The `invalidateServicesCache`
+ * pattern from systemd.ts.
  */
 export function invalidateMetricsCache(profileId: string): void {
   cache.delete(profileId);

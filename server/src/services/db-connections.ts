@@ -6,33 +6,36 @@ import { config } from '../config.js';
 import type { DbEngine, MysqlFlavor } from './db-discovery.js';
 
 /**
- * Хранилище подключений БД (итерация 2 эпика 12): подключение — сохранённая
- * сущность с явными креденшалами, как в DBeaver/TablePlus. Паттерн
- * `profiles.ts`: zod-валидация, атомарная запись tmp+rename, corrupt-guard,
- * пароль открытым текстом — тот же trust domain, что у SSH-паролей в
- * `profiles.json` (осознанный компромисс локального инструмента).
+ * Database connections store (iteration 2 of epic 12): a connection is a
+ * saved entity with explicit credentials, as in DBeaver/TablePlus. The
+ * `profiles.ts` pattern: zod validation, atomic tmp+rename write,
+ * corrupt-guard, the password in plain text — the same trust domain as the
+ * SSH passwords in `profiles.json` (a deliberate compromise of a local tool).
  */
 
-/** Имя базы — идентификатор без спецсимволов (latin/цифры/подчёркивание);
- * кавычек mysql/PG идентификаторы с иными символами и не создают. */
+/** The database name is an identifier without special characters (latin/
+ * digits/underscore); mysql/PG do not create identifiers with other
+ * characters quoted anyway. */
 export const dbNameSchema = z
   .string()
   .regex(/^[A-Za-z0-9_$-]+$/, 'Некорректное имя базы');
 
-/** Имя схемы/таблицы для деталей таблицы: узкий набор — безопасно для
- * интерполяции в SQL (кавычки/точки с запятой невозможны). */
+/** The schema/table name for table details: a narrow set — safe for SQL
+ * interpolation (quotes/semicolons are impossible). */
 export const dbTableComponentSchema = z
   .string()
   .regex(/^[A-Za-z0-9_$-]+$/, 'Некорректное имя схемы/таблицы');
 
-/** Пароль передаётся первой строкой stdin — перевод строки внутри пароля
- * протокол не переносит, отказываем на входе, а не посреди команды. */
+/** The password is passed as the first line of stdin — a newline inside the
+ * password is not carried by the protocol; we reject at the input, not in
+ * the middle of a command. */
 const passwordSchema = z
   .string()
   .refine((v) => !/[\r\n]/.test(v), 'Пароль не может содержать перевод строки');
 
-/** Цель подключения. kind:'host' — модель для v2.x (CLI-клиент на хосте);
- * рабочий путь v1 — контейнер: клиент гарантирован внутри образа. */
+/** The connection target. kind:'host' is a model for v2.x (a CLI client on
+ * the host); the working v1 path is a container: the client is guaranteed
+ * inside the image. */
 const targetSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('container'),
@@ -53,12 +56,12 @@ export const dbConnectionInputSchema = z.object({
   engine: z.enum(['postgres', 'mysql']),
   target: targetSchema,
   username: z.string().min(1, 'Укажите пользователя БД').max(100),
-  // Непереданный при update пароль сохраняется из существующей записи
-  // (частичный update секрета, как у профилей).
+  // A password not passed on update is kept from the existing record
+  // (a partial secret update, as with profiles).
   password: passwordSchema.optional(),
   defaultDatabase: dbNameSchema.optional(),
-  // MariaDB отличается от MySQL именем переменной SET-таймаута; снапшот с
-  // образа при создании (фронт получает из discovery), absence → 'mysql'.
+  // MariaDB differs from MySQL in the SET timeout variable name; snapshotted
+  // from the image at creation (the front gets it from discovery), absence → 'mysql'.
   flavor: z.enum(['mysql', 'mariadb']).optional(),
 });
 
@@ -78,7 +81,7 @@ export interface DbConnection {
   updatedAt: string;
 }
 
-/** Подключение без пароля — форма для API наружу. */
+/** A connection without the password — the API-facing form. */
 export interface SafeDbConnection {
   id: string;
   profileId: string;
@@ -142,7 +145,7 @@ function persist(list: DbConnection[]): void {
   }
   fs.mkdirSync(config.dataDir, { recursive: true });
   const tmp = `${storePath()}.tmp`;
-  // 0600: файл хранит пароли подключений к БД открытым текстом.
+  // 0600: the file stores DB connection passwords in plain text.
   fs.writeFileSync(tmp, JSON.stringify({ connections: list }, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, storePath());
   cache = list;
@@ -171,7 +174,7 @@ export function requireDbConnection(id: string): DbConnection {
   return conn;
 }
 
-/** Валидирует поля подключения без сохранения (route test-connection). */
+/** Validates connection fields without saving (route test-connection). */
 export function parseDbConnectionInput(input: unknown): DbConnectionInput {
   return dbConnectionInputSchema.parse(input);
 }
@@ -200,8 +203,9 @@ export function updateDbConnection(id: string, input: unknown): DbConnection {
   }
   const existing = list[idx];
   const data = dbConnectionInputSchema.parse(input);
-  // Непереданный пароль сохраняется из существующей записи; смена профиля
-  // у подключения не предусмотрена (id привязан к домашнему профилю).
+  // A password not passed is kept from the existing record; changing the
+  // profile of a connection is not provided (the id is bound to the home
+  // profile).
   const updated: DbConnection = {
     ...data,
     profileId: existing.profileId,

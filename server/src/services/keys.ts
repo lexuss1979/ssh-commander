@@ -2,13 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 
-/** Приватные ключи маленькие; больше — почти наверняка мусор. */
+/** Private keys are small; anything larger is almost certainly garbage. */
 export const MAX_KEY_BYTES = 64 * 1024;
 
 const KEY_NAME_PATTERN = /^[A-Za-z0-9._-]+$/;
 const PRIVATE_KEY_HEADER = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/;
 
-/** Ошибка импорта ключа с HTTP-статусом для роутера. */
+/** Key import error with an HTTP status for the router. */
 export class KeyImportError extends Error {
   constructor(
     message: string,
@@ -19,9 +19,9 @@ export class KeyImportError extends Error {
 }
 
 /**
- * Приводит имя файла ключа к безопасному виду: только имя, без путей.
- * Запрещены разделители каталогов, `..`, ведущая точка (скрытые файлы
- * не попадают в список ключей) и любые символы вне [A-Za-z0-9._-].
+ * Reduces a key file name to a safe form: the name only, no paths.
+ * Forbidden: directory separators, `..`, a leading dot (hidden files must
+ * not get into the key list) and any characters outside [A-Za-z0-9._-].
  */
 export function sanitizeKeyFileName(name: string): string {
   const trimmed = name.trim();
@@ -48,11 +48,12 @@ export function sanitizeKeyFileName(name: string): string {
 }
 
 /**
- * Путь к ключу профиля обязан лежать внутри каталога ключей.
+ * A profile's key path must lie inside the keys directory.
  *
- * Иначе `keyPath` — это чтение произвольного файла на хосте приложения силами
- * SSH-клиента: экспорт бэкапа такую проверку делал давно (`profile-transfer.ts`),
- * подключение — нет. Возвращает нормализованный путь, его и открывают.
+ * Otherwise `keyPath` is reading an arbitrary file on the application host
+ * by the SSH client: the backup export has done this check for a long time
+ * (`profile-transfer.ts`), the connection — not. Returns the normalized
+ * path, and that is the one opened.
  */
 export function assertKeyPathAllowed(keyPath: string, keysDir: string = config.keysDir): string {
   const dir = path.resolve(keysDir);
@@ -66,7 +67,7 @@ export function assertKeyPathAllowed(keyPath: string, keysDir: string = config.k
   return resolved;
 }
 
-/** Проверяет, что содержимое похоже на приватный ключ (PEM/OpenSSH). */
+/** Checks that the content looks like a private key (PEM/OpenSSH). */
 export function assertPrivateKeyContent(content: string): void {
   if (!content.trim()) throw new KeyImportError('Файл пуст');
   if (Buffer.byteLength(content, 'utf8') > MAX_KEY_BYTES) {
@@ -80,9 +81,9 @@ export function assertPrivateKeyContent(content: string): void {
 }
 
 /**
- * Сохраняет приватный ключ в каталог ключей: атомарная запись (tmp+rename),
- * права 0600. Без `overwrite` существующий файл не затирается (409).
- * Возвращает запись для списка ключей (имя + путь внутри контейнера).
+ * Saves a private key into the keys directory: an atomic write (tmp+rename),
+ * mode 0600. Without `overwrite` an existing file is not overwritten (409).
+ * Returns the record for the key list (name + path inside the container).
  */
 export function saveKey(
   keysDir: string,
@@ -105,12 +106,13 @@ export function saveKey(
     try {
       fs.unlinkSync(tmp);
     } catch {
-      /* tmp мог не создаться */
+      /* the tmp file may not have been created */
     }
     throw err;
   }
-  // На случай перезаписи файла с другими правами — права берутся с tmp (0600),
-  // но chmod страхует от тонкостей rename на экзотических ФС.
+  // In case a file with different permissions is overwritten — the
+  // permissions come from tmp (0600), but the chmod guards against rename
+  // quirks on exotic filesystems.
   fs.chmodSync(target, 0o600);
   return { name: safeName, path: target };
 }

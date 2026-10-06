@@ -5,40 +5,43 @@ import type { DbExecTarget } from './db-query.js';
 import type { Profile } from '../types.js';
 
 /**
- * Сборка команд дампа (эпик 12): `pg_dump | gzip` / `mysqldump | gzip` внутри
- * контейнера, stdout стримится в HTTP-ответ через `execRawChannel` (паттерн
- * `transfer.ts`) — в память архив не собирается. Восстановление из дампа — v2.
+ * Dump command assembly (epic 12): `pg_dump | gzip` / `mysqldump | gzip`
+ * inside the container, stdout is streamed into the HTTP response via
+ * `execRawChannel` (the `transfer.ts` pattern) — the archive is never
+ * assembled in memory. Restoring from a dump — v2.
  *
- * Пароль — как в консоли, первой строкой stdin (`IFS= read -r`): не светится
- * в argv/ps и не берётся из протухшего env контейнера. `exec` перед пайпом
- * невозможен (`exec a | b` — не POSIX), поэтому пролог и пайп в одном `sh -c`.
+ * The password — as in the console, the first line of stdin (`IFS= read
+ * -r`): it does not show up in argv/ps and is not taken from the container's
+ * stale env. An `exec` before the pipe is impossible (`exec a | b` is not
+ * POSIX), so the prologue and the pipe live in one `sh -c`.
  *
- * Ошибки дампа ловит роут (не exit code): без pipefail код пайпа — код gzip,
- * который успешен всегда. `set -o pipefail` не вариант: dash 0.5.11
- * (ubuntu/mariadb-образы) на неизвестной опции **абортит** скрипт (exit 2) —
- * дамп умирал бы целиком. Вместо этого роут буферизует голову stdout до
- * порога: упавший pg_dump/mysqldump не пишет ничего (gzip пустого входа даёт
- * ~20 байт) и ругается в stderr — ошибка отдаётся до отправки заголовков.
+ * Dump errors are caught by the route (not the exit code): without pipefail
+ * the pipe code is gzip's, which always succeeds. `set -o pipefail` is not
+ * an option: dash 0.5.11 (ubuntu/mariadb images) **aborts** the script on an
+ * unknown option (exit 2) — the whole dump would die. Instead the route
+ * buffers the head of stdout up to a threshold: a failed pg_dump/mysqldump
+ * writes nothing (gzip of empty input yields ~20 bytes) and complains in
+ * stderr — the error is returned before the headers are sent.
  *
- * Таймаута канала нет сознательно (как у `/api/files/download-dir`): большой
- * дамп может идти минутами; обрыв отслеживает `req.on('close')`.
+ * No channel timeout deliberately (like `/api/files/download-dir`): a large
+ * dump can run for minutes; `req.on('close')` tracks the disconnect.
  */
 
-/** Экранирование для внутреннего shell контейнера (`sh -c`). */
+/** Escaping for the container's inner shell (`sh -c`). */
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-/** Пролог чтения пароля из первой строки stdin. */
+/** The prologue reading the password from the first line of stdin. */
 function passwordPrologue(envVar: 'PGPASSWORD' | 'MYSQL_PWD', password: string): string {
   return password ? `IFS= read -r ${envVar}; export ${envVar}; ` : '';
 }
 
-/** Порог «пустого» архива: gzip пустого входа даёт ~20 байт; реальный дамп
- * (хоть пустой базы) — сотни байт заголовков SQL. */
+/** The "empty" archive threshold: gzip of empty input yields ~20 bytes; a real
+ * dump (even of an empty database) — hundreds of bytes of SQL headers. */
 export const EMPTY_GZIP_MAX_BYTES = 64;
 
-/** Аргументы `docker exec` дампа PG (транзакционный снапшот по умолчанию). */
+/** `docker exec` arguments for a PG dump (a transactional snapshot by default). */
 export function pgDumpArgs(target: DbExecTarget, database: string): string[] {
   const inner =
     `${passwordPrologue('PGPASSWORD', target.password)}` +
@@ -46,7 +49,7 @@ export function pgDumpArgs(target: DbExecTarget, database: string): string[] {
   return ['exec', '-i', target.containerId, 'sh', '-c', inner];
 }
 
-/** Аргументы `docker exec` дампа MySQL/MariaDB. */
+/** `docker exec` arguments for a MySQL/MariaDB dump. */
 export function mysqlDumpArgs(target: DbExecTarget, database: string): string[] {
   const inner =
     `${passwordPrologue('MYSQL_PWD', target.password)}` +
@@ -55,7 +58,7 @@ export function mysqlDumpArgs(target: DbExecTarget, database: string): string[] 
   return ['exec', '-i', target.containerId, 'sh', '-c', inner];
 }
 
-/** Полная shell-команда дампа (отдельно — под тесты двойного экранирования). */
+/** The full dump shell command (kept separate for double-escaping tests). */
 export function buildDumpCommand(profile: Profile, target: DbExecTarget, database: string): string {
   const args = target.engine === 'postgres'
     ? pgDumpArgs(target, database)
@@ -63,17 +66,17 @@ export function buildDumpCommand(profile: Profile, target: DbExecTarget, databas
   return dockerCommand(profile, args);
 }
 
-/** Имя файла дампа: `<база>-<ГГГГ-ММ-ДД>.sql.gz`. */
+/** Dump file name: `<database>-<YYYY-MM-DD>.sql.gz`. */
 export function dumpFileName(database: string): string {
   const date = new Date().toISOString().slice(0, 10);
   return `${database}-${date}.sql.gz`;
 }
 
 /**
- * Открывает канал дампа: stdout — gzip-стрим. Пароль пишется первой строкой
- * в stdin канала и закрывается на EOF (`end()` — половинное закрытие,
- * stdout продолжает читаться); без пароля EOF всё равно нужен — `read` в
- * прологе команды блокируется до конца stdin.
+ * Opens the dump channel: stdout is a gzip stream. The password is written
+ * as the first line into the channel stdin and closed on EOF (`end()` — a
+ * half-close, stdout keeps being read); without a password the EOF is still
+ * needed — the `read` in the command prologue blocks until the end of stdin.
  */
 export async function openDumpChannel(
   profile: Profile,

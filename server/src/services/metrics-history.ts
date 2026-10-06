@@ -1,11 +1,12 @@
 import type { ServerMetrics } from './metrics.js';
 
 /**
- * Лёгкий срез снимка метрик для графика нагрузки: процессы, диски и прочие
- * тяжёлые поля не копятся — только то, что рисуется на «Обзоре» и «Серверах».
+ * A lightweight slice of the metrics snapshot for the load chart: processes,
+ * disks and other heavy fields are not accumulated — only what is drawn on
+ * "Overview" and "Servers".
  */
 export interface HistorySample {
-  /** Момент снимка (мс, серверное время ssh-commander). */
+  /** Snapshot time (ms, ssh-commander server clock). */
   t: number;
   cpu: number | null;
   memPct: number | null;
@@ -14,16 +15,19 @@ export interface HistorySample {
   load1: number | null;
 }
 
-// Минимальный промежуток между сэмплами — равен TTL кэша collectMetrics:
-// кэш возвращает тот же промис (тот же timestamp), повторная запись не нужна,
-// а два независимых снимка ближе 2 с всё равно не случаются.
+// The minimum gap between samples equals the collectMetrics cache TTL: the
+// cache returns the same promise (the same timestamp), a duplicate record is
+// not needed, and two independent snapshots closer than 2 s do not happen
+// anyway.
 const MIN_SAMPLE_GAP_MS = 2000;
-// ~12 ч при базовом 10-с опросе (сайдбар), ~3,5 ч при плотном 3-с («Обзор»).
+// ~12 h at the basic 10 s polling (sidebar), ~3.5 h at the dense 3 s
+// ("Overview").
 const MAX_SAMPLES_PER_PROFILE = 4320;
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-// Хранилище только в памяти: история живёт, пока работает процесс и интерфейс
-// её кормит опросами (как реестр туннелей). После рестарта копится заново.
+// In-memory storage only: the history lives while the process runs and the
+// UI feeds it with polling (like the tunnel registry). After a restart it
+// accumulates anew.
 const history = new Map<string, HistorySample[]>();
 
 export function toSample(metrics: ServerMetrics): HistorySample {
@@ -37,7 +41,7 @@ export function toSample(metrics: ServerMetrics): HistorySample {
   };
 }
 
-/** Сэмпл стоит записать: первый для профиля либо отстоящий от последнего ≥ 2 с. */
+/** A sample is worth recording: the first for a profile or at least 2 s after the last one. */
 export function shouldAppend(samples: HistorySample[], sample: HistorySample): boolean {
   const last = samples[samples.length - 1];
   if (!last) return true;
@@ -45,8 +49,9 @@ export function shouldAppend(samples: HistorySample[], sample: HistorySample): b
 }
 
 /**
- * Обрезка истории: выбрасываются сэмплы старше maxAgeMs и всё, что сверх
- * maxSamples (остаются самые свежие). Массив не копируется, если резать нечего.
+ * History trim: samples older than maxAgeMs and everything beyond maxSamples
+ * are dropped (the freshest remain). The array is not copied if there is
+ * nothing to cut.
  */
 export function trimSamples(
   samples: HistorySample[],
@@ -65,9 +70,10 @@ export function trimSamples(
 }
 
 /**
- * Равномерная выборка до maxPoints точек (первая и последняя сохраняются),
- * чтобы ответ API не раздувался при больших окнах истории. Всегда возвращает
- * новый массив — вызывающий может его мутировать, не задев реестр.
+ * Uniform sampling down to maxPoints points (the first and last are kept),
+ * so the API response does not bloat on large history windows. Always
+ * returns a new array — the caller may mutate it without touching the
+ * registry.
  */
 export function decimate(samples: HistorySample[], maxPoints: number): HistorySample[] {
   if (samples.length <= maxPoints) return samples.slice();
@@ -80,7 +86,7 @@ export function decimate(samples: HistorySample[], maxPoints: number): HistorySa
   return out;
 }
 
-/** Записать сэмпл из свежего снимка (вызывается из collectMetrics). */
+/** Record a sample from a fresh snapshot (called from collectMetrics). */
 export function appendSample(profileId: string, metrics: ServerMetrics): void {
   const samples = history.get(profileId) ?? [];
   const sample = toSample(metrics);
@@ -89,10 +95,10 @@ export function appendSample(profileId: string, metrics: ServerMetrics): void {
 }
 
 /**
- * История одного профиля (копия, прореженная до maxPoints). Возраст отмеряется
- * и при отдаче — по wall clock: пока профиль лежит и новых сэмплов нет,
- * вчерашние точки не должны выглядеть актуальными (trimSamples при записи
- * отрезает хвост только относительно свежего сэмпла).
+ * One profile's history (a copy, decimated to maxPoints). The age is also
+ * measured on delivery — by wall clock: while a profile is down and there
+ * are no new samples, yesterday's points must not look current (trimSamples
+ * on write cuts the tail only relative to a fresh sample).
  */
 export function getHistory(profileId: string, maxPoints = 360): HistorySample[] {
   const samples = history.get(profileId);
@@ -100,7 +106,7 @@ export function getHistory(profileId: string, maxPoints = 360): HistorySample[] 
   return decimate(trimSamples(samples, Date.now()), maxPoints);
 }
 
-/** История всех профилей для сводного экрана «Серверы». */
+/** All profiles' history for the summary "Servers" screen. */
 export function getAllHistory(
   maxPoints = 120,
 ): Array<{ id: string; samples: HistorySample[] }> {
@@ -110,7 +116,7 @@ export function getAllHistory(
   }));
 }
 
-/** Удаляется вместе с профилем, чтобы реестр не тек. */
+/** Removed along with the profile, so the registry does not leak. */
 export function clearHistory(profileId: string): void {
   history.delete(profileId);
 }

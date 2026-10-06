@@ -5,22 +5,24 @@ import { z } from 'zod';
 import { config } from '../config.js';
 
 /**
- * Отпечатки ключей SSH-хостов (`data/known-hosts.json`), TOFU.
+ * SSH host key fingerprints (`data/known-hosts.json`), TOFU.
  *
- * До этого модуля `ssh2` подключался без `hostVerifier`, то есть принимал
- * любой ключ сервера: при подмене DNS/маршрута пароль профиля уходил чужому
- * хосту на первом же подключении, и приложение об этом не сообщало.
+ * Before this module `ssh2` connected without a `hostVerifier`, i.e. it
+ * accepted any server key: with a spoofed DNS/route the profile's password
+ * went to a foreign host on the very first connection, and the application
+ * said nothing about it.
  *
- * Модель доверия — как у `ssh(1)`: первый ключ запоминается молча, дальше
- * несовпадение обрывает подключение с явным текстом. Файл — кэш, а не данные
- * пользователя: битый переносится в `*.corrupt-*` и заводится заново
- * (в отличие от `profiles.json`, где перезапись запрещена до рестарта).
+ * The trust model is like `ssh(1)`'s: the first key is remembered silently,
+ * after that a mismatch aborts the connection with an explicit message. The
+ * file is a cache, not user data: a broken one is moved to `*.corrupt-*` and
+ * started anew (unlike `profiles.json`, where overwriting is forbidden until
+ * restart).
  */
 
 export interface KnownHost {
-  /** Алгоритм ключа из самого блоба: `ssh-ed25519`, `ecdsa-sha2-nistp256`, … */
+  /** Key algorithm from the blob itself: `ssh-ed25519`, `ecdsa-sha2-nistp256`, … */
   algo: string;
-  /** `SHA256:<base64>` — тот же формат, что печатает `ssh-keygen -lf`. */
+  /** `SHA256:<base64>` — the same format `ssh-keygen -lf` prints. */
   fingerprint: string;
   addedAt: number;
 }
@@ -31,7 +33,7 @@ export interface HostKeyCheck {
   status: HostKeyStatus;
   fingerprint: string;
   algo: string;
-  /** Прежний отпечаток — только при `mismatch`. */
+  /** The previous fingerprint — only for `mismatch`. */
   knownFingerprint?: string;
 }
 
@@ -59,7 +61,7 @@ function load(): Record<string, KnownHost> {
         try {
           fs.renameSync(storePath(), backup);
         } catch {
-          /* оставляем как есть */
+          /* keep the original in place */
         }
         console.warn(`known-hosts store is unreadable, moved to ${backup}; starting a fresh one:`, err);
       }
@@ -77,14 +79,15 @@ function persist(hosts: Record<string, KnownHost>): void {
   cache = { ...hosts };
 }
 
-/** Ключ записи. Хост нормализуется регистром: DNS-имена регистронезависимы. */
+/** Record key. The host is case-normalized: DNS names are case-insensitive. */
 export function hostKeyId(host: string, port: number): string {
   return `${host.trim().toLowerCase()}:${port}`;
 }
 
 /**
- * Алгоритм из блоба публичного ключа: первые 4 байта — длина строки-алгоритма
- * (формат RFC 4253). Мусор на входе — `unknown`, проверку это не ломает.
+ * Algorithm from a public key blob: the first 4 bytes are the length of the
+ * algorithm string (the RFC 4253 format). Garbage on input — `unknown`; the
+ * check does not break because of it.
  */
 export function algoFromBlob(blob: Buffer): string {
   try {
@@ -96,16 +99,16 @@ export function algoFromBlob(blob: Buffer): string {
   }
 }
 
-/** `SHA256:<base64 без паддинга>` — как у `ssh-keygen -lf`, чтобы сверять глазами. */
+/** `SHA256:<base64 without padding>` — like `ssh-keygen -lf`, so it can be compared by eye. */
 export function fingerprintOf(blob: Buffer): string {
   const digest = crypto.createHash('sha256').update(blob).digest('base64');
   return `SHA256:${digest.replace(/=+$/, '')}`;
 }
 
 /**
- * Сверяет ключ хоста с сохранённым. Незнакомый хост запоминается (TOFU) и
- * получает `new`; совпадение — `match`; иначе `mismatch`, и подключение
- * обязано быть прервано вызывающим.
+ * Compares the host key with the stored one. An unknown host is remembered
+ * (TOFU) and gets `new`; a match — `match`; otherwise `mismatch`, and the
+ * caller must abort the connection.
  */
 export function checkHostKey(host: string, port: number, blob: Buffer): HostKeyCheck {
   const id = hostKeyId(host, port);
@@ -123,14 +126,14 @@ export function checkHostKey(host: string, port: number, blob: Buffer): HostKeyC
   return { status: 'mismatch', fingerprint, algo, knownFingerprint: known.fingerprint };
 }
 
-/** Забыть хост — после осознанной переустановки сервера. */
+/** Forget a host — after a deliberate server reinstallation. */
 export function forgetHostKey(host: string, port: number): void {
   const hosts = { ...load() };
   delete hosts[hostKeyId(host, port)];
   persist(hosts);
 }
 
-/** Текст для пользователя: что случилось и что с этим делать. */
+/** The message for the user: what happened and what to do about it. */
 export function hostKeyMismatchMessage(host: string, port: number, check: HostKeyCheck): string {
   return (
     `Ключ хоста ${host}:${port} изменился — подключение прервано. ` +
@@ -141,7 +144,7 @@ export function hostKeyMismatchMessage(host: string, port: number, check: HostKe
   );
 }
 
-/** Только для тестов: сбросить кэш между прогонами с разным DATA_DIR. */
+/** Tests only: reset the cache between runs with different DATA_DIR. */
 export function resetKnownHostsCache(): void {
   cache = null;
 }

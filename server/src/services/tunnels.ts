@@ -31,14 +31,14 @@ interface TunnelInternal extends Tunnel {
 const tunnels = new Map<string, TunnelInternal>();
 let nextId = 1;
 
-// Диапазон портов для автоподбора и ограничений.
-// Переопределяется через env TUNNEL_PORT_MIN/MAX (для Docker-развёртывания).
+// Port range for auto-selection and limits.
+// Overridden via the TUNNEL_PORT_MIN/MAX env (for the Docker deployment).
 const PORT_MIN = Number(process.env.TUNNEL_PORT_MIN) || 10000;
 const PORT_MAX = Number(process.env.TUNNEL_PORT_MAX) || 10049;
 const MAX_TUNNELS_PER_PROFILE = 10;
 const MAX_CONNECTIONS_PER_TUNNEL = 10;
 
-// Валидация диапазона при старте.
+// Range validation at startup.
 if (PORT_MIN > PORT_MAX) {
   throw new Error(`TUNNEL_PORT_MIN (${PORT_MIN}) > TUNNEL_PORT_MAX (${PORT_MAX})`);
 }
@@ -48,27 +48,27 @@ export function getPortRange(): { min: number; max: number } {
 }
 
 /**
- * Валидация параметров туннеля. Чистая функция — удобна для unit-тестов.
- * Бросает Error с понятным сообщением при невалидных данных.
+ * Tunnel parameter validation. A pure function — convenient for unit tests.
+ * Throws an Error with a clear message on invalid data.
  */
 export function validateTunnelParams(params: TunnelParams, existingTunnels?: Tunnel[]): void {
   const { localPort, targetHost, targetPort, profileId } = params;
 
-  // Локальный порт: 0 (авто) или диапазон 1–65535.
+  // Local port: 0 (auto) or the 1–65535 range.
   if (localPort !== 0 && (localPort < 1 || localPort > 65535)) {
     throw new Error(`Недопустимый локальный порт: ${localPort}`);
   }
-  // Ограничение диапазона для локального запуска (Docker-диапазон задаётся env).
+  // Range restriction for a local run (the Docker range is set via env).
   if (localPort !== 0 && (localPort < PORT_MIN || localPort > PORT_MAX)) {
     throw new Error(`Локальный порт вне диапазона ${PORT_MIN}–${PORT_MAX}`);
   }
 
-  // Целевой порт: 1–65535.
+  // Target port: 1–65535.
   if (targetPort < 1 || targetPort > 65535) {
     throw new Error(`Недопустимый целевой порт: ${targetPort}`);
   }
 
-  // Целевой хост: hostname/IP до 253 символов, только безопасные символы.
+  // Target host: a hostname/IP up to 253 characters, safe characters only.
   if (!targetHost || targetHost.length > 253) {
     throw new Error('Недопустимый целевой хост');
   }
@@ -76,13 +76,13 @@ export function validateTunnelParams(params: TunnelParams, existingTunnels?: Tun
     throw new Error('Целевой хост содержит недопустимые символы');
   }
 
-  // Лимит туннелей на профиль (считаем только active).
+  // Tunnel limit per profile (only active ones are counted).
   const profileTunnels = existingTunnels?.filter((t) => t.profileId === profileId && t.status === 'active') ?? [];
   if (profileTunnels.length >= MAX_TUNNELS_PER_PROFILE) {
     throw new Error(`Превышен лимит туннелей на профиль (${MAX_TUNNELS_PER_PROFILE})`);
   }
 
-  // Дубликат (profileId, localPort).
+  // A duplicate (profileId, localPort).
   const duplicate = existingTunnels?.find(
     (t) => t.profileId === profileId && t.localPort === localPort && t.status === 'active',
   );
@@ -92,8 +92,9 @@ export function validateTunnelParams(params: TunnelParams, existingTunnels?: Tun
 }
 
 /**
- * Создаёт SSH-туннель (эквивалент `ssh -L`). Слушает 127.0.0.1:localPort,
- * на каждое TCP-соединение открывает direct-tcpip канал через SSH к targetHost:targetPort.
+ * Creates an SSH tunnel (the `ssh -L` equivalent). Listens on
+ * 127.0.0.1:localPort; for every TCP connection it opens a direct-tcpip
+ * channel via SSH to targetHost:targetPort.
  */
 export async function createTunnel(profile: Profile, params: TunnelParams): Promise<Tunnel> {
   const allTunnels = listTunnels();
@@ -120,29 +121,31 @@ export async function createTunnel(profile: Profile, params: TunnelParams): Prom
   server.on('connection', (socket) => handleConnection(tunnel, socket));
 
   server.on('error', (err) => {
-    // EADDRINUSE при ручном указании занятого порта.
-    // Туннель остаётся в реестре со статусом closed и ошибкой — UI покажет
-    // кнопку «Удалить» (пользователь может удалить и создать заново).
+    // EADDRINUSE when a busy port is set manually.
+    // The tunnel stays in the registry with the closed status and an error —
+    // the UI shows the "Delete" button (the user can delete it and create a
+    // new one).
     tunnel.status = 'closed';
     tunnel.error = err.message;
-    // Не удаляем из реестра — пусть UI увидит closed-статус.
+    // Not removed from the registry — let the UI see the closed status.
   });
 
-  // Добавляем в реестр ДО listen, чтобы при ошибке listen (EADDRINUSE)
-  // туннель уже был в реестре со статусом closed.
+  // Added to the registry BEFORE listen, so that on a listen error
+  // (EADDRINUSE) the tunnel is already in the registry with the closed status.
   tunnels.set(id, tunnel);
 
   try {
     await new Promise<void>((resolve, reject) => {
-      // Слушаем на 0.0.0.0 внутри контейнера, чтобы Docker мог пробросить
-      // соединение на этот порт. На хосте Docker ограничивает доступ через
-      // 127.0.0.1:10000-10049 в compose.yml — наружу порт не торчит.
+      // Listening on 0.0.0.0 inside the container so that Docker can forward
+      // a connection to this port. On the host Docker restricts access via
+      // 127.0.0.1:10000-10049 in compose.yml — the port does not stick out.
       server.listen(localPort, '0.0.0.0', () => resolve());
       server.once('error', (err) => reject(err));
     });
   } catch (err) {
-    // listen failed — туннель уже в реестре со статусом closed (обработчик error выше).
-    // Пробрасываем ошибку, чтобы роут вернул 409/500.
+    // listen failed — the tunnel is already in the registry with the closed
+    // status (the error handler above). Rethrow so that the route returns
+    // 409/500.
     throw err;
   }
 
@@ -150,7 +153,7 @@ export async function createTunnel(profile: Profile, params: TunnelParams): Prom
 }
 
 async function handleConnection(tunnel: TunnelInternal, socket: net.Socket): Promise<void> {
-  // Резервируем слот сразу (до await), чтобы параллельные соединения не пробили лимит.
+  // Reserve the slot immediately (before await), so that parallel connections do not break the limit.
   if (tunnel.activeConnections.size >= MAX_CONNECTIONS_PER_TUNNEL) {
     socket.destroy();
     return;
@@ -169,7 +172,7 @@ async function handleConnection(tunnel: TunnelInternal, socket: net.Socket): Pro
 
     tunnel.activeConnections.add(channel);
 
-    // Двусторонний pipe.
+    // Two-way pipe.
     socket.pipe(channel);
     channel.pipe(socket);
 
@@ -193,7 +196,7 @@ async function handleConnection(tunnel: TunnelInternal, socket: net.Socket): Pro
     channel.on('close', cleanup);
     channel.on('error', cleanup);
   } catch (err) {
-    // Ошибка открытия канала (AllowTcpForwarding no, хост недоступен и т.д.).
+    // Channel open failure (AllowTcpForwarding no, unreachable host, etc.).
     tunnel.activeConnections.delete(socket);
     try {
       socket.destroy();
@@ -218,7 +221,7 @@ function isPortAvailable(port: number): Promise<boolean> {
     server.once('listening', () => {
       server.close(() => resolve(true));
     });
-    // Проверяем на 0.0.0.0 — там же будет слушать туннель.
+    // Check on 0.0.0.0 — the same address the tunnel will listen on.
     server.listen(port, '0.0.0.0');
   });
 }
@@ -236,7 +239,7 @@ export async function deleteTunnel(id: string): Promise<void> {
   const t = tunnels.get(id);
   if (!t) return;
 
-  // Закрываем все активные соединения.
+  // Close all active connections.
   for (const conn of t.activeConnections) {
     try {
       if (conn instanceof net.Socket) {
@@ -250,7 +253,7 @@ export async function deleteTunnel(id: string): Promise<void> {
   }
   t.activeConnections.clear();
 
-  // Закрываем сервер.
+  // Close the server.
   await new Promise<void>((resolve) => {
     t.server.close(() => resolve());
   });

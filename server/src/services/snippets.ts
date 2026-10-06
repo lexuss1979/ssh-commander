@@ -8,18 +8,18 @@ import type { ExecResult, Profile } from '../types.js';
 import { withTimeout } from '../util/async.js';
 
 /**
- * Хранилище сохранённых команд (эпик 18): сниппет — «команда на всех или на
- * выбранных серверах». Паттерн `db-connections.ts`: zod-валидация, атомарная
- * запись tmp+rename, corrupt-guard. Секретов нет — safe-маппинг не нужен,
- * запись отдаётся наружу как есть (команда может содержать пароль — тот же
- * уровень доверия, что у терминала и `profiles.json`).
+ * Saved commands store (epic 18): a snippet is "a command on all or selected
+ * servers". The `db-connections.ts` pattern: zod validation, atomic
+ * tmp+rename write, corrupt-guard. No secrets — no safe mapping needed, the
+ * record is returned as is (a command may contain a password — the same
+ * trust level as the terminal and `profiles.json`).
  */
 
 export const snippetInputSchema = z.object({
   name: z.string().min(1, 'Укажите имя команды').max(100),
   command: z.string().min(1, 'Укажите команду').max(10000),
   description: z.string().max(500).optional(),
-  // null — «доступен на всех серверах»; отсутствие поля означает то же самое.
+  // null — "available on all servers"; a missing field means the same.
   profileIds: z.array(z.string().min(1)).max(50).nullable().optional(),
 });
 
@@ -84,14 +84,14 @@ function persist(list: Snippet[]): void {
   }
   fs.mkdirSync(config.dataDir, { recursive: true });
   const tmp = `${storePath()}.tmp`;
-  // 0600: в сохранённых командах бывают секреты (риск уровня терминала).
+  // 0600: saved commands may contain secrets (a terminal-level risk).
   fs.writeFileSync(tmp, JSON.stringify({ snippets: list }, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, storePath());
   cache = list;
 }
 
 export function listSnippets(): Snippet[] {
-  // profileIds копируем глубже: наружу не должен уходить массив, общий с кэшем.
+  // profileIds is copied deeper: the array shared with the cache must not leak out.
   return load().map((s) => ({
     ...s,
     profileIds: s.profileIds ? [...s.profileIds] : s.profileIds,
@@ -111,8 +111,8 @@ export function requireSnippet(id: string): Snippet {
 }
 
 function newId(list: Snippet[]): string {
-  // 8 символов UUID — 32 бита; коллизию проверяем, иначе delete/update
-  // задели бы обе записи.
+  // 8 UUID characters — 32 bits; collisions are checked, otherwise
+  // delete/update would hit both records.
   let id = crypto.randomUUID().slice(0, 8);
   while (list.some((s) => s.id === id)) {
     id = crypto.randomUUID().slice(0, 8);
@@ -130,13 +130,13 @@ export function createSnippet(input: unknown): Snippet {
     createdAt: now,
     updatedAt: now,
   };
-  // Новый массив, а не мутация кэша: при отказе persist (corrupt/диск) кэш
-  // в памяти не должен разойтись с файлом на диске.
+  // A new array, not a cache mutation: if persist fails (corrupt/disk), the
+  // in-memory cache must not diverge from the file on disk.
   persist([...load(), snippet]);
   return { ...snippet };
 }
 
-/** Полная замена полей по схеме: секретов нет, частичный update не нужен. */
+/** Full replacement of fields per the schema: no secrets, a partial update is not needed. */
 export function updateSnippet(id: string, input: unknown): Snippet {
   const list = load();
   const idx = list.findIndex((s) => s.id === id);
@@ -166,17 +166,17 @@ export function deleteSnippet(id: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// Запуск на нескольких профилях
+// Running on multiple profiles
 // ---------------------------------------------------------------------------
 
-/** Таймаут на профиль: перезапуск службы бывает дольше дефолтных 60 c exec. */
+/** Timeout per profile: a service restart can take longer than the exec default of 60 s. */
 export const RUN_TIMEOUT_MS = 120000;
-/** Лимит целей за один запуск: по транзитному SSH-каналу на профиль. */
+/** Target limit per run: one transit SSH channel per profile. */
 export const RUN_PROFILES_LIMIT = 10;
-/** Обрезка вывода в ответе: 10 профилей × 2 МБ × 2 потока в один JSON нельзя. */
+/** Output truncation in the response: 10 profiles × 2 MB × 2 streams must not go into one JSON. */
 export const RUN_RESULT_TEXT_LIMIT = 100_000;
 
-/** Тело POST /api/snippets/run: сниппет или разовая команда, XOR на схеме. */
+/** POST /api/snippets/run body: a snippet or an ad-hoc command, XOR at the schema level. */
 export const snippetRunBodySchema = z
   .object({
     snippetId: z.string().min(1).optional(),
@@ -196,24 +196,24 @@ export const snippetRunBodySchema = z
 
 export type SnippetRunBody = z.infer<typeof snippetRunBodySchema>;
 
-/** Результат запуска на одном профиле — элемент ответа /api/snippets/run. */
+/** Result of a run on one profile — an element of the /api/snippets/run response. */
 export interface SnippetRunResult {
   profileId: string;
-  /** true — только exit code 0. */
+  /** true — exit code 0 only. */
   ok: boolean;
-  /** null — транспортный отказ/таймаут, команда не завершилась. */
+  /** null — transport failure/timeout, the command did not finish. */
   code: number | null;
   stdout: string;
   stderr: string;
-  /** Длительность попытки (мс), включая отказ по таймауту. */
+  /** Attempt duration (ms), including a timeout failure. */
   ms: number;
-  /** stdout или stderr не влезли в лимит ответа. */
+  /** stdout or stderr did not fit into the response limit. */
   truncated: boolean;
-  /** Текст транспортного отказа (отсутствует, если команда завершилась). */
+  /** Transport failure text (absent if the command finished). */
   error?: string;
 }
 
-/** Результат профиля до маппинга: settled-статус exec + замер времени. */
+/** Profile result before mapping: the exec settled status + a time measurement. */
 export interface SnippetRunEntry {
   profileId: string;
   ms: number;
@@ -228,8 +228,9 @@ export function truncateRunText(text: string): { text: string; truncated: boolea
 }
 
 /**
- * Чистый маппинг settled-результатов в элементы ответа (под unit-тесты).
- * Отказ профиля — ok:false с текстом ошибки, остальные результаты целы.
+ * Pure mapping of settled results to response items (for unit tests).
+ * A profile failure — ok:false with the error text, the other results are
+ * intact.
  */
 export function mapRunResults(entries: SnippetRunEntry[]): SnippetRunResult[] {
   return entries.map(({ profileId, ms, result }) => {
@@ -267,11 +268,12 @@ export type SnippetExecFn = (
 ) => Promise<ExecResult>;
 
 /**
- * Параллельный запуск команды на профилях. Команда передаётся в exec как
- * есть: это ручной инструмент уровня терминала — без deny-листа и без
- * экранирования (защита — подтверждение в UI со списком целей). На профиль —
- * guard-таймаут RUN_TIMEOUT_MS, чтобы один зависший сервер не держал ответ;
- * отказ одного профиля не роняет остальные (Promise.all-обёртки не бросают).
+ * Parallel command run on profiles. The command is passed to exec as is:
+ * this is a manual terminal-level tool — no command filtering and no
+ * escaping (the protection is the UI confirmation with the list of targets).
+ * Per profile — the RUN_TIMEOUT_MS guard timeout, so that one hung server
+ * does not hold the response; one profile's failure does not fail the others
+ * (the Promise.all wrappers do not throw).
  */
 export async function runSnippetOnProfiles(
   command: string,

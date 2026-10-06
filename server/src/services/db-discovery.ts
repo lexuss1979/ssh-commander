@@ -4,30 +4,31 @@ import { parseInspectPorts } from './container-ports.js';
 
 export type DbEngine = 'postgres' | 'mysql';
 
-/** MariaDB отличается от MySQL именем переменной таймаута (секунды vs мс). */
+/** MariaDB differs from MySQL in the timeout variable name (seconds vs ms). */
 export type MysqlFlavor = 'mysql' | 'mariadb';
 
 /**
- * Обнаруженный контейнер СУБД — подсказка для формы подключения (итерация 2):
- * автозаполняет движок, пользователя и базу по умолчанию из env официальных
- * образов. Креденшалы пользователь задаёт явно — env контейнера может
- * протухнуть (причина отката итерации 1), пароль вводит человек.
+ * A discovered DB container — a hint for the connection form (iteration 2):
+ * auto-fills the engine, user and default database from the official images'
+ * env. Credentials are entered explicitly by the user — the container env
+ * may go stale (the reason iteration 1 was rolled back), the password is
+ * typed by a human.
  */
 export interface DbContainerSuggestion {
-  /** Id docker-контейнера. */
+  /** Docker container id. */
   id: string;
   name: string;
   engine: DbEngine;
   image: string;
-  /** Подсказка пользователя из POSTGRES_USER / MYSQL_USER (root для mysql). */
+  /** User hint from POSTGRES_USER / MYSQL_USER (root for mysql). */
   suggestedUser: string;
-  /** Подсказка базы из POSTGRES_DB / MYSQL_DATABASE; null — нет. */
+  /** Database hint from POSTGRES_DB / MYSQL_DATABASE; null — none. */
   suggestedDatabase: string | null;
-  /** MySQL: семейство образа — влияет на синтаксис SET таймаута. */
+  /** MySQL: the image family — affects the timeout SET syntax. */
   flavor?: MysqlFlavor;
 }
 
-/** Контейнер с портом СУБД, но неопознанным образом — подсказка, не вариант формы. */
+/** A container with a DB port but an unrecognized image — a hint, not a form option. */
 export interface DbHint {
   id: string;
   name: string;
@@ -39,18 +40,19 @@ export interface DbDiscoveryResult {
   hints: DbHint[];
 }
 
-/** Репозитории образов → движок. Список расширяемый (эпик 12, план). */
+/** Image repositories → engine. The list is extensible (epic 12, the plan). */
 const PG_REPOS = new Set(['postgres', 'postgis/postgis', 'bitnami/postgresql']);
 const MYSQL_REPOS = new Set(['mysql', 'mysql/mysql-server', 'bitnami/mysql']);
 const MARIADB_REPOS = new Set(['mariadb', 'bitnami/mariadb']);
 
-/** Порты, по которым контейнер попадает в подсказки при неопознанном образе. */
+/** Ports by which a container with an unrecognized image gets into hints. */
 const DB_PORT_HINTS = new Set([5432, 3306]);
 
 /**
- * Репозиторий из референса образа: отрезает registry (компонент до первого
- * `/` с точкой/двоеточием или `localhost`), тег после последнего `:` и
- * digest после `@`. Чистая функция — весь матчинг движков под unit-тесты.
+ * Repository from an image reference: cuts off the registry (the component
+ * before the first `/` with a dot/colon or `localhost`), the tag after the
+ * last `:` and the digest after `@`. A pure function — all engine matching
+ * is under unit tests.
  */
 export function imageRepository(imageRef: string): string {
   let ref = imageRef.trim().toLowerCase();
@@ -66,13 +68,13 @@ export function imageRepository(imageRef: string): string {
       ref = ref.slice(firstSlash + 1);
     }
   }
-  // Официальные образы на Hub живут в `library/` — ref'ы вида
-  // `docker.io/library/mysql` указывают на тот же образ, что и `mysql`.
+  // Official Hub images live in `library/` — refs like
+  // `docker.io/library/mysql` point to the same image as `mysql`.
   if (ref.startsWith('library/')) ref = ref.slice('library/'.length);
   return ref;
 }
 
-/** Матчит образ на поддерживаемый движок; null — не СУБД. */
+/** Matches an image against a supported engine; null — not a DB. */
 export function matchDbEngine(imageRef: string): DbEngine | null {
   const repo = imageRepository(imageRef);
   if (PG_REPOS.has(repo)) return 'postgres';
@@ -82,12 +84,12 @@ export function matchDbEngine(imageRef: string): DbEngine | null {
   return null;
 }
 
-/** Семейство MySQL-образа: mariadb имеет другой синтаксис таймаута. */
+/** MySQL image family: mariadb has a different timeout syntax. */
 export function matchMysqlFlavor(imageRef: string): MysqlFlavor {
   return MARIADB_REPOS.has(imageRepository(imageRef)) ? 'mariadb' : 'mysql';
 }
 
-/** `KEY=VALUE`-строки `Config.Env` → словарь (значение может содержать `=`). */
+/** `Config.Env` `KEY=VALUE` lines → a map (a value may contain `=`). */
 export function extractEnv(env: string[] | undefined): Record<string, string> {
   const map: Record<string, string> = {};
   for (const line of env ?? []) {
@@ -99,9 +101,10 @@ export function extractEnv(env: string[] | undefined): Record<string, string> {
 }
 
 /**
- * Inspect-объект → подсказка для формы подключения; null — образ не опознан.
- * env используется только как автозаполнение: пароль из env мог протухнуть
- * (наблюдено на проде в итерации 1), источник истины — человек в форме.
+ * An inspect object → a connection form hint; null — the image is not
+ * recognized. env is used for auto-fill only: the env password may have gone
+ * stale (observed in production in iteration 1), the source of truth is the
+ * human in the form.
  */
 export function toDbSuggestion(entity: DockerEntity): DbContainerSuggestion | null {
   const config = (entity.Config as DockerEntity | undefined) ?? {};
@@ -124,9 +127,9 @@ export function toDbSuggestion(entity: DockerEntity): DbContainerSuggestion | nu
       suggestedDatabase: env.POSTGRES_DB || user,
     };
   }
-  // MySQL: пара MYSQL_USER+MYSQL_PASSWORD создаёт отдельного пользователя,
-  // иначе root. Схему с именем пользователя MySQL (в отличие от PG) не
-  // создаёт — без MYSQL_DATABASE подсказки базы нет.
+  // MySQL: the MYSQL_USER+MYSQL_PASSWORD pair creates a separate user,
+  // otherwise root. It does not create a schema named after the MySQL user
+  // (unlike PG) — without MYSQL_DATABASE there is no database hint.
   return {
     id,
     name,
@@ -138,7 +141,7 @@ export function toDbSuggestion(entity: DockerEntity): DbContainerSuggestion | nu
   };
 }
 
-/** Контейнер с портом 5432/3306, но неопознанным образом → подсказка. */
+/** A container with port 5432/3306 but an unrecognized image → a hint. */
 export function toDbHint(entity: DockerEntity): DbHint | null {
   const engine = matchDbEngine(String((entity.Config as DockerEntity | undefined)?.Image ?? ''));
   if (engine) return null;
@@ -155,9 +158,9 @@ const CACHE_TTL_MS = 2000;
 const cache = new Map<string, { at: number; promise: Promise<DbDiscoveryResult> }>();
 
 /**
- * Обнаружение контейнеров СУБД на профиле: `docker ps` + один батч-
- * `docker inspect` (паттерн `container-ports.ts`). Кэш 2 с на профиль;
- * docker недоступен → reject (роут решает, как деградировать).
+ * Discovery of DB containers on a profile: `docker ps` + a single batch
+ * `docker inspect` (the `container-ports.ts` pattern). A 2 s cache per
+ * profile; docker unavailable → reject (the route decides how to degrade).
  */
 export function discoverDbContainers(profile: Profile): Promise<DbDiscoveryResult> {
   const now = Date.now();

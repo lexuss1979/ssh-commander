@@ -7,7 +7,7 @@ import { importProfile, listProfiles, normalizeLogPaths, profileInputSchema } fr
 import { assertPrivateKeyContent, sanitizeKeyFileName, saveKey } from './keys.js';
 import type { Profile } from '../types.js';
 
-/** Ошибка переноса профилей с HTTP-статусом для роутера. */
+/** Profile transfer error with an HTTP status for the router. */
 export class ProfileTransferError extends Error {
   constructor(
     message: string,
@@ -19,8 +19,8 @@ export class ProfileTransferError extends Error {
 
 const BACKUP_APP = 'ssh-commander-profiles';
 const BACKUP_VERSION = 1;
-// scrypt: 16 МБ памяти, заметная задержка подбора пароля — укладывается в
-// дефолтный maxmem node (32 МБ).
+// scrypt: 16 MB of memory, a noticeable password-cracking delay — fits into
+// the node default maxmem (32 MB).
 const KDF = { algo: 'scrypt', N: 16384, r: 8, p: 1, keylen: 32 } as const;
 
 interface BackupKey {
@@ -54,17 +54,18 @@ const encryptedEnvelopeSchema = envelopeBaseSchema.extend({
   data: z.string().min(1),
 });
 
-// Содержимое бэкапа: для открытого файла — сам envelope (лишние поля
-// app/version отбрасываются), для зашифрованного — расшифрованный payload.
+// Backup contents: for a plaintext file — the envelope itself (extra
+// app/version fields are dropped), for an encrypted one — the decrypted
+// payload.
 const payloadSchema = z.object({
   profiles: z.array(z.unknown()).default([]),
   keys: z.array(z.object({ name: z.string(), content: z.string() })).default([]),
 });
 
 export interface ExportOptions {
-  /** Включать пароли/passphrase и содержимое ключей. Без них перенос требует ручного ввода секретов. */
+  /** Include passwords/passphrases and key contents. Without them the transfer requires manual secret entry. */
   includeSecrets: boolean;
-  /** Пароль шифрования; без него бэкап сохраняется открытым текстом. */
+  /** The encryption password; without it the backup is saved in plain text. */
   passphrase?: string;
 }
 
@@ -78,8 +79,9 @@ export function buildExport(opts: ExportOptions): string {
     return rest;
   });
 
-  // Ключи вкладываем только вместе с секретами и только из KEYS_DIR:
-  // keyPath профиля — путь на хосте приложения, читать что попало нельзя.
+  // Keys are embedded only together with secrets and only from KEYS_DIR:
+  // a profile's keyPath is a path on the application host, reading anything
+  // arbitrary is not allowed.
   const keys: BackupKey[] = [];
   if (opts.includeSecrets) {
     const keysDir = path.resolve(config.keysDir);
@@ -137,7 +139,7 @@ export interface ImportSummary {
   renamed: Array<{ from: string; to: string }>;
   keysSaved: number;
   keysSkipped: string[];
-  /** Профили без секрета (экспортированы без секретов) — пароль нужно задать вручную. */
+  /** Profiles without a secret (exported without secrets) — the password must be set manually. */
   needSecrets: string[];
 }
 
@@ -193,7 +195,7 @@ export function importBackup(raw: string, passphrase?: string): ImportSummary {
   const payload = payloadSchema.safeParse(payloadRaw);
   if (!payload.success) throw new ProfileTransferError('Повреждённое содержимое бэкапа');
 
-  // Всё валидируем до первой записи: либо импортируется всё, либо ничего.
+  // Everything is validated before the first write: either everything imports or nothing does.
   const keys = payload.data.keys.map((k) => {
     sanitizeKeyFileName(k.name);
     try {
@@ -206,9 +208,9 @@ export function importBackup(raw: string, passphrase?: string): ImportSummary {
   const profiles = payload.data.profiles.map((p, i) => {
     try {
       const data = profileInputSchema.parse(p);
-      // logPaths нормализуем здесь, на этапе валидации до первой записи —
-      // «либо импортируется всё, либо ничего» не должно нарушаться плохим
-      // путём лога (относительный/..) в середине бэкапа.
+      // logPaths is normalized here, at the validation stage before the
+      // first write — "either everything imports or nothing does" must not
+      // be broken by a bad log path (relative/..) in the middle of a backup.
       if (data.logPaths) data.logPaths = normalizeLogPaths(data.logPaths);
       return data;
     } catch (err) {
@@ -220,7 +222,7 @@ export function importBackup(raw: string, passphrase?: string): ImportSummary {
     }
   });
 
-  // Ключи: существующие не затираем — профили будут ссылаться на них.
+  // Keys: existing ones are not overwritten — profiles will reference them.
   const summary: ImportSummary = {
     imported: 0,
     renamed: [],
@@ -242,10 +244,11 @@ export function importBackup(raw: string, passphrase?: string): ImportSummary {
 
   const existingNames = new Set(listProfiles().map((p) => p.name));
   for (const data of profiles) {
-    // Перепривязываем ключ к пути в KEYS_DIR текущей установки — всегда, а не
-    // только для вложенных в бэкап ключей: путь из чужой установки (например
-    // /keys/... из Docker в локальный запуск) не пройдёт проверку keyPath.
-    // Файла может не оказаться — ниже это попадёт в needSecrets, как и раньше.
+    // Rebind the key to a path in the current installation's KEYS_DIR —
+    // always, not only for keys embedded in the backup: a path from a
+    // foreign installation (e.g. /keys/... from Docker into a local run)
+    // would not pass the keyPath check. The file may be missing — below
+    // that lands in needSecrets, as before.
     if (data.keyPath) {
       const mapped = keyPaths.get(path.basename(data.keyPath));
       data.keyPath = mapped ?? path.join(config.keysDir, sanitizeKeyFileName(path.basename(data.keyPath)));

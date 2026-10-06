@@ -2,53 +2,55 @@ import { X509Certificate } from 'node:crypto';
 import type { NginxListen, NginxSite, NginxTarget } from '../types.js';
 
 /**
- * Чистый парсер вывода `nginx -T` (решение 1 плана: источник данных — только
- * раскрытый дамп; маркеры `# configuration file <путь>:` приписывают каждый
- * server-блок своему файлу). Без I/O — под unit-тесты (паттерн cron.ts/ports.ts).
+ * Pure parser of `nginx -T` output (plan decision 1: the data source is the
+ * expanded dump only; the `# configuration file <path>:` markers attribute
+ * each server block to its file). No I/O — for unit tests (the
+ * cron.ts/ports.ts pattern).
  *
- * Парсер консервативен (решение 8): непонятное поле — пропуск/пусто, а не
- * ошибка; `map`/`upstream`/`geo`/`if`/`stream` игнорируются молча.
+ * The parser is conservative (decision 8): an unclear field is skipped/empty,
+ * not an error; `map`/`upstream`/`geo`/`if`/`stream` are silently ignored.
  */
 
 export interface ParsedLocation {
-  /** Первый аргумент location (матч: '/', '~ ^/api/' и т.п.). */
+  /** The first location argument (the match: '/', '~ ^/api/' etc.). */
   match: string;
-  /** proxy_pass на верхнем уровне location; null — нет. */
+  /** proxy_pass at the top level of the location; null — none. */
   proxyPass: string | null;
 }
 
 export interface ParsedServerBlock {
-  /** Файл из маркера дампа; null — маркера не было (не должно случаться). */
+  /** File from the dump marker; null — no marker (should not happen). */
   file: string | null;
   serverNames: string[];
   listens: NginxListen[];
-  /** Последний root на уровне server-блока; null — нет. */
+  /** The last root at the server block level; null — none. */
   root: string | null;
-  /** Последний ssl_certificate на уровне server-блока; null — нет. */
+  /** The last ssl_certificate at the server block level; null — none. */
   sslCertificate: string | null;
-  /** Только верхнеуровневые location (прямые дети server). */
+  /** Only top-level locations (direct children of server). */
   locations: ParsedLocation[];
 }
 
 export interface ParsedNginxConfig {
   /**
-   * ssl_certificate с http-уровня (общий сертификат, решение 7) — дефолт
-   * для server-блоков без своего. null — на http-уровне сертификата нет.
+   * ssl_certificate from the http level (a shared certificate, decision 7) —
+   * the default for server blocks without their own. null — no certificate
+   * at the http level.
    */
   httpSslCertificate: string | null;
-  /** Верхнеуровневые server-блоки внутри http. */
+  /** Top-level server blocks inside http. */
   sites: ParsedServerBlock[];
 }
 
 const FILE_MARKER_RE = /^# configuration file (.+?):?$/;
 
-/** Маркер `# configuration file <путь>:` — имя следующего файла. */
+/** The `# configuration file <path>:` marker — the name of the next file. */
 export function frameFile(line: string): string | null {
   const m = line.match(FILE_MARKER_RE);
   return m ? m[1] : null;
 }
 
-/** Раскадровка дампа по маркерам файлов (паттерн батча `/etc/cron.d`). */
+/** Split the dump into frames by file markers (the `/etc/cron.d` batch pattern). */
 export function splitDumpFrames(text: string): Array<{ file: string; text: string }> {
   const frames: Array<{ file: string; text: string }> = [];
   let current: { file: string; lines: string[] } | null = null;
@@ -68,18 +70,18 @@ export function splitDumpFrames(text: string): Array<{ file: string; text: strin
 interface NginxStatement {
   directive: string;
   args: string[];
-  /** Есть — блочная директива (server, location, http, upstream, ...). */
+  /** Present — a block directive (server, location, http, upstream, ...). */
   block?: NginxStatement[];
 }
 
 /**
- * Токенизация текста фрейма: слова, одинарные/двойные кавычки (значения
- * с пробелами и `#` внутри кавычек), `;` `{` `}` отдельными токенами.
- * Комментарии `#` — только вне кавычек, до конца строки: значение вида
- * `"a#b"` или `'it''s #1'` не обрезается (маркеры файлов уже сняты
- * раскадровкой, внутри фреймов `#` — комментарий). Скобки считаем
- * лексически (решение 8): `}` внутри строки/кавычек не учитывается —
- * кавычки экранируют.
+ * Tokenization of a frame's text: words, single/double quotes (values with
+ * spaces and `#` inside quotes), `;` `{` `}` as separate tokens. `#`
+ * comments are only outside quotes, up to the end of the line: a value like
+ * `"a#b"` or `'it''s #1'` is not cut off (file markers are already removed
+ * by the frame split; inside frames `#` is a comment). Braces are counted
+ * lexically (decision 8): a `}` inside a string/quotes is not counted —
+ * quotes escape it.
  */
 function tokenize(text: string): string[] {
   const tokens: string[] = [];
@@ -118,7 +120,7 @@ function tokenize(text: string): string[] {
   return tokens;
 }
 
-/** Токены → дерево утверждений (стек блоков, brace-matching лексически). */
+/** Tokens → a statement tree (a stack of blocks, lexical brace-matching). */
 function parseStatements(tokens: string[]): NginxStatement[] {
   const root: NginxStatement[] = [];
   const stack: NginxStatement[][] = [root];
@@ -150,7 +152,7 @@ function parseStatements(tokens: string[]): NginxStatement[] {
   return root;
 }
 
-/** Последнее значение простой директивы среди прямых детей (для nginx «последнее» побеждает). */
+/** The last value of a simple directive among direct children (in nginx "the last one wins"). */
 function lastDirectiveValue(statements: NginxStatement[], directive: string): string | null {
   let value: string | null = null;
   for (const st of statements) {
@@ -162,9 +164,10 @@ function lastDirectiveValue(statements: NginxStatement[], directive: string): st
 }
 
 /**
- * Разбор одного `listen`-утверждения. Форматы: `80`, `80 default_server`,
+ * Parse a single `listen` statement. Formats: `80`, `80 default_server`,
  * `443 ssl`, `127.0.0.1:8080`, `[::]:443 ssl`, `*:80`, `unix:/run/nginx.sock`.
- * Неопознанный формат — addr как есть, port null (не теряем факт прослушивания).
+ * An unrecognized format — addr as is, port null (the fact of listening is
+ * not lost).
  */
 export function parseListen(args: string[]): NginxListen | null {
   const first = args[0];
@@ -213,9 +216,9 @@ function parseServerBlock(st: NginxStatement, file: string | null): ParsedServer
           break;
       }
     } else if (s.directive === 'location' && s.block) {
-      // Только верхний уровень вложенности: вложенные location — внутри s.block,
-      // сюда не попадают (как и if/limit_except и пр. — не считаем).
-      // match — полный модификатор+паттерн: '/', '= /', '~ ^/api/'.
+      // Only the top nesting level: nested locations are inside s.block and
+      // do not get here (nor do if/limit_except etc. — not counted).
+      // match is the full modifier+pattern: '/', '= /', '~ ^/api/'.
       locations.push({
         match: s.args.join(' '),
         proxyPass: lastDirectiveValue(s.block, 'proxy_pass'),
@@ -226,16 +229,17 @@ function parseServerBlock(st: NginxStatement, file: string | null): ParsedServer
 }
 
 /**
- * Разбор вывода `nginx -T`. Каждый фрейм (файл) парсится отдельно: http-уровень
- * нужен только для дефолта ssl_certificate (может лежать в nginx.conf/conf.d,
- * а server-блоки — в sites-enabled), server-блоки собираются по всем фреймам.
+ * Parse `nginx -T` output. Each frame (file) is parsed separately: the http
+ * level is needed only for the ssl_certificate default (it may live in
+ * nginx.conf/conf.d while server blocks live in sites-enabled); server
+ * blocks are collected across all frames.
  *
- * Фрейм с `http {}` — его прямые дети. Фрейм без http-обёртки — контент
- * http-контекста из include (conf.d/*, sites-enabled/*): верхнеуровневые
- * директивы считаются http-уровнем, верхнеуровневые `server {}` — сайтами.
- * Известное ограничение v1: `stream`-файлы из `stream-enabled` тоже выглядят
- * как контент http-контекста — их server-блоки попадут в сайты (редко, и
- * колонки будут пустыми, не ложными).
+ * A frame with `http {}` — its direct children. A frame without the http
+ * wrapper is http-context content from an include (conf.d/*,
+ * sites-enabled/*): top-level directives count as http level, top-level
+ * `server {}` — sites. A known v1 limitation: `stream` files from
+ * stream-enabled also look like http-context content — their server blocks
+ * get into sites (rare, and the columns will be empty, not wrong).
  */
 export function parseNginxDump(text: string): ParsedNginxConfig {
   let httpSslCertificate: string | null = null;
@@ -254,7 +258,7 @@ export function parseNginxDump(text: string): ParsedNginxConfig {
       }
       continue;
     }
-    // Фрейм без http-блока — контент http-контекста из include.
+    // A frame without an http block — http-context content from an include.
     const ssl = lastDirectiveValue(statements, 'ssl_certificate');
     if (ssl) httpSslCertificate = ssl;
     for (const st of statements) {
@@ -266,17 +270,18 @@ export function parseNginxDump(text: string): ParsedNginxConfig {
   return { httpSslCertificate, sites };
 }
 
-/** Дефолты http-уровня для toSiteEntry (сейчас — только общий сертификат). */
+/** http-level defaults for toSiteEntry (currently — only the shared certificate). */
 export interface HttpDefaults {
   sslCertificate: string | null;
 }
 
 /**
- * Маппинг server-блока в строку таблицы (решение 7): proxy_pass из
- * `location /`, иначе из первого location с proxy_pass; нет — static по root;
- * совсем ничего — unknown. cert заполняет сборщик снапшота (нужен I/O).
- * Возвращаемое значение — NginxSite плюс служебное `certPath` (путь PEM
- * для батч-чтения); сборщик вычленяет его и наружу не отдаёт.
+ * Mapping a server block to a table row (decision 7): proxy_pass from
+ * `location /`, otherwise from the first location with proxy_pass; none —
+ * static by root; nothing at all — unknown. cert is filled by the snapshot
+ * collector (needs I/O). The return value is NginxSite plus the internal
+ * `certPath` (the PEM path for batch reading); the collector extracts it and
+ * does not expose it.
  */
 export function toSiteEntry(
   block: ParsedServerBlock,
@@ -300,24 +305,24 @@ export function toSiteEntry(
     listens: block.listens,
     target,
     locationsCount: block.locations.length,
-    // Путь сертификата для сборщика: свой или общий с http-уровня (решение 7).
+    // The certificate path for the collector: its own or the shared one from the http level (decision 7).
     cert: null,
     certPath: block.sslCertificate ?? httpDefaults.sslCertificate,
   };
 }
 
-/** Информация о сроке действия из PEM. */
+/** Validity info from a PEM. */
 export interface CertInfo {
   notAfter: Date;
-  /** Целых дней до конца срока (может быть отрицательным — просрочен). */
+  /** Whole days until expiry (may be negative — expired). */
   daysLeft: number;
 }
 
 /**
- * Локальный парсинг PEM через `crypto.X509Certificate` (Node 20, `validTo`).
- * Без удалённого `openssl` (решение 5): в alpine/distroless-образах его может
- * не быть, а срок сертификата не должен зависеть от состава образа.
- * Битый PEM → null. `now` — инъекция времени под тесты.
+ * Local PEM parsing via `crypto.X509Certificate` (Node 20, `validTo`).
+ * Without a remote `openssl` (decision 5): alpine/distroless images may not
+ * have it, and the certificate expiry must not depend on the image contents.
+ * A broken PEM → null. `now` — time injection for tests.
  */
 export function certInfoFromPem(pem: string, now = Date.now()): CertInfo | null {
   try {
@@ -332,9 +337,10 @@ export function certInfoFromPem(pem: string, now = Date.now()): CertInfo | null 
 }
 
 /**
- * Раскадровка батч-вывода чтения сертификатов по маркерам `=== <путь>`
- * (паттерн `/etc/cron.d`). Файл, который не удалось прочитать, секции
- * в stdout не даёт (билдер команды гвардит `[ -f ]`) — в Map его нет.
+ * Split the certificate batch-read output into frames by `=== <path>`
+ * markers (the `/etc/cron.d` pattern). A file that failed to read yields no
+ * section in stdout (the command builder guards with `[ -f ]`) — it is not
+ * in the Map.
  */
 export function parseCertBatch(output: string): Map<string, string> {
   const result = new Map<string, string>();

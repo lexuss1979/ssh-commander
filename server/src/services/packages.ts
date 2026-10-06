@@ -3,45 +3,45 @@ import { stat as sftpStat } from '../ssh/sftp.js';
 import type { ExecResult, Profile } from '../types.js';
 
 /**
- * Обновления пакетов (эпик 19).
+ * Package updates (epic 19).
  *
- * Read-only часть: детект менеджера (`command -v apt-get || dnf || yum ||
- * apk`), список обновлений и признаки рестарта одним exec с маркерами,
- * возраст индекса apt через SFTP-stat. Применение — отдельный маршрут
- * (`POST /api/packages/apply`) со sudo-зондом до стрима (см. `routes/
- * packages.ts`); инструмент агента для пакетов не заводится (обновления
- * уже покрыты секцией `updates` аудита).
+ * The read-only part: manager detection (`command -v apt-get || dnf || yum ||
+ * apk`), the update list and reboot indicators in a single exec with markers,
+ * the apt index age via SFTP-stat. Applying updates is a separate route
+ * (`POST /api/packages/apply`) with a sudo probe before the stream (see
+ * `routes/packages.ts`); no agent tool is introduced for packages (updates
+ * are already covered by the audit's `updates` section).
  *
- * Код возврата списка берётся из маркера `@@LIST_CODE@@`, а не из
- * `result.code`: снимок — одна команда из двух частей, и код всей строки
- * принадлежит последней части (reboot-проверке). У dnf/yum `check-update`
- * возвращает 100 = есть обновления — это не ошибка.
+ * The list exit code is taken from the `@@LIST_CODE@@` marker, not from
+ * `result.code`: the snapshot is a single command of two parts, and the code
+ * of the whole line belongs to the last part (the reboot check). For
+ * dnf/yum, `check-update` returns 100 = updates available — not an error.
  */
 
 export type PackageManager = 'apt' | 'dnf' | 'yum' | 'apk';
 
 export interface PackageUpdate {
-  /** Имя пакета (для dnf — `name.arch` как в check-update). */
+  /** Package name (for dnf — `name.arch`, as in check-update). */
   name: string;
-  /** Установленная версия; null, если менеджер её не показывает. */
+  /** Installed version; null if the manager does not show it. */
   current: string | null;
-  /** Доступная версия. */
+  /** Available version. */
   available: string;
-  /** Suite/repo (apt) или репозиторий (dnf); у apk — null. */
+  /** Suite/repo (apt) or repository (dnf); null for apk. */
   source: string | null;
 }
 
 export interface PackagesSnapshot {
-  /** Момент снимка (мс, серверное время ssh-commander). */
+  /** Snapshot time (ms, ssh-commander server clock). */
   timestamp: number;
-  /** Обнаруженный менеджер; null — не найден (не ошибка, заглушка в UI). */
+  /** Detected manager; null — not found (not an error, a UI placeholder). */
   pm: PackageManager | null;
   updates: PackageUpdate[];
   rebootRequired: boolean;
   rebootPackages: string[];
-  /** Возраст индекса apt (мс); null — нет конвенции или файла. */
+  /** apt index age (ms); null — no convention or no file. */
   indexAgeMs: number | null;
-  /** Причина отсутствия менеджера — для карточки UI. */
+  /** Reason the manager is missing — for the UI card. */
   error?: string;
 }
 
@@ -52,13 +52,13 @@ export type ExecFn = (
 ) => Promise<ExecResult>;
 
 export const PACKAGES_CACHE_TTL_MS = 60000;
-/** Таймаут быстрых exec'ов (детект менеджера). */
+/** Timeout for quick execs (manager detection). */
 export const PROBE_TIMEOUT_MS = 15000;
 /**
- * Таймаут снимка списка обновлений: dnf check-update ходит в сеть, dpkg-lock
- * бывает занят — без явного предела exec висел бы до дефолтных 60 с, держа
- * SSH-канал. 30 с — компромисс «не мгновенно, но не вечно» (кэш 60 с гасит
- * повторы).
+ * Timeout of the update-list snapshot: dnf check-update goes to the network
+ * and the dpkg lock may be busy — without an explicit limit the exec would
+ * hang for the default 60 s, holding the SSH channel. 30 s is a compromise
+ * between "not instant" and "not forever" (the 60 s cache absorbs retries).
  */
 export const SNAPSHOT_TIMEOUT_MS = 30000;
 
@@ -68,15 +68,15 @@ const RESTART_CODE_MARKER = '@@RESTART_CODE@@';
 const APT_INDEX_STAMP = '/var/lib/apt/periodic/update-success-stamp';
 
 // ---------------------------------------------------------------------------
-// Чистые функции: детект, команды, парсеры
+// Pure functions: detection, commands, parsers
 // ---------------------------------------------------------------------------
 
-/** Детект менеджера одним exec: первая найденная команда. */
+/** Manager detection in a single exec: the first command found. */
 export function detectPmCommand(): string {
   return 'command -v apt-get || command -v dnf || command -v yum || command -v apk';
 }
 
-/** Первая непустая строка → basename пути → менеджер (незнакомый → null). */
+/** First non-empty line → path basename → manager (unfamiliar → null). */
 export function parsePmDetection(text: string): PackageManager | null {
   for (const line of text.split('\n')) {
     const t = line.trim();
@@ -98,25 +98,25 @@ export function listUpdatesCommand(pm: PackageManager): string {
     case 'yum':
       return 'yum -q check-update';
     case 'apk':
-      // Статическая строка — shell сам съест кавычки, apk принимает литерал '<'.
+      // Static string — the shell consumes the quotes itself, apk accepts the literal '<'.
       return "apk version -l '<'";
   }
 }
 
-/** Код 100 у dnf/yum = есть обновления, не ошибка (roadmap). null — код не получен. */
+/** Code 100 for dnf/yum = updates available, not an error (roadmap). null — no code received. */
 export function isUpdatesExitCode(pm: PackageManager, code: number | null): boolean {
   if (code === null) return false;
   if (pm === 'dnf' || pm === 'yum') return code === 0 || code === 100;
   return code === 0;
 }
 
-/** Код списка из маркера `@@LIST_CODE@@N`; маркера нет → null (отказ). */
+/** List code from the `@@LIST_CODE@@N` marker; no marker → null (failure). */
 export function parseListCode(text: string): number | null {
   const m = new RegExp(`${LIST_CODE_MARKER}(\\d+)`).exec(text);
   return m ? Number(m[1]) : null;
 }
 
-/** Текст списка — всё до маркера кода (после — код и reboot-секция). */
+/** List text — everything before the code marker (after it — the code and the reboot section). */
 export function splitListSection(text: string): string {
   const idx = text.indexOf(LIST_CODE_MARKER);
   return idx >= 0 ? text.slice(0, idx) : text;
@@ -124,11 +124,11 @@ export function splitListSection(text: string): string {
 
 /**
  * `apt list --upgradable`: `name/suite version arch [upgradable from: cur]`.
- * Имя — до первого `/` (может содержать `+`/`-`/цифры), suite — без пробелов
- * (`stable-security`, `jammy-updates`), version — второй токен (доступная),
- * current — из скобки (нет скобки → null). Заголовок `Listing…` и мусор без
- * `/` пропускаются. WARNING apt про нестабильный CLI приходит в stderr —
- * парсер stdout его не видит.
+ * The name is up to the first `/` (may contain `+`/`-`/digits), the suite has
+ * no spaces (`stable-security`, `jammy-updates`), version is the second
+ * token (available), current comes from the brackets (no brackets → null).
+ * The `Listing…` header and garbage without `/` are skipped. apt's WARNING
+ * about the unstable CLI goes to stderr — the stdout parser does not see it.
  */
 export function parseAptList(text: string): PackageUpdate[] {
   const out: PackageUpdate[] = [];
@@ -148,13 +148,13 @@ export function parseAptList(text: string): PackageUpdate[] {
 }
 
 /**
- * `dnf -q check-update`: `name.arch version repo` (3 токена). name.arch не
- * расщепляем — колонка «Пакет» и так читается. Текущая версия из
- * check-update недоступна (отклонение от строки roadmap — колонка «— →
- * версия»). После списка обновлений идёт блок `Obsoleting Packages`: его
- * заголовок (2 токена) останавливает парсинг, иначе записи блока (та же
- * форма) завысили бы счётчик. Строки короче 3 токенов до начала списка —
- * мусор (заголовки), пропускаются.
+ * `dnf -q check-update`: `name.arch version repo` (3 tokens). name.arch is
+ * not split — the "Package" column reads fine as is. The current version is
+ * not available from check-update (a deviation from the roadmap line — the
+ * "— → version" column). After the update list comes the `Obsoleting
+ * Packages` block: its header (2 tokens) stops parsing, otherwise the
+ * block's entries (the same shape) would inflate the counter. Lines shorter
+ * than 3 tokens before the list starts are garbage (headers), skipped.
  */
 export function parseDnfCheckUpdate(text: string): PackageUpdate[] {
   const out: PackageUpdate[] = [];
@@ -163,8 +163,8 @@ export function parseDnfCheckUpdate(text: string): PackageUpdate[] {
     const trimmed = line.trim();
     const fields = trimmed.split(/\s+/);
     if (fields.length < 3) {
-      // После первой записи короткая строка — конец списка обновлений
-      // (пустая строка или заголовок «Obsoleting Packages»).
+      // After the first entry, a short line is the end of the update list
+      // (an empty line or the "Obsoleting Packages" header).
       if (started || /^obsoleting packages$/i.test(trimmed)) return out;
       continue;
     }
@@ -175,12 +175,12 @@ export function parseDnfCheckUpdate(text: string): PackageUpdate[] {
 }
 
 /**
- * `apk version -l '<'`: `name-version < version` (справа может быть только
- * версия). Имя — до последнего дефиса с цифровым хвостом
+ * `apk version -l '<'`: `name-version < version` (only a version can be on
+ * the right). The name is up to the last hyphen with a digit tail
  * (`alpine-baselayout-3.4.3-r1` → `alpine-baselayout` / `3.4.3-r1`).
- * Многострочный перенос (apk режет по ширине терминала): строка без `<`
- * после записи — продолжение её available; до первой записи — мусор (WARNING
- * про APKINDEX), пропускается.
+ * Multi-line wrapping (apk cuts to the terminal width): a line without `<`
+ * after an entry is a continuation of its available; before the first entry
+ * it is garbage (an APKINDEX WARNING), skipped.
  */
 const APK_RE = /^(.+)-(\d[^\s<]*)\s*<\s*(.*)$/;
 
@@ -208,10 +208,10 @@ export function parseApkVersionLt(text: string): PackageUpdate[] {
 }
 
 /**
- * Признак рестарта в конце команды снимка (каждый вариант начинается с
- * `'; '` — склейка с командой списка идёт встык). apt: маркер печатается
- * только при существующем `/var/run/reboot-required` (+ список `.pkgs`);
- * dnf/yum: `needs-restarting -r`, код 1 = нужен рестарт; apk: конвенции нет.
+ * The reboot check at the end of the snapshot command (each variant starts
+ * with `'; '` — glued back to back to the list command). apt: the marker is
+ * printed only if `/var/run/reboot-required` exists (+ the `.pkgs` list);
+ * dnf/yum: `needs-restarting -r`, code 1 = reboot needed; apk: no convention.
  */
 export function rebootCheckSuffix(pm: PackageManager): string {
   switch (pm) {
@@ -231,12 +231,12 @@ export function rebootCheckSuffix(pm: PackageManager): string {
   }
 }
 
-/** Полная команда снимка: список + маркер кода + reboot-проверка. */
+/** Full snapshot command: list + code marker + reboot check. */
 export function snapshotCommand(pm: PackageManager): string {
   return `${listUpdatesCommand(pm)}; echo "${LIST_CODE_MARKER}$?"${rebootCheckSuffix(pm)}`;
 }
 
-/** Разбор reboot-секции (текст после `@@REBOOT@@`): код needs-restarting и пакеты `.pkgs`. */
+/** Parse the reboot section (the text after `@@REBOOT@@`): the needs-restarting code and the `.pkgs` packages. */
 export function parseRebootSection(text: string): { code: number | null; packages: string[] } {
   const idx = text.indexOf(REBOOT_MARKER);
   if (idx < 0) return { code: null, packages: [] };
@@ -262,7 +262,7 @@ function parseUpdates(pm: PackageManager, text: string): PackageUpdate[] {
   }
 }
 
-/** Дедуп по имени, первое вхождение выигрывает. */
+/** Dedupe by name, first occurrence wins. */
 export function dedupeByName(updates: PackageUpdate[]): PackageUpdate[] {
   const seen = new Set<string>();
   const out: PackageUpdate[] = [];
@@ -275,15 +275,15 @@ export function dedupeByName(updates: PackageUpdate[]): PackageUpdate[] {
 }
 
 // ---------------------------------------------------------------------------
-// Применение (мутация)
+// Applying updates (mutation)
 // ---------------------------------------------------------------------------
 
 /**
- * Команда применения обновлений. С sudo — прямая форма `sudo -S -p '' --`
- * без `sh -c` (инвариант эпика 13); пароль уходит первой строкой stdin
- * канала. `env DEBIAN_FRONTEND=noninteractive` — dpkg-промпты примут дефолт,
- * а не зависнут на EOF-stdin. Статические строки — пользовательский ввод
- * не интерполируется нигде.
+ * The update-apply command. With sudo — the direct form `sudo -S -p '' --`
+ * without `sh -c` (the epic 13 invariant); the password goes as the first
+ * line of the channel stdin. `env DEBIAN_FRONTEND=noninteractive` — dpkg
+ * prompts take the defaults instead of hanging on the EOF stdin. Static
+ * strings — user input is not interpolated anywhere.
  */
 export function buildApplyCommand(pm: PackageManager, withSudo: boolean): string {
   const sudo = withSudo ? `sudo -S -p '' -- ` : '';
@@ -300,17 +300,17 @@ export function buildApplyCommand(pm: PackageManager, withSudo: boolean): string
 }
 
 // ---------------------------------------------------------------------------
-// Исполнители (снимок + детект, кэш 60 с)
+// Executors (snapshot + detection, 60 s cache)
 // ---------------------------------------------------------------------------
 
 const cache = new Map<string, { at: number; promise: Promise<PackagesSnapshot> }>();
 
-/** Сброс кэша после применения — refetch вернёт свежий список. */
+/** Invalidate the cache after applying — refetch gets a fresh list. */
 export function invalidatePackagesCache(profileId: string): void {
   cache.delete(profileId);
 }
 
-/** Свежий детект менеджера (для применения — не из кэша снимка). */
+/** Fresh manager detection (for applying — not from the snapshot cache). */
 export async function detectPackageManager(
   profile: Profile,
   deps: { execFn?: ExecFn } = {},
@@ -320,7 +320,7 @@ export async function detectPackageManager(
   return parsePmDetection(r.stdout);
 }
 
-/** Возраст индекса apt через SFTP-stat; файла нет или stat упал — тихий null. */
+/** apt index age via SFTP-stat; no file or a failed stat → a silent null. */
 async function aptIndexAge(profile: Profile): Promise<number | null> {
   try {
     const st = await withSftp(profile, (sftp) => sftpStat(sftp, APT_INDEX_STAMP));
@@ -333,10 +333,11 @@ async function aptIndexAge(profile: Profile): Promise<number | null> {
 }
 
 /**
- * Снимок обновлений. Кэш 60 с на профиль (паттерн `collectMetrics`):
- * список меняется редко, команда не мгновенная; параллельные вызовы делят
- * один exec, ошибочный промис из кэша удаляется. `pm: null` — не ошибка:
- * это штатный результат детекта «менеджера нет» (заглушка в UI).
+ * Updates snapshot. A 60 s cache per profile (the `collectMetrics` pattern):
+ * the list changes rarely and the command is not instant; parallel calls
+ * share one exec, a failed promise is evicted from the cache. `pm: null` is
+ * not an error: it is a normal detection result of "no manager" (a UI
+ * placeholder).
  */
 export function collectPackagesSnapshot(
   profile: Profile,

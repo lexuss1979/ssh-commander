@@ -3,28 +3,30 @@ import { probeSudo } from './sudo.js';
 import type { ExecResult, Profile } from '../types.js';
 
 /**
- * Действия над процессами (вкладка «Обзор», эпик 17): сигналы из whitelist и
- * renice с sudo-ретраем по EPERM.
+ * Process actions (the "Overview" tab, epic 17): signals from an allow-list
+ * and renice with a sudo retry on EPERM.
  *
- * Инварианты:
- * - pid — каноничное целое 2..4194304 (`parsePid`): `0`, `1` и отрицательные
- *   запрещены — `kill -TERM -1` / `-0` бьют по группам и всему, до чего
- *   дотянется;
- * - сигнал — элемент whitelist-enum (TERM|KILL|HUP), произвольная строка не
- *   принимается ни в какой форме;
- * - команды собираются без `shq`: сигнал — элемент enum, pid — валидированное
- *   целое, строковых аргументов нет (в отличие от имени unit'а в эпике 13);
- * - `kill -<sig> <pid>` без `--`: команда исполняется builtin'ом login-shell
- *   (bash/dash/busybox), поддержка `--` у них различается, а pid после
- *   валидации опцией быть не может;
- * - sudo-механика — общий `services/sudo.ts` (вынесен из systemd.ts): пароль
- *   первой строкой stdin канала, в argv/логах не появляется, живёт в памяти
- *   одного запроса;
- * - после мутации роут сбрасывает кэш метрик (`invalidateMetricsCache`), иначе
- *   «Обзор» до 2 с показывал бы убитый процесс.
+ * Invariants:
+ * - pid is a canonical integer 2..4194304 (`parsePid`): `0`, `1` and negative
+ *   values are banned — `kill -TERM -1` / `-0` hit process groups and
+ *   everything they can reach;
+ * - the signal is a member of the allow-list enum (TERM|KILL|HUP); an
+ *   arbitrary string is not accepted in any form;
+ * - commands are built without `shq`: the signal is an enum member, pid is a
+ *   validated integer, there are no string arguments (unlike the unit name
+ *   in epic 13);
+ * - `kill -<sig> <pid>` without `--`: the command is executed by the
+ *   login-shell builtin (bash/dash/busybox), their `--` support differs, and
+ *   after validation a pid cannot be an option;
+ * - the sudo mechanics are the shared `services/sudo.ts` (extracted from
+ *   systemd.ts): the password is the first line of the channel stdin, never
+ *   appears in argv/logs, lives in the memory of a single request;
+ * - after the mutation the route invalidates the metrics cache
+ *   (`invalidateMetricsCache`), otherwise "Overview" would show the killed
+ *   process for up to 2 s.
  *
- * Инструмент агента сознательно не заводится: `kill`/`pkill`/`killall` в
- * deny-листе `ai/guard.ts`, ослаблять его не будем.
+ * An agent tool is deliberately not introduced: `kill`/`pkill`/`killall` stay
+ * outside the `ai/guard.ts` allow-list, and it will not be weakened.
  */
 
 export const PROCESS_SIGNALS = ['TERM', 'KILL', 'HUP'] as const;
@@ -38,7 +40,7 @@ export interface ProcessActionResult {
   output: string;
 }
 
-/** Ошибка действия над процессом с HTTP-статусом (400 — пользовательские причины, 502 — транспорт). */
+/** Process action error carrying an HTTP status (400 — user-caused reasons, 502 — transport). */
 export class ProcessActionError extends Error {
   readonly status: number;
 
@@ -54,13 +56,13 @@ export type ExecFn = (
   opts?: { timeoutMs?: number; stdin?: string },
 ) => Promise<ExecResult>;
 
-/** Верхняя граница pid — pid_max по умолчанию (cat /proc/sys/kernel/pid_max). */
+/** The pid upper bound — the default pid_max (cat /proc/sys/kernel/pid_max). */
 const PID_MAX = 4194304;
 
 /**
- * Валидация pid из URL-параметра: строка из цифр, без ведущих нулей и
- * экспоненты (`raw === String(Number(raw))`), значение 2..4194304.
- * Возвращает число или null → роут отвечает 400.
+ * pid validation from a URL parameter: a string of digits, without leading
+ * zeros or an exponent (`raw === String(Number(raw))`), value 2..4194304.
+ * Returns the number or null → the route answers 400.
  */
 export function parsePid(raw: string): number | null {
   if (!/^\d+$/.test(raw)) return null;
@@ -71,22 +73,22 @@ export function parsePid(raw: string): number | null {
   return n;
 }
 
-/** `kill -<sig> <pid>` — builtin login-shell (без `--`, см. шапку модуля). */
+/** `kill -<sig> <pid>` — the login-shell builtin (no `--`, see the module header). */
 export function killCommand(signal: ProcessSignal, pid: number): string {
   return `kill -${signal} ${pid}`;
 }
 
-/** Прямая sudo-форма без `sh -c`: исполняет `/bin/kill` напрямую (не builtin). */
+/** Direct sudo form without `sh -c`: executes `/bin/kill` directly (not the builtin). */
 export function sudoKillCommand(signal: ProcessSignal, pid: number): string {
   return `sudo -S -p '' -- kill -${signal} ${pid}`;
 }
 
-/** `renice -n <nice> -p <pid>`; отрицательное nice — законное значение опции. */
+/** `renice -n <nice> -p <pid>`; a negative nice is a legitimate option value. */
 export function reniceCommand(nice: number, pid: number): string {
   return `renice -n ${nice} -p ${pid}`;
 }
 
-/** Прямая sudo-форма: `sudo -S -p '' -- renice -n <nice> -p <pid>`. */
+/** Direct sudo form: `sudo -S -p '' -- renice -n <nice> -p <pid>`. */
 export function sudoReniceCommand(nice: number, pid: number): string {
   return `sudo -S -p '' -- renice -n ${nice} -p ${pid}`;
 }
@@ -94,16 +96,18 @@ export function sudoReniceCommand(nice: number, pid: number): string {
 export type ProcessActionFailureCategory = 'ok' | 'sudo-needed' | 'gone' | 'no-tool' | 'transport';
 
 /**
- * Классификация результата kill/renice:
- * - `ok` — код 0;
- * - `sudo-needed` — EPERM (чужой процесс, понижение nice, kernel-thread);
- *   текст может быть у util-linux (`kill: (1234) - Operation not permitted`)
- *   и у builtin bash (`bash: line 1: kill: (1234) - Operation not permitted`);
- * - `gone` — ESRCH (процесс завершился между снимком и кликом);
- * - `no-tool` — утилиты нет на сервере (BusyBox без `renice`, минимальный
- *   образ без `/bin/kill` под `sudo --`) → 400, а не 502 «Сервер недоступен»:
- *   сервер-то в порядке, недоступна утилита;
- * - `transport` — всё остальное.
+ * Classification of a kill/renice result:
+ * - `ok` — code 0;
+ * - `sudo-needed` — EPERM (someone else's process, a nice decrease, a kernel
+ *   thread); the text may come from util-linux
+ *   (`kill: (1234) - Operation not permitted`) or from the bash builtin
+ *   (`bash: line 1: kill: (1234) - Operation not permitted`);
+ * - `gone` — ESRCH (the process exited between the snapshot and the click);
+ * - `no-tool` — the utility is missing on the server (BusyBox without
+ *   `renice`, a minimal image without `/bin/kill` under `sudo --`) → 400,
+ *   not 502 «Сервер недоступен»: the server itself is fine, it is the
+ *   utility that is unavailable;
+ * - `transport` — everything else.
  */
 export function classifyProcessActionFailure(result: ExecResult): ProcessActionFailureCategory {
   if (result.code === 0) return 'ok';
@@ -115,17 +119,19 @@ export function classifyProcessActionFailure(result: ExecResult): ProcessActionF
 }
 
 /**
- * Общий поток мутации с sudo-ретраем (паттерн `runServiceAction` из systemd.ts):
- * 1. пробуем без sudo;
- * 2. `gone` → 400 «процесс больше не существует»;
+ * The shared mutation flow with a sudo retry (the `runServiceAction` pattern
+ * from systemd.ts):
+ * 1. try without sudo;
+ * 2. `gone` → 400 «Процесс больше не существует»;
  * 3. `no-tool` → 400 «команда недоступна»;
- * 4. sudo-needed + передан пароль → зонд `sudo -S -p '' -- true` (stdin),
- *    явные ошибки зонда → 400, иное → 502; зонд прошёл → повтор через sudo;
- * 5. sudo-needed без пароля → 400 «укажите sudo-пароль»;
- * 6. транспорт/неизвестное → 502.
+ * 4. sudo-needed + a password supplied → probe `sudo -S -p '' -- true`
+ *    (stdin); explicit probe failures → 400, anything else → 502; probe
+ *    passed → retry via sudo;
+ * 5. sudo-needed without a password → 400 «укажите sudo-пароль»;
+ * 6. transport/unknown → 502.
  *
- * Ретрай безопасен: EPERM означает, что сигнал не отправлен/приоритет не
- * менялся. Таймаут — дефолт exec 60 с (kill/renice мгновенны).
+ * The retry is safe: EPERM means the signal was not sent / the priority was
+ * not changed. Timeout — the exec default of 60 s (kill/renice are instant).
  */
 async function withSudoRetry(
   profile: Profile,
@@ -171,10 +177,10 @@ async function withSudoRetry(
     const retry = await execFn(profile, sudoCommand, { stdin: `${sudoPassword}\n` });
     const retryCat = classifyProcessActionFailure(retry);
     if (retryCat === 'ok') return onSuccess(retry);
-    // Та же лесенка, что у первой попытки, — это важно именно здесь:
-    // sudo-форма зовёт `/bin/kill`/`/bin/renice` напрямую (без shell), так
-    // что промах по бинарнику (`sudo: kill: command not found`) возможен
-    // только на ретрае; процесс мог также умереть за время sudo-зонда.
+    // The same ladder as for the first attempt — that matters exactly here:
+    // the sudo form calls `/bin/kill`/`/bin/renice` directly (no shell), so
+    // a missed binary (`sudo: kill: command not found`) is only possible on
+    // the retry; the process may also have died during the sudo probe.
     if (retryCat === 'gone') {
       throw new ProcessActionError(400, 'Процесс больше не существует (уже завершился?)');
     }
@@ -186,14 +192,14 @@ async function withSudoRetry(
       (retry.stderr || retry.stdout).trim() || `Команда не выполнена (код ${retry.code ?? 'unknown'})`,
     );
   }
-  // transport / неизвестное
+  // transport / unknown
   throw new ProcessActionError(
     502,
     (first.stderr || first.stdout).trim() || `Команда не выполнена (код ${first.code ?? 'unknown'})`,
   );
 }
 
-/** Сигнал процессу (TERM|KILL|HUP). Успех — kill молчит, output пустой. */
+/** Signal a process (TERM|KILL|HUP). On success kill is silent, output is empty. */
 export function runProcessSignal(
   profile: Profile,
   pid: number,
@@ -213,7 +219,7 @@ export function runProcessSignal(
   );
 }
 
-/** Изменение приоритета процесса (nice −20..19). Вывод renice — в notice. */
+/** Change a process priority (nice −20..19). renice output goes into the notice. */
 export function runProcessRenice(
   profile: Profile,
   pid: number,

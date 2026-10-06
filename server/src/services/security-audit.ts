@@ -6,14 +6,14 @@ import type { PromptLang } from '../ai/prompts.js';
 import type { ExecResult, Profile } from '../types.js';
 
 /**
- * Детерминированный аудит безопасности сервера: фиксированный белый список
- * read-only команд по секциям. Произвольный shell инструмент НЕ принимает,
- * поэтому через guard.ts он не проходит — команды зашиты здесь.
+ * Deterministic server security audit: a fixed allow-list of read-only
+ * commands per section. The tool does NOT accept arbitrary shell, so it
+ * never goes through guard.ts — the commands are baked in here.
  *
- * Привилегированный режим: root-only команды выполняются через
- * `sudo -S -p '' -- sh -c <cmd>`, пароль подаётся в stdin канала (НЕ в
- * командной строке — пароль не появляется в ps и логах). Без пароля или при
- * нерабочем sudo root-подсекции помечаются «пропущено: нет прав».
+ * Privileged mode: root-only commands run via `sudo -S -p '' -- sh -c
+ * <cmd>`, the password is fed to the channel stdin (NOT the command line —
+ * the password never appears in ps or logs). Without a password, or when
+ * sudo does not work, root subsections are marked "skipped: no permissions".
  */
 
 export type AuditSectionId = 'auth' | 'network' | 'updates' | 'activity' | 'docker' | 'filesystem';
@@ -27,32 +27,32 @@ export const ALL_SECTIONS: AuditSectionId[] = [
   'filesystem',
 ];
 
-/** Общий лимит вывода аудита: результат должен укладываться в ~10 КБ. */
+/** Total audit output limit: the result must fit into ~10 KB. */
 const TOTAL_LIMIT = 9500;
 const DEFAULT_MAX_LINES = 60;
-/** Лимит символов на подсекцию (строки бывают очень длинными). */
+/** Character limit per subsection (lines can be very long). */
 const SUBSECTION_MAX_CHARS = 1500;
-/** SUID-find по всей ФС может быть долгим — отдельный лимит времени. */
+/** A SUID find across the whole FS can take long — a separate time limit. */
 const FIND_TIMEOUT_MS = 55000;
 
 export interface AuditCommand {
-  /** Название подсекции в отчёте. */
+  /** Subsection title in the report. */
   title: string;
-  /** Команда, выполняемая без прав root. */
+  /** The command run without root. */
   command: string;
-  /** Вариант команды для root (выполняется через sudo вместо command, если sudo доступен). */
+  /** Root variant of the command (run via sudo instead of command, if sudo is available). */
   rootCommand?: string;
-  /** Подсекция только для root: без sudo — пропуск с пометкой. */
+  /** Root-only subsection: without sudo — skipped with a note. */
   rootOnly?: boolean;
-  /** Лимит строк вывода подсекции. */
+  /** Line limit of the subsection output. */
   maxLines?: number;
   timeoutMs?: number;
 }
 
 /**
- * Команды секции — чистая функция, фиксированный белый список.
- * Заголовки подсекций и echo-заглушки — на языке сессии агента
- * (ai/strings.ts); сами команды от языка не зависят.
+ * Section commands — a pure function, a fixed allow-list.
+ * Subsection titles and echo placeholders are in the agent session language
+ * (ai/strings.ts); the commands themselves do not depend on the language.
  */
 export function commandsForSection(section: AuditSectionId, lang: PromptLang = 'ru'): AuditCommand[] {
   switch (section) {
@@ -202,21 +202,22 @@ export function commandsForSection(section: AuditSectionId, lang: PromptLang = '
         },
       ];
     case 'docker':
-      // Секция собирается через services/docker.ts (listContainers + inspect),
-      // а не фиксированными shell-командами.
+      // The section is collected via services/docker.ts (listContainers +
+      // inspect), not fixed shell commands.
       return [];
   }
 }
 
 /**
- * Обёртка для запуска команды через sudo: пароль НЕ попадает в строку
- * команды — он подаётся в stdin канала (`sudo -S`), промпт подавлен (`-p ''`).
+ * Wrapper for running a command via sudo: the password never gets into the
+ * command string — it is fed to the channel stdin (`sudo -S`), the prompt is
+ * suppressed (`-p ''`).
  */
 export function sudoWrap(command: string): string {
   return `sudo -S -p '' -- sh -c ${shq(command)}`;
 }
 
-/** Обрезка вывода подсекции по строкам и символам с пометкой. */
+/** Truncate subsection output by lines and characters, with a marker. */
 export function limitLines(text: string, maxLines: number, lang: PromptLang = 'ru'): string {
   const lines = text.split('\n');
   let body =
@@ -229,7 +230,7 @@ export function limitLines(text: string, maxLines: number, lang: PromptLang = 'r
   return body;
 }
 
-/** Проблемы контейнера по данным docker inspect — чистая функция. */
+/** Container issues from docker inspect data — a pure function. */
 export function findContainerIssues(inspectData: DockerEntity, lang: PromptLang = 'ru'): string[] {
   const issues: string[] = [];
   const hostConfig = (inspectData.HostConfig ?? {}) as Record<string, unknown>;
@@ -273,11 +274,11 @@ export interface AuditDeps {
 
 export interface AuditOptions {
   sections?: string[];
-  /** Запрошен привилегированный режим (root-подсекции через sudo). */
+  /** Privileged mode requested (root subsections via sudo). */
   privileged?: boolean;
-  /** sudo-пароль из сессии агента; в вывод и команды не попадает. */
+  /** The sudo password from the agent session; never gets into the output or commands. */
   sudoPassword?: string;
-  /** Язык отчёта — язык сессии агента (дефолт ru). */
+  /** Report language — the agent session language (default ru). */
   lang?: PromptLang;
 }
 
@@ -319,9 +320,10 @@ async function auditDocker(
 }
 
 /**
- * Выполняет аудит и возвращает компактный текстовый отчёт с сырыми данными
- * по секциям (анализ и severity — задача модели). Мягкая деградация: без
- * пароля или при нерабочем sudo root-подсекции помечаются «пропущено».
+ * Runs the audit and returns a compact text report with raw data per section
+ * (analysis and severity are the model's job). Soft degradation: without a
+ * password, or when sudo does not work, root subsections are marked
+ * "skipped".
  */
 export async function runSecurityAudit(
   profile: Profile,
@@ -333,7 +335,7 @@ export async function runSecurityAudit(
   const password = opts.privileged && opts.sudoPassword ? opts.sudoPassword : null;
   const lang = opts.lang ?? 'ru';
 
-  // Проверяем sudo один раз: пароль уходит в stdin, не в командную строку.
+  // Check sudo once: the password goes to stdin, not the command line.
   let sudoOk = false;
   if (password) {
     try {

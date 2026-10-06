@@ -17,13 +17,13 @@ import type {
 } from '../types.js';
 
 /**
- * I/O слой вкладки «Nginx»: discovery (решение 2), снапшот `nginx -T` +
- * `nginx -t` + сертификаты (решения 1, 5, 10), guard-перезагрузка (решение 4).
- * Паттерн cron.ts/ports.ts: кэш снапшота 2 с на профиль, сертификаты —
- * отдельный кэш 10 мин.
+ * The I/O layer of the "Nginx" tab: discovery (decision 2), the `nginx -T`
+ * snapshot + `nginx -t` + certificates (decisions 1, 5, 10), guarded reload
+ * (decision 4). The cron.ts/ports.ts pattern: a 2 s snapshot cache per
+ * profile, certificates in a separate 10 min cache.
  */
 
-/** Репозитории образов с nginx (через imageRepository из db-discovery.ts). */
+/** Image repositories with nginx (via imageRepository from db-discovery.ts). */
 const NGINX_IMAGE_REPOS = new Set([
   'nginx',
   'nginxproxy/nginx-proxy',
@@ -31,22 +31,22 @@ const NGINX_IMAGE_REPOS = new Set([
   'openresty/openresty',
 ]);
 
-/** Лимит вывода `nginx -T`: реальный дамп с сотнями сайтов больше дефолтных 2 МБ. */
+/** `nginx -T` output limit: a real dump with hundreds of sites exceeds the default 2 MB. */
 const DUMP_MAX_OUTPUT = 8 * 1024 * 1024;
 
 const SNAPSHOT_CACHE_TTL_MS = 2000;
 const CERT_CACHE_TTL_MS = 10 * 60 * 1000;
 
 const snapshotCache = new Map<string, { at: number; promise: Promise<NginxSnapshot> }>();
-/** Ключ: `<profileId>:<source>` → путь → {at, pem}. */
+/** Key: `<profileId>:<source>` → path → {at, pem}. */
 const certCache = new Map<string, Map<string, { at: number; pem: string }>>();
 
 // ---------------------------------------------------------------------------
-// Билдеры команд (чистые, под unit-тесты)
+// Command builders (pure, for unit tests)
 // ---------------------------------------------------------------------------
 
-/** Команда для native — shell-строка; для контейнера — docker-аргументы
- * (экранирование dockerCommand + shq делает `dockerExec` внутри docker.ts). */
+/** The command for native is a shell string; for a container — docker args
+ * (dockerCommand escaping + shq are applied by `dockerExec` inside docker.ts). */
 export type NginxCmd = string | string[];
 
 export function buildDumpCmd(source: NginxSourceRef): NginxCmd {
@@ -64,16 +64,17 @@ export function buildReloadCmd(source: NginxSourceRef): NginxCmd {
   return ['exec', source.containerId, 'nginx', '-s', 'reload'];
 }
 
-/** `nginx -v` пишет версию в stderr. */
+/** `nginx -v` writes the version to stderr. */
 export function buildVersionCmd(source: NginxSourceRef): NginxCmd {
   if (source.type === 'native') return `${shq(source.bin)} -v`;
   return ['exec', source.containerId, 'nginx', '-v'];
 }
 
 /**
- * Батч-чтение PEM-файлов одной командой с маркерами `=== <путь>`
- * (паттерн `/etc/cron.d`, решение 5). `[ -f ]`-гвард: непрочитанный файл
- * не даёт секции в stdout — сборщик помечает его «недоступен», а не мусором.
+ * Batch reading of PEM files in one command with `=== <path>` markers
+ * (the `/etc/cron.d` pattern, decision 5). The `[ -f ]` guard: an unreadable
+ * file yields no section in stdout — the collector marks it "unavailable"
+ * rather than garbage.
  */
 export function buildCertBatchCmd(source: NginxSourceRef, paths: string[]): NginxCmd {
   const loop =
@@ -83,10 +84,10 @@ export function buildCertBatchCmd(source: NginxSourceRef, paths: string[]): Ngin
   return ['exec', source.containerId, 'sh', '-c', loop];
 }
 
-/** Лимит чтения одного конфиг-файла: реальный конфиг редко больше пары сотен КБ. */
+/** Single config read limit: a real config rarely exceeds a couple hundred KB. */
 const CONFIG_MAX_OUTPUT = 2 * 1024 * 1024;
 
-/** Прочитать один конфиг-файл: native — `cat` на хосте, контейнер — `docker exec … cat`. */
+/** Read one config file: native — `cat` on the host, container — `docker exec … cat`. */
 export function buildReadConfigCmd(source: NginxSourceRef, path: string): NginxCmd {
   const cat = `cat -- ${shq(path)}`;
   if (source.type === 'native') return cat;
@@ -94,9 +95,10 @@ export function buildReadConfigCmd(source: NginxSourceRef, path: string): NginxC
 }
 
 /**
- * Чтение одного конфига (кнопка «Открыть» в панели Nginx). Путь — из маркера
- * `# configuration file <путь>:` дампа `nginx -T`, поэтому это реальный файл,
- * который nginx загрузил (для контейнера — путь внутри контейнера).
+ * Reading a single config (the "Open" button in the Nginx panel). The path
+ * comes from the `# configuration file <path>:` marker of the `nginx -T`
+ * dump, so it is a real file that nginx loaded (for a container — a path
+ * inside the container).
  */
 export async function readNginxConfig(
   profile: Profile,
@@ -111,7 +113,7 @@ export async function readNginxConfig(
   return { content: r.stdout };
 }
 
-/** Выполнение команды источника: строка — exec, массив — dockerExec. */
+/** Run a source command: a string — exec, an array — dockerExec. */
 async function runSource(
   profile: Profile,
   cmd: NginxCmd,
@@ -121,17 +123,17 @@ async function runSource(
   return exec(profile, cmd, opts);
 }
 
-/** Версия nginx из stderr `nginx version: nginx/1.25.3`; null — не распознана. */
+/** nginx version from the stderr `nginx version: nginx/1.25.3`; null — unrecognized. */
 export function parseVersion(stderr: string): string | null {
   const m = stderr.match(/nginx version: nginx\/(\S+)/);
   return m ? m[1] : null;
 }
 
 // ---------------------------------------------------------------------------
-// Discovery (решение 2): native первым, контейнер — best-effort
+// Discovery (decision 2): native first, containers — best-effort
 // ---------------------------------------------------------------------------
 
-/** Детект нативного бинаря кэшируется на профиль (как compose-детект в docker.ts). */
+/** Native binary detection is cached per profile (like compose detection in docker.ts). */
 const nativeCache = new Map<string, string | null>();
 
 async function detectNativeNginx(profile: Profile): Promise<string | null> {
@@ -155,10 +157,10 @@ interface NginxContainer {
 }
 
 /**
- * Матчинг контейнера: репозиторий образа в белом списке плюс подстрока
- * `nginx` в имени образа или контейнера (ловит self-built `web-nginx`).
- * Известный промах: контейнер с совсем чужим именем/образом не найдётся —
- * задокументировано в пустом состоянии вкладки (решение 2).
+ * Container matching: the image repository in the allow-list plus an `nginx`
+ * substring in the image or container name (catches self-built `web-nginx`).
+ * A known miss: a container with a completely foreign name/image is not
+ * found — documented in the tab's empty state (decision 2).
  */
 export function isNginxContainer(image: string, name: string): boolean {
   const repo = imageRepository(image);
@@ -167,7 +169,7 @@ export function isNginxContainer(image: string, name: string): boolean {
   return NGINX_IMAGE_REPOS.has(repo) || img.includes('nginx') || nm.includes('nginx');
 }
 
-/** docker недоступен → reject; discoverNginx ловит и продолжает с native. */
+/** docker unavailable → reject; discoverNginx catches it and continues with native. */
 async function findNginxContainers(profile: Profile): Promise<NginxContainer[]> {
   const result = await dockerExec(profile, ['ps', '--format', '{{json .}}']);
   if (result.code !== 0) {
@@ -186,8 +188,8 @@ async function findNginxContainers(profile: Profile): Promise<NginxContainer[]> 
 }
 
 /**
- * Discovery: native (detect кэшируется на профиль) + контейнеры
- * (живут в кэше снапшота — состав контейнеров может меняться).
+ * Discovery: native (detection cached per profile) + containers
+ * (kept in the snapshot cache — the container set may change).
  */
 export async function discoverNginx(profile: Profile): Promise<NginxSourceRef[]> {
   const sources: NginxSourceRef[] = [];
@@ -198,16 +200,16 @@ export async function discoverNginx(profile: Profile): Promise<NginxSourceRef[]>
       sources.push({ type: 'container', containerId: c.id, containerName: c.name });
     }
   } catch {
-    // docker недоступен — контейнерный nginx не ищем (best-effort, решение 2).
+    // docker unavailable — container nginx is not searched for (best-effort, decision 2).
   }
   return sources;
 }
 
 // ---------------------------------------------------------------------------
-// Сертификаты: батч-чтение + кэш 10 мин на (профиль, источник)
+// Certificates: batch read + a 10 min cache per (profile, source)
 // ---------------------------------------------------------------------------
 
-/** Читает PEM по путям с кэшем; в Map попадают только прочитанные файлы. */
+/** Reads PEMs by paths with a cache; only successfully read files get into the Map. */
 async function readCerts(
   profile: Profile,
   source: NginxSourceRef,
@@ -241,14 +243,15 @@ async function readCerts(
         }
       }
     }
-    // Команда упала целиком — прочитанные ранее пути из кэша уже в fresh;
-    // непрочитанные помечаются «недоступен» в сборщике.
+    // The command failed as a whole — previously read paths are already in
+    // fresh from the cache; unread ones are marked "unavailable" in the
+    // collector.
   }
   return fresh;
 }
 
 // ---------------------------------------------------------------------------
-// Снапшот: discovery → параллельно по источникам -T/-t/-v → сертификаты
+// Snapshot: discovery → -T/-t/-v per source in parallel → certificates
 // ---------------------------------------------------------------------------
 
 function sourceBase(source: NginxSourceRef): NginxSourceSnapshot {
@@ -279,8 +282,8 @@ async function collectSource(profile: Profile, source: NginxSourceRef): Promise<
     snap.error = `nginx -T: ${(dump.stderr || dump.stdout).trim() || `код ${dump.code}`}`;
     return snap;
   }
-  // Признак обрезки по лимиту: exec молча режет на maxOutput — честная
-  // ошибка вместо частичного (и вводящего в заблуждение) конфига.
+  // Truncation indicator at the output limit: exec silently cuts at
+  // maxOutput — an honest error instead of a partial (and misleading) config.
   if (dump.stdout.length >= DUMP_MAX_OUTPUT) {
     snap.error = 'конфиг слишком большой (превышен лимит 8 МБ) — сайты не показаны';
     return snap;
@@ -288,7 +291,7 @@ async function collectSource(profile: Profile, source: NginxSourceRef): Promise<
 
   const parsed = parseNginxDump(dump.stdout);
   const httpDefaults = { sslCertificate: parsed.httpSslCertificate };
-  // Дедуп путей сертификатов перед батчем (общий сертификат на много сайтов).
+  // Dedupe certificate paths before the batch (one certificate shared by many sites).
   const certPaths = [
     ...new Set(
       parsed.sites
@@ -321,8 +324,9 @@ async function collectNginxUncached(profile: Profile): Promise<NginxSnapshot> {
   const sourceSnaps = await Promise.all(
     sources.map((s) =>
       collectSource(profile, s).catch((err) => {
-        // Источник упал на exec (таймаут, обрыв SSH) — секция с ошибкой,
-        // снапшот в целом не падает (решение 1, allSettled-семантика).
+        // The source failed on exec (timeout, SSH drop) — a section with an
+        // error, the snapshot as a whole does not fail (decision 1,
+        // allSettled semantics).
         const snap = sourceBase(s);
         snap.error = (err as Error).message;
         return snap;
@@ -333,10 +337,10 @@ async function collectNginxUncached(profile: Profile): Promise<NginxSnapshot> {
 }
 
 /**
- * Снимок nginx-сайтов профиля. Кэш 2 с на профиль (параллельные вызовы
- * делят одни exec'ы) — как у портов/метрик; reject удаляет запись из кэша.
- * nginx не найден нигде → `{timestamp, sources: []}` — пустое состояние
- * решает UI, не 404.
+ * Snapshot of the profile's nginx sites. A 2 s cache per profile (parallel
+ * calls share the same execs) — like ports/metrics; a reject evicts the
+ * entry from the cache. nginx not found anywhere → `{timestamp,
+ * sources: []}` — the empty state is left to the UI, not a 404.
  */
 export function getNginxSnapshot(profile: Profile): Promise<NginxSnapshot> {
   const now = Date.now();
@@ -354,7 +358,7 @@ export function getNginxSnapshot(profile: Profile): Promise<NginxSnapshot> {
   return promise;
 }
 
-/** Очистка кэшей профиля при его удалении (паттерн clearHistory в metrics-history). */
+/** Clear the profile's caches when it is deleted (the clearHistory pattern in metrics-history). */
 export function clearNginxCaches(profileId: string): void {
   snapshotCache.delete(profileId);
   nativeCache.delete(profileId);
@@ -364,7 +368,7 @@ export function clearNginxCaches(profileId: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// nginx -t / reload с guard'ом (решение 4)
+// nginx -t / reload with a guard (decision 4)
 // ---------------------------------------------------------------------------
 
 export interface NginxTestResult {
@@ -372,7 +376,7 @@ export interface NginxTestResult {
   output: string;
 }
 
-/** `nginx -t`: вывод читается из stderr (nginx пишет туда), + stdout. */
+/** `nginx -t`: output is read from stderr (nginx writes there), plus stdout. */
 export async function testNginxConfig(
   profile: Profile,
   source: NginxSourceRef,
@@ -381,7 +385,7 @@ export async function testNginxConfig(
   return { ok: r.code === 0, output: (r.stderr || r.stdout).trim() };
 }
 
-/** Guard reload'а: при красном `nginx -t` reload не выполняется. */
+/** Reload guard: a red `nginx -t` means no reload. */
 export class NginxTestFailedError extends Error {
   readonly code = 'NGINX_TEST_FAILED';
   readonly output: string;
@@ -393,7 +397,7 @@ export class NginxTestFailedError extends Error {
   }
 }
 
-/** Reload: сначала `nginx -t`; тест красный → NginxTestFailedError (409 в роуте). */
+/** Reload: `nginx -t` first; a red test → NginxTestFailedError (409 in the route). */
 export async function reloadNginx(
   profile: Profile,
   source: NginxSourceRef,
@@ -404,7 +408,7 @@ export async function reloadNginx(
   return { ok: r.code === 0, output: (r.stderr || r.stdout).trim() };
 }
 
-/** Парсинг source из тела запроса: 'native' | 'container:<id>'. */
+/** Parse the source from the request body: 'native' | 'container:<id>'. */
 export function parseSourceRef(raw: string): NginxSourceRef | null {
   if (raw === 'native') return { type: 'native', bin: '' };
   if (raw.startsWith('container:')) {
@@ -415,9 +419,9 @@ export function parseSourceRef(raw: string): NginxSourceRef | null {
 }
 
 /**
- * Валидация источника против актуального discovery: нельзя адресовать
- * произвольный контейнер — только реально обнаруженные (решение 2).
- * Возвращает реальный источник (с bin/именем) или null.
+ * Source validation against the actual discovery: an arbitrary container
+ * cannot be addressed — only really discovered ones (decision 2). Returns
+ * the real source (with bin/name) or null.
  */
 export async function findSource(
   profile: Profile,
