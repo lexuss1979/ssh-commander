@@ -10,8 +10,10 @@ import type {
 } from '../types';
 import { Markdown } from '../components/Markdown';
 import { Modal } from '../components/Modal';
+import { TipBanner } from '../components/TipBanner';
 import { useT } from '../i18n';
 import type { I18nKey, I18nParams } from '../i18n';
+import { markTipSeen } from '../tips';
 
 type TFn = (key: I18nKey, params?: I18nParams | number) => string;
 
@@ -336,6 +338,22 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       cancelled = true;
     };
   }, [profile.id, showError]);
+
+  // The multi-server tip (docs/feature-discovery-plan.md, item 3) must know up
+  // front that there is something to attach: allProfiles is otherwise loaded
+  // only when the "+" dropdown opens — too late for the banner condition.
+  // The dropdown keeps refreshing the list on every open.
+  useEffect(() => {
+    let cancelled = false;
+    void api<Profile[]>('/api/profiles')
+      .then((list) => {
+        if (!cancelled) setAllProfiles(list);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [profile.id]);
 
   // WS connection and history load for the selected dialogue.
   useEffect(() => {
@@ -951,6 +969,10 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                     key={p.id}
                     className="server-add-item"
                     onClick={() => {
+                      // The multi-server tip retires on attach: the banner
+                      // hides itself via the render condition (attached grows
+                      // past the home server), the flag keeps it away after F5.
+                      markTipSeen('agent-multi-server');
                       sendWs({ type: 'attach_server', profileId: p.id });
                       setAddOpen(false);
                     }}
@@ -965,6 +987,13 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
             )}
           </div>
         </div>
+
+        {/* Multi-server tip (docs/feature-discovery-plan.md, item 3): shown
+            while only the home server is attached and there is something to
+            attach; attaching a server makes the condition false. */}
+        {availableProfiles.length > 0 && attachedServers.length === 1 && (
+          <TipBanner id="agent-multi-server">{t('tips.agentMultiServer')}</TipBanner>
+        )}
 
         <div className="agent-messages" ref={listRef}>
           {messages.length === 0 && (

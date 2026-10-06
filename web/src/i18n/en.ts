@@ -938,4 +938,7 @@ export const en: typeof ru = {
   'agent.planExecute': 'Run',
 
   'tips.dismiss': "Got it, don't show again",
+  'tips.agentMultiServer': 'You can attach a second server to this conversation with the "+" button — the agent will work on both.',
+  'tips.filesFolderDownload': 'A folder can be downloaded whole (tar.gz) — the ⬇ button in its row; multiple files and folders — via checkboxes.',
+  'tips.filesLogPin': 'This log can be pinned with the "Pin" button — it will appear above the file list, and its tail opens in one click.',
 };

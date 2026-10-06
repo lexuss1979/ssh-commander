@@ -13,8 +13,10 @@ import {
 import type { AgentAskMode, FileEntry, FileListResponse, FileSearchResult, Profile } from '../types';
 import { LogViewer } from '../components/LogViewer';
 import { Modal } from '../components/Modal';
+import { TipBanner } from '../components/TipBanner';
 import { useSortBy, SortableTh } from '../hooks/useSortBy';
 import { useT } from '../i18n';
+import { isTipSeen, markTipSeen } from '../tips';
 
 // The editor with highlighting loads as a separate chunk to keep the main bundle small
 const CodeEditor = lazy(() => import('../components/CodeEditor'));
@@ -165,6 +167,12 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
   const [tailTarget, setTailTarget] = useState<string | null>(null);
   const [addLogOpen, setAddLogOpen] = useState(false);
   const [addLogInput, setAddLogInput] = useState('');
+  // One-time tips (docs/feature-discovery-plan.md, items 7-8). The folder
+  // download tip is armed by the first listing containing a directory; the
+  // log-pin tip lives while nothing is pinned. markTipSeen (✕ or actually
+  // using the feature) retires both for good — the flag survives reloads.
+  const [showFolderTip, setShowFolderTip] = useState(false);
+  const [logPinTipActive, setLogPinTipActive] = useState(() => !isTipSeen('files-log-pin'));
 
   const fileAccessors = useMemo(() => ({
     // Folders always come before files; within a group — alphabetically.
@@ -180,6 +188,11 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
     try {
       const data = await api<FileListResponse>(fileQuery(profile.id, path));
       setEntries(data.entries);
+      // Folder-download tip: arm once, on the first listing that has a
+      // directory (not re-armed per folder while the tip is alive).
+      if (!isTipSeen('files-folder-download') && data.entries.some((e) => e.isDirectory)) {
+        setShowFolderTip(true);
+      }
     } catch (err) {
       showError((err as Error).message);
     } finally {
@@ -452,6 +465,9 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
 
   const batchDownload = async () => {
     if (selected.size === 0) return;
+    // The checkbox flow is what the folder-download tip advertises — retire it.
+    markTipSeen('files-folder-download');
+    setShowFolderTip(false);
     setBatchLoading(true);
     try {
       const names = sortedEntries.filter((e) => selected.has(e.path)).map((e) => e.name);
@@ -777,6 +793,13 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
         </button>
       </div>
 
+      {/* Folder-download tip (docs/feature-discovery-plan.md, item 7): armed
+          by the first listing with a directory, retired by the row/batch
+          download handlers (markTipSeen) or the banner's ✕. */}
+      {showFolderTip && (
+        <TipBanner id="files-folder-download">{t('tips.filesFolderDownload')}</TipBanner>
+      )}
+
       <div className="search-panel">
         <input
           className="search-input"
@@ -902,6 +925,11 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
                         className="btn btn-mini"
                         href={downloadDirUrl(profile.id, entry.path)}
                         title={t('files.downloadDirTitle')}
+                        onClick={() => {
+                          // Using the feature retires the tip for good.
+                          markTipSeen('files-folder-download');
+                          setShowFolderTip(false);
+                        }}
                       >
                         {DOWN_ICON}
                       </a>
@@ -1054,6 +1082,12 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
 
       {tailTarget !== null && (
         <Modal title={tailTarget} onClose={() => setTailTarget(null)} wide>
+          {/* Log-pin tip (docs/feature-discovery-plan.md, item 8): shown while
+              nothing is pinned and the tip is alive; the first pin retires it
+              (markTipSeen + the logPinTipActive flag). */}
+          {pinnedPaths.length === 0 && logPinTipActive && (
+            <TipBanner id="files-log-pin">{t('tips.filesLogPin')}</TipBanner>
+          )}
           <LogViewer
             kind="url"
             title={tailTarget}
@@ -1070,11 +1104,17 @@ export function FilesPage({ profile, showError, visible, onAskAgent, onProfilesC
             toolbarExtra={
               <button
                 className="btn btn-mini"
-                onClick={() =>
+                onClick={() => {
+                  if (!tailPinned) {
+                    // Pinning retires the log-pin tip right away — the banner
+                    // would otherwise linger until the modal is reopened.
+                    markTipSeen('files-log-pin');
+                    setLogPinTipActive(false);
+                  }
                   void putLogPaths(
                     tailPinned ? pinnedPaths.filter((p) => p !== tailTarget) : [...pinnedPaths, tailTarget],
-                  )
-                }
+                  );
+                }}
               >
                 {tailPinned ? t('files.unpin') : t('files.pin')}
               </button>
