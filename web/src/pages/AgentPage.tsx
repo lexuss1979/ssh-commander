@@ -1009,7 +1009,15 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
         </div>
 
         {planReady && !running && (
-          <PlanCard onExecute={() => sendWs({ type: 'approve_plan' })} />
+          // Approving the plan also switches plan mode off: it is one-shot,
+          // otherwise the next message would be planned again (no tools)
+          // instead of executed.
+          <PlanCard
+            onExecute={() => {
+              setPlanMode(false);
+              sendWs({ type: 'approve_plan' });
+            }}
+          />
         )}
 
         {pendingTool && (
