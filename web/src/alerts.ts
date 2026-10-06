@@ -1,9 +1,9 @@
 import type { AlertKind, AlertRuleState, AlertSeverity } from './types';
 
 /**
- * Клиентская часть алертов (эпик 20): настройки в localStorage, ключи,
- * гистерезис и переходы состояний. Вся математика правил — на сервере
- * (services/alerts.ts под unit-тестами); здесь только stateful-клей.
+ * The client side of alerts (epic 20): settings in localStorage, keys,
+ * hysteresis and state transitions. All rule math lives on the server
+ * (services/alerts.ts under unit tests); this is only the stateful glue.
  */
 
 export interface AlertsSettings {
@@ -24,7 +24,7 @@ export const DEFAULT_ALERTS_SETTINGS: AlertsSettings = {
 
 const STORAGE_KEY = 'sc-alerts';
 
-/** Толерантное чтение: битые/отсутствующие поля заменяются дефолтами. */
+/** Tolerant read: broken/missing fields fall back to defaults. */
 export function loadAlertsSettings(): AlertsSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -48,11 +48,11 @@ export function saveAlertsSettings(s: AlertsSettings): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
   } catch {
-    /* localStorage может быть недоступен */
+    /* localStorage may be unavailable */
   }
 }
 
-/** Активный (держащийся) алерт — то, что видно в колокольчике и чипах. */
+/** An active (holding) alert — what shows up in the bell and the chips. */
 export interface ActiveAlert {
   key: string;
   profileId: string;
@@ -62,11 +62,11 @@ export interface ActiveAlert {
   message: string;
   value: number;
   threshold: number;
-  /** Момент перехода в активное состояние (мс). */
+  /** The moment the alert went active (ms). */
   since: number;
 }
 
-/** Дельта снятия по kind: пока value > threshold − delta, алерт держится. */
+/** Clear delta per kind: while value > threshold − delta, the alert holds. */
 export const ALERT_CLEAR_DELTA: Record<AlertKind, number> = {
   'server-down': 0,
   disk: 5,
@@ -85,10 +85,11 @@ export interface MergeAlertStatesResult {
 }
 
 /**
- * Переходы состояний по новому набору правил (вселенная состояний = ответ
- * сервера): новый активный → fired; держащийся по гистерезису — обновляется
- * без сброса since; снявшийся (значение упало ниже порога минус дельта)
- * и пропавший из ответа — resolved.
+ * State transitions over the new set of rules (the universe of states =
+ * the server response): a newly active one → fired; one holding by
+ * hysteresis — updated without resetting since; one that cleared (the value
+ * fell below the threshold minus the delta) and one missing from the
+ * response — resolved.
  */
 export function mergeAlertStates(
   prev: Map<string, ActiveAlert>,
@@ -110,8 +111,8 @@ export function mergeAlertStates(
           ...existing,
           value: rule.value,
           threshold: rule.threshold,
-          // Сервер заполняет message всегда — текст несёт текущее значение,
-          // алерт в зоне гистерезиса не показывает устаревшую цифру.
+          // The server always fills message — the text carries the current
+          // value, an alert in the hysteresis zone never shows a stale figure.
           message: rule.message,
         });
       } else {
@@ -134,8 +135,8 @@ export function mergeAlertStates(
     next.set(key, alert);
     fired.push(alert);
   }
-  // Ключи, исчезнувшие из ответа (профиль удалён, диск отмонтирован,
-  // load-правило пропало из-за неизвестных ядер), снимаются молча.
+  // Keys that disappeared from the response (profile deleted, disk unmounted,
+  // a load rule dropped due to unknown cores) are resolved silently.
   for (const [key, alert] of prev) {
     if (!seen.has(key)) resolved.push(alert);
   }

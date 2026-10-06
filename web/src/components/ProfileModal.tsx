@@ -18,7 +18,7 @@ interface Props {
   onClose: () => void;
   onSaved: () => Promise<void>;
   showError: (msg: string) => void;
-  /** Вызывается после успешного bootstrap — выбрать созданный профиль. */
+  /** Called after a successful bootstrap — to select the created profile. */
   onProfileCreated?: (profileId: string) => void;
 }
 
@@ -75,7 +75,7 @@ type BootstrapPhase =
 export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileCreated }: Props) {
   const { t } = useT();
   const [editingId, setEditingId] = useState<string | null>(null);
-  // Режим правой панели: обычная форма профиля или bootstrap «root + пароль».
+  // Right panel mode: the regular profile form or the "root + password" bootstrap.
   const [mode, setMode] = useState<'form' | 'bootstrap'>('form');
   const [form, setForm] = useState<FormState>(emptyForm);
   const [busy, setBusy] = useState(false);
@@ -83,13 +83,13 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
   const [keysError, setKeysError] = useState('');
   const [importBusy, setImportBusy] = useState(false);
   const keyFileRef = useRef<HTMLInputElement>(null);
-  // Перенос профилей: общий пароль шифрования для экспорта/импорта.
+  // Profile transfer: a shared encryption password for export/import.
   const [transferPassword, setTransferPassword] = useState('');
   const [transferNoSecrets, setTransferNoSecrets] = useState(false);
   const [transferBusy, setTransferBusy] = useState(false);
   const [transferMsg, setTransferMsg] = useState('');
   const backupFileRef = useRef<HTMLInputElement>(null);
-  // Результат «Проверить подключение»: ok/error с сообщением.
+  // "Test connection" result: ok/error with a message.
   const [testResult, setTestResult] = useState<
     { phase: 'idle' } | { phase: 'testing' } | { phase: 'ok'; banner: string } | { phase: 'error'; message: string }
   >({ phase: 'idle' });
@@ -104,8 +104,8 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
     }
   };
 
-  // Импорт ключа с диска: файл уходит на сервер в keys/ (0600),
-  // после загрузки он сразу выбирается в форме.
+  // Import a key from disk: the file goes to the server into keys/ (0600),
+  // and after the upload it is selected in the form right away.
   const importKeyFile = async (file: File) => {
     setImportBusy(true);
     try {
@@ -129,8 +129,8 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
     void loadKeys();
   }, []);
 
-  // Профиль в правке: по нему видно, есть ли уже сохранённый секрет —
-  // тогда пустое поле означает «не менять», а не ошибку валидации.
+  // The profile being edited: it shows whether a saved secret already exists —
+  // then an empty field means "keep", not a validation error.
   const editingProfile = editingId ? profiles.find((p) => p.id === editingId) : undefined;
   const keepsPassword = Boolean(
     editingProfile && editingProfile.authType === 'password' && editingProfile.hasPassword,
@@ -150,7 +150,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
       username: p.username,
       authType: p.authType,
       keyPath: p.keyPath ?? '',
-      // Секреты сервер не отдаёт: поля остаются пустыми, пустое = «не менять».
+      // The server never returns secrets: the fields stay empty, empty = "keep".
       keyPassphrase: '',
       password: '',
       dockerCommand: p.dockerCommand ?? 'docker',
@@ -192,7 +192,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
     }
   };
 
-  // Общая валидация формы и сборка payload (для сохранения и теста соединения).
+  // Shared form validation and payload assembly (for both saving and the connection test).
   function buildPayload(): Record<string, unknown> | null {
     if (!form.name || !form.host || !form.username) {
       showError(t('profileModal.errorRequiredFields'));
@@ -213,17 +213,17 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
       username: form.username,
       authType: form.authType,
       keyPath: form.authType === 'key' ? form.keyPath : undefined,
-      // Пустое поле passphrase = «не менять» при редактировании / «без passphrase» при создании.
+      // An empty passphrase field = "keep" when editing / "no passphrase" when creating.
       keyPassphrase: form.authType === 'key' ? form.keyPassphrase || undefined : undefined,
-      // Пустой пароль при правке = «не менять»: сервер оставит сохранённый.
+      // An empty password when editing = "keep": the server keeps the saved one.
       password: form.authType === 'password' ? form.password || undefined : undefined,
       dockerCommand: form.dockerCommand || 'docker',
       note: form.note || undefined,
     };
   }
 
-  // «Проверить подключение»: разовое SSH-подключение по текущим полям формы,
-  // профиль сохранять не нужно.
+  // "Test connection": a one-off SSH connection using the current form fields;
+  // no need to save the profile.
   const testConn = async () => {
     const payload = buildPayload();
     if (!payload) return;
@@ -233,7 +233,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
         '/api/profiles/test-connection',
         {
           method: 'POST',
-          // savedId — чтобы сервер подставил сохранённый секрет: в форме его нет.
+          // savedId — so the server fills in the saved secret: the form does not have it.
           body: JSON.stringify(editingId ? { ...payload, savedId: editingId } : payload),
         },
       );
@@ -258,8 +258,8 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
     }
   };
 
-  // Экспорт бэкапа: без пароля и с секретами — спрашиваем подтверждение,
-  // файл окажется открытым текстом.
+  // Backup export: without a password but with secrets — ask for confirmation,
+  // the file would end up as plain text.
   const exportBackup = async () => {
     if (!transferNoSecrets && !transferPassword) {
       const ok = window.confirm(t('profileModal.exportNoPasswordConfirm'));
@@ -286,7 +286,7 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
     }
   };
 
-  // Импорт бэкапа: файл читается локально и уходит на сервер текстом.
+  // Backup import: the file is read locally and sent to the server as text.
   const importBackup = async (file: File) => {
     setTransferBusy(true);
     setTransferMsg('');
@@ -549,10 +549,10 @@ export function ProfileModal({ profiles, onClose, onSaved, showError, onProfileC
 }
 
 // --------------------------------------------------------------------------
-// «Новый сервер (root + пароль)» — bootstrap под ключ: отдельный ed25519-ключ
-// на сервер, опциональное закрытие парольного входа, профиль с authType=key.
-// Живого прогресса нет (одиночный запрос, десятки секунд): спиннер во время
-// работы, итоговый отчёт по шагам в конце.
+// "New server (root + password)" — key-based bootstrap: a dedicated ed25519
+// key on the server, optionally closing password login, a profile with
+// authType=key. No live progress (a single request taking tens of seconds):
+// a spinner while it runs, a final per-step report at the end.
 // --------------------------------------------------------------------------
 
 function BootstrapPanel({

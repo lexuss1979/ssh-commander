@@ -66,7 +66,7 @@ function containerAccessLabel(t: TFn, b: ContainerPortBinding, networkMode: stri
   return t('ports.accessContainerOnly');
 }
 
-// Модалка создания туннеля
+// Tunnel creation modal
 function TunnelModal({
   onClose,
   onCreate,
@@ -154,7 +154,7 @@ function TunnelModal({
   );
 }
 
-// Секция активных туннелей
+// Active tunnels section
 function TunnelsSection({
   tunnels,
   onStop,
@@ -308,13 +308,13 @@ export function PortsPage({ profile, visible, showError }: Props) {
   const [filter, setFilter] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
 
-  // Туннели
+  // Tunnels
   const [tunnels, setTunnels] = useState<Tunnel[]>([]);
   const [portRange, setPortRange] = useState({ min: 10000, max: 10049 });
   const [showTunnelModal, setShowTunnelModal] = useState(false);
   const [tunnelPrefill, setTunnelPrefill] = useState<{ targetHost: string; targetPort: number } | undefined>();
 
-  // Polling портов
+  // Ports polling
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
@@ -340,7 +340,7 @@ export function PortsPage({ profile, visible, showError }: Props) {
     };
   }, [profile.id, visible, reloadKey]);
 
-  // Polling туннелей
+  // Tunnels polling
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
@@ -352,7 +352,7 @@ export function PortsPage({ profile, visible, showError }: Props) {
         setTunnels(res.tunnels);
         setPortRange(res.portRange);
       } catch {
-        // Туннели — опционально, не блокируем UI.
+        // Tunnels are optional, do not block the UI.
       }
       if (!cancelled) {
         timer = window.setTimeout(tick, POLL_INTERVAL_MS);
@@ -444,10 +444,10 @@ export function PortsPage({ profile, visible, showError }: Props) {
         </div>
       ) : (
         <>
-          {/* Активные туннели */}
+          {/* Active tunnels */}
           <TunnelsSection tunnels={tunnels} onStop={handleStopTunnel} />
 
-          {/* Основная таблица хостовых портов */}
+          {/* Main host ports table */}
           <div className="ports-scroll">
             <table className="data-table">
               <thead>
@@ -516,7 +516,7 @@ export function PortsPage({ profile, visible, showError }: Props) {
             </p>
           </div>
 
-          {/* Порты контейнеров */}
+          {/* Container ports */}
           {containersWithPorts && containersWithPorts.length > 0 && (
             <ContainerPortsSection
               containers={containersWithPorts}
@@ -527,7 +527,7 @@ export function PortsPage({ profile, visible, showError }: Props) {
         </>
       )}
 
-      {/* Модалка создания туннеля */}
+      {/* Tunnel creation modal */}
       {showTunnelModal && (
         <TunnelModal
           onClose={() => {

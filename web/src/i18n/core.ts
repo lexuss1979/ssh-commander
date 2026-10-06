@@ -1,8 +1,8 @@
 import { ru } from './ru';
 import { en } from './en';
 
-// Чистое ядро i18n без React/DOM — покрывается раннером сервера
-// (server/test/i18n.test.ts, прецедент alerts-merge.test.ts).
+// Pure i18n core without React/DOM — covered by the server test runner
+// (server/test/i18n.test.ts, the alerts-merge.test.ts precedent).
 
 export type Lang = 'ru' | 'en';
 export type I18nKey = keyof typeof ru;
@@ -11,8 +11,8 @@ export type I18nParams = Record<string, string | number>;
 const dicts: Record<Lang, typeof ru> = { ru, en };
 
 /**
- * Перевод ключа. Строковые значения — с подстановкой {placeholders};
- * функции (склонения) вызываются с переданным аргументом как есть.
+ * Translate a key. String values get {placeholder} substitution;
+ * functions (plural forms) are called with the passed argument as is.
  */
 export function translate(lang: Lang, key: I18nKey, params?: I18nParams | number): string {
   const v = dicts[lang][key] as string | ((arg: unknown) => string);
@@ -23,20 +23,20 @@ export function translate(lang: Lang, key: I18nKey, params?: I18nParams | number
   );
 }
 
-/** Сохранённый выбор ('sc-lang') приоритетнее локали браузера; дефолт — en. */
+/** The saved choice ('sc-lang') outranks the browser locale; default — en. */
 export function detectLang(saved: string | null, navLanguage: string | undefined): Lang {
   if (saved === 'ru' || saved === 'en') return saved;
   return navLanguage?.toLowerCase().startsWith('ru') ? 'ru' : 'en';
 }
 
-/** Локаль для toLocale*-форматирования дат и чисел. */
+/** Locale for toLocale* formatting of dates and numbers. */
 export function localeOf(lang: Lang): string {
   return lang === 'ru' ? 'ru-RU' : 'en-US';
 }
 
-// Активный язык на уровне модуля — доступ для не-React кода (api.ts и
-// т.п.). LangProvider синхронизирует через setActiveLang; реактивность
-// при переключении даёт контекст (компоненты обязаны брать useT()).
+// The active language at module level — access for non-React code (api.ts
+// etc.). LangProvider syncs via setActiveLang; reactivity on switch comes
+// from the context (components must use useT()).
 let activeLang: Lang = 'en';
 
 export function setActiveLang(lang: Lang): void {
@@ -47,12 +47,12 @@ export function getActiveLang(): Lang {
   return activeLang;
 }
 
-/** Не-React вариант перевода: читает активный язык модуля. */
+/** The non-React variant of translation: reads the module's active language. */
 export function t(key: I18nKey, params?: I18nParams | number): string {
   return translate(activeLang, key, params);
 }
 
-/** Локаль активного языка — для toLocale* вне React-компонентов. */
+/** Locale of the active language — for toLocale* outside React components. */
 export function activeLocale(): string {
   return localeOf(activeLang);
 }

@@ -1,8 +1,8 @@
 import type { ru } from './ru';
 
-// Английский словарь. Тип `typeof ru` делает пропуск ключа, лишний ключ
-// и расхождение сигнатуры функции ошибкой компиляции; тест
-// server/test/i18n.test.ts — второй эшелон (паритет плейсхолдеров).
+// The English dictionary. The `typeof ru` type makes a missing key, an
+// extra key and a function signature mismatch a compile error; the
+// server/test/i18n.test.ts test is the second line of defense (placeholder parity).
 export const en: typeof ru = {
   'common.loading': 'Loading…',
   'common.save': 'Save',

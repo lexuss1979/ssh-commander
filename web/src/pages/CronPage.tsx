@@ -40,13 +40,13 @@ function matchesFilter(entry: CronEntry, filter: string): boolean {
   return q === '' || entry.command.toLowerCase().includes(q);
 }
 
-// Модалка добавления/редактирования задачи
+// Add/edit entry modal
 function CronEntryModal({
   entry,
   onClose,
   onSave,
 }: {
-  /** undefined — добавление, иначе редактирование существующей записи. */
+  /** undefined — adding a new entry, otherwise editing an existing one. */
   entry?: CronEntry;
   onClose: () => void;
   onSave: (schedule: string, command: string) => Promise<void>;
@@ -129,7 +129,7 @@ function CronEntryModal({
   );
 }
 
-// SVG-иконки в фирменном стиле приложения (feather)
+// SVG icons in the app's signature style (feather)
 function IconEdit() {
   return (
     <svg
@@ -166,7 +166,7 @@ function IconDelete() {
   );
 }
 
-// Switch статуса задачи (вкл/выкл); disabled — read-only (чужой crontab / системные файлы)
+// Entry status switch (on/off); disabled — read-only (someone else's crontab / system files)
 function StatusSwitch({
   enabled,
   disabled,
@@ -211,7 +211,7 @@ function ScheduleCell({ entry }: { entry: CronEntry }) {
   );
 }
 
-// Системная read-only таблица (/etc/crontab, /etc/cron.d/*) с колонкой «Пользователь».
+// System read-only table (/etc/crontab, /etc/cron.d/*) with a "User" column.
 function SystemCronTable({
   entries,
   emptyText,
@@ -280,7 +280,7 @@ export function CronPage({ profile, visible, showError }: Props) {
         if (!cancelled) setUsers(us);
       })
       .catch(() => {
-        // Селектор не появится — работаем как раньше (только свой crontab).
+        // The selector will not appear — work as before (own crontab only).
         if (!cancelled) setUsers([]);
       });
     return () => {
@@ -314,7 +314,7 @@ export function CronPage({ profile, visible, showError }: Props) {
     };
   }, [profile.id, visible, reloadKey, selectedUser]);
 
-  // Мутации возвращают свежий snapshot (текущего пользователя) — применяем сразу.
+  // Mutations return a fresh snapshot (of the current user) — applied right away.
   const applySnapshot = (s: CronSnapshot) => {
     setSnapshot(s);
     setError(null);
@@ -448,7 +448,7 @@ export function CronPage({ profile, visible, showError }: Props) {
         </div>
       ) : (
         <div className="cron-scroll">
-          {/* Crontab пользователя — редактируемый (свой) или read-only (чужой) */}
+          {/* The user's crontab — editable (own) or read-only (someone else's) */}
           <div className="cron-section">
             <div className="section-head">
               <h3 className="section-title">

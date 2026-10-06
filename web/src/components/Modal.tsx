@@ -6,22 +6,23 @@ interface Props {
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
-  /** Дополнительный класс на .modal — кастомный layout вроде модалки настроек. */
+  /** Extra class on .modal — a custom layout like the settings modal. */
   className?: string;
   /**
-   * Закрытие кликом по оверлею. Для модалок, где случайное закрытие дорого
-   * (например, просмотрщик применения обновлений пакетов — клик мимо окна
-   * оборвал бы `apt-get upgrade`), выставляется false.
+   * Close on overlay click. For modals where an accidental close is costly
+   * (e.g. the package update viewer — a click outside the window would abort
+   * `apt-get upgrade`), set to false.
    */
   dismissable?: boolean;
 }
 
 export function Modal({ title, onClose, children, wide, className, dismissable = true }: Props) {
   const { t } = useT();
-  // Клик по оверлею закрывает модалку только если нажатие началось на нём же:
-  // click при выделении текста в поле (mousedown внутри модалки, mouseup на
-  // оверлее) всплывает на оверлее как общий предок и без этой проверки
-  // молча закрывал бы модалку вместе с введёнными данными.
+  // An overlay click closes the modal only if the press started on the overlay
+  // itself: a click while selecting text in a field (mousedown inside the
+  // modal, mouseup on the overlay) bubbles to the overlay as a common ancestor
+  // and without this check would silently close the modal along with the
+  // entered data.
   const pressedOnOverlay = useRef(false);
   return (
     <div

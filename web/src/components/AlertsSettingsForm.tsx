@@ -16,10 +16,10 @@ const clampNum = (raw: string, min: number, max: number, fallback: number): numb
 };
 
 /**
- * Форма порогов алертов — раздел «Алерты» модалки настроек (раньше жила
- * модалкой в колокольчике). Поля — локальный стейт, инициализируется из
- * пропа settings при монтировании; сохранение уходит через onSave
- * (App делает тихий re-baseline активных алертов).
+ * The alert thresholds form — the "Alerts" section of the settings modal
+ * (it used to live in a modal on the bell). The fields are local state
+ * initialized from the settings prop on mount; saving goes through onSave
+ * (App does a silent re-baseline of active alerts).
  */
 export function AlertsSettingsForm({ settings, onSave, showError, showSuccess }: Props) {
   const { t } = useT();
@@ -30,15 +30,15 @@ export function AlertsSettingsForm({ settings, onSave, showError, showSuccess }:
   const [notify, setNotify] = useState(settings.notify);
   const notifySupported = typeof Notification !== 'undefined';
 
-  // Разрешение запрашиваем по клику на тумблер, не при загрузке (roadmap).
+  // Permission is requested on a toggle click, not on load (roadmap).
   const toggleNotify = async (on: boolean) => {
     if (!on) {
       setNotify(false);
       return;
     }
     try {
-      // Legacy-Safari возвращает undefined (callback-API) — оборачиваем
-      // оба варианта в промис.
+      // Legacy Safari returns undefined (callback API) — wrap both variants
+      // in a promise.
       const result: unknown = Notification.requestPermission();
       const perm = typeof result === 'string' ? result : await result;
       if (perm === 'granted') {
@@ -61,7 +61,7 @@ export function AlertsSettingsForm({ settings, onSave, showError, showSuccess }:
       load: clampNum(load, 0.5, 16, DEFAULT_ALERTS_SETTINGS.load),
       notify,
     });
-    // Форма остаётся открытой (это раздел, а не модалка) — подтверждаем тостом.
+    // The form stays open (it is a section, not a modal) — confirm with a toast.
     showSuccess(t('alerts.saved'));
   };
 

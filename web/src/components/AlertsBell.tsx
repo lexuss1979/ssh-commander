@@ -23,9 +23,9 @@ function formatSince(since: number, t: TFn): string {
 }
 
 /**
- * Колокольчик алертов в шапке сайдбара: счётчик активных и выпадающий
- * список. Настройки порогов переехали в модалку «Настройки» (раздел
- * «Алерты») — колокольчик остаётся только индикатором и списком.
+ * The alerts bell in the sidebar header: an active count and a dropdown
+ * list. Threshold settings moved into the "Settings" modal (the "Alerts"
+ * section) — the bell remains only an indicator and a list.
  */
 export function AlertsBell({ alerts, settings, profiles, onOpenProfile }: Props) {
   const { t } = useT();
@@ -33,8 +33,8 @@ export function AlertsBell({ alerts, settings, profiles, onOpenProfile }: Props)
   const rootRef = useRef<HTMLDivElement>(null);
   const bellRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  // Позиция панели (fixed), чтобы она не выходила за край экрана: считается по
-  // колокольчику при открытии и клампится по ширине/высоте вьюпорта.
+  // Panel position (fixed) so it does not leave the screen: measured from
+  // the bell on open and clamped to the viewport width/height.
   const [panelPos, setPanelPos] = useState<{ left: number; top: number } | null>(null);
 
   useLayoutEffect(() => {
@@ -53,7 +53,7 @@ export function AlertsBell({ alerts, settings, profiles, onOpenProfile }: Props)
     setPanelPos({ left, top });
   }, [open]);
 
-  // Панель закрывается по клику вне неё и по Escape (паттерн меню «В чат ▾»).
+  // The panel closes on a click outside it and on Escape (the "To chat ▾" menu pattern).
   useEffect(() => {
     if (!open) return;
     const onMouseDown = (e: MouseEvent) => {
@@ -70,7 +70,7 @@ export function AlertsBell({ alerts, settings, profiles, onOpenProfile }: Props)
     };
   }, [open]);
 
-  // crit выше warn, внутри уровня — старые выше.
+  // crit above warn, within a level — older above.
   const sorted = useMemo(() => {
     const rank = (a: ActiveAlert) => (a.severity === 'crit' ? 0 : 1);
     return [...alerts].sort((x, y) => rank(x) - rank(y) || x.since - y.since);

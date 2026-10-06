@@ -1,7 +1,7 @@
 /**
- * Режим запроса «из терминала/вкладки БД в чат агента».
- * 'send' — отправить текст как есть (кнопка «Спросить агента» вкладки БД
- * собирает полный промпт с движком и схемой сама).
+ * The mode of an "ask the agent from terminal/DB tab" request.
+ * 'send' — send the text as is (the DB tab's "Ask agent" button assembles
+ * the full prompt with engine and schema itself).
  */
 export type AgentAskMode = 'explain' | 'new-dialogue' | 'prefill' | 'send';
 
@@ -13,20 +13,21 @@ export interface Profile {
   username: string;
   authType: 'key' | 'password';
   keyPath?: string;
-  /** Секреты наружу не отдаются (server: toSafeProfile) — только факт «задан».
-   * Пустое поле формы при правке = «не менять». */
+  /** Secrets are never returned (server: toSafeProfile) — only the "is set" fact.
+   * An empty form field when editing = "keep". */
   hasPassword?: boolean;
   hasKeyPassphrase?: boolean;
   dockerCommand?: string;
   note?: string;
-  /** Закреплённые пути логов для быстрого доступа в FilesPage (эпик 14). */
+  /** Pinned log paths for quick access in FilesPage (epic 14). */
   logPaths?: string[];
 }
 
 /**
- * Внутренняя вкладка терминала (эпик 15). id — стабильный на всю жизнь
- * вкладки (монотонный счётчик в localStorage), им же ключ сессии на сервере;
- * container — shell внутри docker-контейнера вместо системного.
+ * An internal terminal tab (epic 15). id is stable for the tab's whole life
+ * (a monotonic counter in localStorage) and doubles as the session key on
+ * the server; container — a shell inside a docker container instead of the
+ * system one.
  */
 export interface TerminalTab {
   id: number;
@@ -59,33 +60,34 @@ export interface DockerEntity {
   [key: string]: string | number | boolean | null | undefined;
 }
 
-// Алерты по порогам (эпик 20) — зеркала серверных имён полей.
+// Threshold alerts (epic 20) — mirrors of the server field names.
 export type AlertKind = 'server-down' | 'disk' | 'memory' | 'load';
 
 export type AlertSeverity = 'crit' | 'warn';
 
 /**
- * Состояние одного правила на тик опроса: и неактивные тоже — гистерезис
- * на клиенте должен видеть значение ниже порога, а не только факт срабатывания.
+ * The state of one rule on a polling tick: inactive ones too — client-side
+ * hysteresis must see the value below the threshold, not only the fact of
+ * firing.
  */
 export interface AlertRuleState {
   profileId: string;
   kind: AlertKind;
-  /** Точка монтирования (kind='disk'). */
+  /** Mount point (kind='disk'). */
   subject?: string;
   severity: AlertSeverity;
   active: boolean;
-  /** server-down: 0/1; disk/memory: %; load: load1/cores (2 знака). */
+  /** server-down: 0/1; disk/memory: %; load: load1/cores (2 decimals). */
   value: number;
-  /** server-down: 1; disk/mem: %; load: на ядро. */
+  /** server-down: 1; disk/mem: %; load: per core. */
   threshold: number;
-  /** Текст о текущем значении — заполняется всегда (свежая цифра у алерта в зоне гистерезиса). */
+  /** Text of the current value — always filled (a fresh figure for an alert in the hysteresis zone). */
   message: string;
 }
 
 export interface AlertsResponse {
   timestamp: number;
-  /** Эффективные пороги (echo). */
+  /** Effective thresholds (echo). */
   thresholds: { diskPercent: number; memPercent: number; loadPerCore: number };
   rules: AlertRuleState[];
 }
@@ -102,8 +104,8 @@ export interface DialogueMessage {
   name?: string;
 }
 
-/** Кумулятивные итоги расходов AI по диалогу (enrichment / WS-событие usage).
- * costUsd неполна при unpricedCalls > 0 (часть вызовов без цены модели). */
+/** Cumulative AI cost totals for a dialogue (enrichment / the usage WS event).
+ * costUsd is incomplete when unpricedCalls > 0 (some calls have no model price). */
 export interface DialogueUsageTotals {
   calls: number;
   promptTokens: number;
@@ -120,9 +122,9 @@ export interface DialogueSummary {
   messageCount: number;
   createdAt: number;
   updatedAt: number;
-  /** Дополнительные серверы, подключённые к диалогу (мульти-серверный режим). */
+  /** Extra servers attached to the dialogue (multi-server mode). */
   extraProfileIds?: string[];
-  /** Расходы диалога; null — записей usage нет. */
+  /** Dialogue costs; null — no usage records. */
   usage?: DialogueUsageTotals | null;
 }
 

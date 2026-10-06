@@ -1,7 +1,8 @@
-// Пресеты AI-провайдеров (docs/settings-model-plan.md): пресет несёт base и
-// модель — пресет без модели не работает. Общий модуль onboarding'а и
-// страницы «Настройки» (эпик 23). «Свой URL» — пустой пресет: base и модель
-// заполняет человек; срез хвостового '/' у base делает сервер.
+// AI provider presets (docs/settings-model-plan.md): a preset carries a base
+// and a model — a preset without a model does not work. Shared by onboarding
+// and the "Settings" page (epic 23). "Custom URL" is an empty preset: the
+// human fills in the base and the model; trimming the trailing '/' of the
+// base is done by the server.
 
 export type AiProvider = 'deepseek' | 'openai' | 'opencode-go' | 'custom';
 

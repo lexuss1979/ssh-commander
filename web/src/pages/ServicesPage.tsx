@@ -35,7 +35,7 @@ const ACTION_LABELS: Record<ServiceAction, I18nKey> = {
   'reset-failed': 'services.actionResetFailed',
 };
 
-// Точное имя или префикс до `.service` — только усиливает confirm-текст, не блокирует.
+// Exact name or a prefix up to `.service` — only strengthens the confirm text, never blocks.
 const CRITICAL_UNITS = [
   'sshd',
   'ssh',
@@ -55,7 +55,7 @@ function isCriticalUnit(name: string): boolean {
   return CRITICAL_UNITS.includes(core);
 }
 
-/** Приоритет статуса для сортировки: failed вверх, затем activating. */
+/** Status priority for sorting: failed on top, then activating. */
 function statusPriority(u: UnitInfo): number {
   if (u.active === 'failed' || u.sub === 'failed') return 0;
   if (u.active === 'activating') return 1;
@@ -68,7 +68,7 @@ function statusText(u: UnitInfo): string {
   return `${active} (${u.sub})`;
 }
 
-/** Класс чипа статуса с точкой: running/ok, failed/red, exited|activating/amber, остальное нейтральный. */
+/** Status chip class with a dot: running/ok, failed/red, exited|activating/amber, anything else neutral. */
 function statusBadgeClass(u: UnitInfo): string {
   if (u.sub === 'running') return 'running';
   if (u.active === 'failed' || u.sub === 'failed') return 'failed';
@@ -81,7 +81,7 @@ function isFailed(u: UnitInfo): boolean {
   return u.active === 'failed' || u.sub === 'failed';
 }
 
-/** Класс бейджа автозапуска в карточке (enabled/masked/generated цветные, остальные нейтральные). */
+/** Autostart badge class in the card (enabled/masked/generated are colored, the rest neutral). */
 function unitAutoClass(enabled: UnitInfo['enabled']): string {
   if (enabled === 'enabled') return 'enabled';
   if (enabled === 'masked') return 'masked';
@@ -89,12 +89,12 @@ function unitAutoClass(enabled: UnitInfo['enabled']): string {
   return '';
 }
 
-/** Автозапуск переключаем (enable/disable имеют смысл) только для enabled/disabled. */
+/** Autostart is toggleable (enable/disable make sense) only for enabled/disabled. */
 function autoToggleable(enabled: UnitInfo['enabled']): boolean {
   return enabled === 'enabled' || enabled === 'disabled';
 }
 
-/** Подсказка под switch, когда enable/disable неприменимы. */
+/** Hint under the switch when enable/disable do not apply. */
 function autoHint(t: TFn, enabled: UnitInfo['enabled']): string {
   if (enabled === 'masked') return t('services.autoHintMasked');
   if (enabled === 'static' || enabled === 'indirect' || enabled === 'alias' || enabled === 'generated') {
@@ -115,7 +115,7 @@ const DETAIL_FIELDS: Array<{ key: string; label: I18nKey }> = [
   { key: 'ActiveEnterTimestamp', label: 'services.fieldStarted' },
 ];
 
-/** Цель подтверждения: действие + unit + необязательный откат (для switch автозапуска). */
+/** Confirmation target: action + unit + optional rollback (for the autostart switch). */
 interface ConfirmTarget {
   action: ServiceAction;
   unit: UnitInfo;
@@ -138,13 +138,13 @@ export function ServicesPage({ profile, visible, showError }: Props) {
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [logsUnit, setLogsUnit] = useState<UnitInfo | null>(null);
-  // Уведомление об успешном действии (output systemctl не отбрасываем).
+  // Success notice for an action (the systemctl output is not discarded).
   const [notice, setNotice] = useState<string | null>(null);
   const noticeTimer = useRef<number | null>(null);
-  // sudo-пароль держим в стейте страницы на время жизни вкладки (без persist):
-  // после первого ввода повторные действия не спрашивают его заново.
+  // The sudo password lives in the page state for the lifetime of the tab (not persisted):
+  // after the first entry, subsequent actions do not ask for it again.
   const [sudoPassword, setSudoPassword] = useState('');
-  // Оптимистичное положение switch автозапуска во время подтверждения (откат при отмене).
+  // Optimistic position of the autostart switch during confirmation (rolled back on cancel).
   const [autoFlip, setAutoFlip] = useState<{ name: string; value: boolean } | null>(null);
 
   const showNotice = useCallback((msg: string) => {
@@ -159,7 +159,7 @@ export function ServicesPage({ profile, visible, showError }: Props) {
     };
   }, []);
 
-  // Polling 5 с при видимой вкладке; мутации применяют свежий снимок сразу.
+  // 5s polling while the tab is visible; mutations apply the fresh snapshot right away.
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
@@ -185,7 +185,7 @@ export function ServicesPage({ profile, visible, showError }: Props) {
     };
   }, [profile.id, visible, reloadKey]);
 
-  // Деталь выбранного unit'а (и при возврате на вкладку после keep-alive).
+  // Detail of the selected unit (also when returning to the tab after keep-alive).
   useEffect(() => {
     if (!visible) return;
     if (!selected) {
@@ -209,7 +209,7 @@ export function ServicesPage({ profile, visible, showError }: Props) {
     };
   }, [profile.id, selected, visible, detailKey, showError]);
 
-  // Свежий объект выбранного unit'а из последнего снимка (бейдж статуса не устаревает).
+  // Fresh object of the selected unit from the latest snapshot (the status badge never goes stale).
   const selectedUnit = useMemo(() => {
     if (!selected) return null;
     return snapshot?.units.find((u) => u.name === selected.name) ?? selected;
@@ -218,15 +218,15 @@ export function ServicesPage({ profile, visible, showError }: Props) {
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
     return (snapshot?.units ?? []).filter((u) => {
-      // Шаблоны из list-unit-files (getty@.service, user@.service) — не
-      // инстансы, в таблицу не попадают (инстансы вида getty@tty1.service
-      // остаются).
+      // Templates from list-unit-files (getty@.service, user@.service) are not
+      // instances and do not reach the table (instances like getty@tty1.service
+      // stay).
       if (/@\.service$/.test(u.name)) return false;
       if (q && !u.name.toLowerCase().includes(q) && !(u.description ?? '').toLowerCase().includes(q)) {
         return false;
       }
-      // «только запущенные» и «только сбойные» — ИЛИ: две галочки вместе
-      // дают объединение, а не всегда пустой список (логическое И).
+      // "only running" and "only failed" are OR: both checkboxes together
+      // give a union, not an always-empty list (logical AND).
       if (onlyRunning || onlyFailed) {
         const running = onlyRunning && u.sub === 'running';
         const failed = onlyFailed && isFailed(u);
@@ -246,7 +246,7 @@ export function ServicesPage({ profile, visible, showError }: Props) {
     [],
   );
 
-  // Дефолт — failed вверх (приоритет failed → activating → остальные).
+  // Default — failed on top (priority failed → activating → the rest).
   const { sort, toggle, sorted } = useSortBy(filtered, accessors, { key: 'status', dir: 'asc' });
 
   const handleActionRequest = (unit: UnitInfo, action: ServiceAction, onCancel?: () => void) => {
@@ -259,7 +259,7 @@ export function ServicesPage({ profile, visible, showError }: Props) {
     setConfirm(null);
   };
 
-  // Переключение switch автозапуска: оптимистичный флип + подтверждение + откат при отмене.
+  // Toggling the autostart switch: optimistic flip + confirmation + rollback on cancel.
   const handleAutoToggle = (unit: UnitInfo, newValue: boolean) => {
     const action: ServiceAction = newValue ? 'enable' : 'disable';
     setAutoFlip({ name: unit.name, value: newValue });
@@ -277,7 +277,7 @@ export function ServicesPage({ profile, visible, showError }: Props) {
       showNotice(
         `${t(ACTION_LABELS[confirm.action])}: ${confirm.unit.name}${result.output ? ` — ${result.output}` : ''}`,
       );
-      // Немедленный refetch снимка (кэш сброшен на сервере после мутации).
+      // Immediate snapshot refetch (the cache is invalidated on the server after the mutation).
       setReloadKey((k) => k + 1);
       if (selected?.name === confirm.unit.name) {
         setDetailKey((k) => k + 1);
@@ -289,7 +289,7 @@ export function ServicesPage({ profile, visible, showError }: Props) {
     }
   };
 
-  // Состояние switch автозапуска для выбранного unit'а.
+  // Autostart switch state for the selected unit.
   const selEnabled = selectedUnit?.enabled ?? null;
   const flipping = autoFlip?.name === selectedUnit?.name;
   const autoOn = flipping ? (autoFlip?.value ?? false) : selEnabled === 'enabled';
@@ -471,7 +471,7 @@ export function ServicesPage({ profile, visible, showError }: Props) {
 }
 
 // ---------------------------------------------------------------------------
-// Деталь unit'а — модальное окно
+// Unit detail modal
 // ---------------------------------------------------------------------------
 
 function ServiceDetailModal({
@@ -567,7 +567,7 @@ function ServiceDetailModal({
 }
 
 // ---------------------------------------------------------------------------
-// Модалка подтверждения действия
+// Action confirmation modal
 // ---------------------------------------------------------------------------
 
 function ActionConfirmModal({
@@ -627,7 +627,7 @@ function ActionConfirmModal({
 }
 
 // ---------------------------------------------------------------------------
-// Просмотрщик журнала unit'а (минимальный inline по образцу LogsModal)
+// Unit log viewer (minimal inline viewer modeled after LogsModal)
 // ---------------------------------------------------------------------------
 
 const LOG_BUFFER_LIMIT = 500 * 1024;
@@ -663,7 +663,7 @@ function ServiceLogsModal({
     const el = preRef.current;
     if (!el) return;
     let next = (el.textContent ?? '') + text;
-    // Кольцевая обрезка буфера ~500 КБ по границе строки.
+    // Ring-buffer trim of the buffer at ~500 KB on a line boundary.
     if (next.length > LOG_BUFFER_LIMIT) {
       const nl = next.indexOf('\n', next.length - LOG_BUFFER_LIMIT);
       next = next.slice(nl >= 0 ? nl + 1 : next.length - LOG_BUFFER_LIMIT);
@@ -673,7 +673,7 @@ function ServiceLogsModal({
   }, []);
 
   useEffect(() => {
-    // Вкладка скрыта (keep-alive) — стрим на паузе, возобновится при возврате.
+    // Tab hidden (keep-alive) — the stream is paused and resumes on return.
     if (!visible) return;
     let cancelled = false;
     const controller = new AbortController();

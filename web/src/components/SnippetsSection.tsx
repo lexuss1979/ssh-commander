@@ -17,16 +17,16 @@ import type { I18nKey, I18nParams } from '../i18n';
 interface Props {
   showError: (msg: string) => void;
   onAskAgent: (text: string, mode?: AgentAskMode) => void;
-  /** Цели запуска — из списка профилей App (overview бывает пуст/устаревшим). */
+  /** Run targets — from the App profile list (the overview may be empty/stale). */
   profiles: Profile[];
-  /** Свежий снимок /api/overview — статус-точки у целей (необязательное украшение). */
+  /** Fresh /api/overview snapshot — status dots on the targets (optional decoration). */
   servers: OverviewServerEntry[] | null;
 }
 
-// Контекст для «В чат»: хвост объединённого вывода до 4 КБ.
+// Context for "To chat": the tail of the combined output, up to 4 KB.
 const ASK_TAIL_CHARS = 4096;
 
-/** Форма редактора сниппета: null в profileIds = «на всех серверах». */
+/** Snippet editor form: profileIds === null means "on all servers". */
 interface SnippetForm {
   name: string;
   command: string;
@@ -62,10 +62,10 @@ function buildAskText(
 }
 
 /**
- * Раздел «Команды» на странице «Серверы» (эпик 18): список сохранённых
- * команд + параллельный запуск на выбранных серверах с подтверждением и
- * разбором результатов. Команда исполняется как есть (уровень терминала) —
- * защита не фильтрацией, а модалкой с явным перечислением целей.
+ * The "Commands" section of the "Servers" page (epic 18): a list of saved
+ * commands + parallel execution on the selected servers with confirmation
+ * and result breakdown. The command runs as is (terminal level) — the
+ * protection is not filtering but a modal with an explicit target list.
  */
 export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Props) {
   const { t } = useT();
@@ -74,16 +74,18 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
   const [editing, setEditing] = useState<{ snippet: Snippet | null; form: SnippetForm } | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Цели запуска: общий выбор для сниппетов и разовой команды.
+  // Run targets: a shared selection for snippets and one-off commands.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [adhoc, setAdhoc] = useState('');
-  // scope — область сниппета (null = все серверы): запуски сниппета с областью
-  // предвыбирают именно его цели, модалке остаётся показать выходы за область.
+  // scope — the snippet's scope (null = all servers): running a snippet with
+  // a scope preselects exactly its targets; the modal only has to show the
+  // out-of-scope outputs.
   const [confirming, setConfirming] = useState<{ command: string; scope: string[] | null } | null>(null);
   const [running, setRunning] = useState(false);
-  // Замороженные цели и отмена: чекбоксы во время запуска меняют selected,
-  // а выполняется то, что ушло с запросом (AbortController — UI освобождается
-  // сразу, на сервере команда дорабатывает своё).
+  // Frozen targets and cancellation: the checkboxes keep changing selected
+  // while a run is in progress, but what executes is what was sent with the
+  // request (AbortController frees the UI right away; on the server the
+  // command runs to completion).
   const [runTargets, setRunTargets] = useState<string[]>([]);
   const runAbortRef = useRef<AbortController | null>(null);
   const [results, setResults] = useState<SnippetRunResponse | null>(null);
@@ -109,8 +111,8 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
     };
   }, [reloadKey, showError]);
 
-  // Профиль удалили — убираем его из выбора и целей сниппетов не теряем:
-  // запуск валидирует цели на сервере, здесь чистим только чекбоксы.
+  // A profile was deleted — drop it from the selection without losing snippet
+  // targets: the run validates targets on the server, here we only clean the checkboxes.
   useEffect(() => {
     setSelected((prev) => {
       const next = new Set([...prev].filter((id) => profileById.has(id)));
@@ -164,8 +166,8 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
   };
 
   const startRun = (command: string, snippet?: Snippet) => {
-    // Сниппет с областью предвыбирает свои цели — настройка «только на этих
-    // серверах» должна значить что-то, а не молча наследовать прошлый выбор.
+    // A snippet with a scope preselects its own targets — the "only on these
+    // servers" setting has to mean something, not silently inherit the previous selection.
     const scope = snippet?.profileIds ?? null;
     let effective = selected;
     if (scope) {
@@ -193,11 +195,11 @@ export function SnippetsSection({ showError, onAskAgent, profiles, servers }: Pr
     const controller = new AbortController();
     runAbortRef.current = controller;
     try {
-      // Уходит именно command — та строка, что показана в модалке; серверный
-      // путь со snippetId перечитал бы стор и мог выполнить уже отредактированную команду.
+      // Exactly command is sent — the string shown in the modal; a server-side
+      // path via snippetId would re-read the store and could execute an already edited command.
       const res = await runSnippet({ command: confirming.command, profileIds: targets }, controller.signal);
       setResults(res);
-      // Разворачиваем первый проблемный результат, остальные свёрнуты.
+      // Expand the first failing result, the rest stay collapsed.
       const firstBad = res.results.find((r) => !r.ok);
       setOpenResults(new Set(firstBad ? [firstBad.profileId] : []));
     } catch (err) {

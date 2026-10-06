@@ -8,15 +8,15 @@ import { useT } from '../i18n';
 interface Props {
   content: string;
   /**
-   * Кнопка «Вставить в редактор» на ```sql-блоках (SQL-консоль вкладки
-   * «Базы данных»: ответ агента → редактор). Не задан — кнопки нет.
+   * The "Insert into editor" button on ```sql blocks (the SQL console of the
+   * "Databases" tab: agent reply → editor). Not set — no button.
    */
   onInsertSql?: (sql: string) => void;
 }
 
 const InsertSqlContext = createContext<((sql: string) => void) | null>(null);
 
-/** Язык блока из className дочернего `<code class="language-*">`. */
+/** The block language from the className of a child `<code class="language-*">`. */
 function codeLanguage(children: ReactNode): string | null {
   if (Array.isArray(children)) children = children[0];
   if (typeof children === 'object' && children !== null && 'props' in children) {
@@ -27,7 +27,7 @@ function codeLanguage(children: ReactNode): string | null {
   return null;
 }
 
-/** Блок <pre> с кнопкой «Копировать»; для sql-блоков — дополнительно «В SQL». */
+/** A <pre> block with a "Copy" button; sql blocks additionally get "To SQL". */
 function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
   const { children, ...rest } = props;
   const { t } = useT();
@@ -78,8 +78,8 @@ function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
 }
 
 /**
- * Рендер сообщений чата как markdown (GFM: таблицы, списки, код, ссылки).
- * react-markdown не рендерит сырой HTML, поэтому вывод модели безопасен.
+ * Renders chat messages as markdown (GFM: tables, lists, code, links).
+ * react-markdown does not render raw HTML, so model output is safe.
  */
 export const Markdown = memo(function Markdown({ content, onInsertSql }: Props) {
   return (

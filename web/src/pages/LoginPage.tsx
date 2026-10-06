@@ -18,8 +18,8 @@ export function LoginPage({ onLogin, showError }: Props) {
     try {
       await onLogin(password);
     } catch (err) {
-      // Тексты ошибок входа переводим на клиенте по статус-коду: серверные
-      // строки захардкожены на русском, а язык UI к этому моменту уже известен.
+      // Login error texts are localized on the client by status code: the server
+      // strings are hardcoded in Russian, and the UI language is already known.
       if (err instanceof ApiError && err.status === 401) {
         showError(t('login.wrongPassword'));
       } else if (err instanceof ApiError && err.status === 429) {

@@ -22,7 +22,7 @@ interface I18nContextValue {
   lang: Lang;
   setLang: (lang: Lang) => void;
   t: (key: I18nKey, params?: I18nParams | number) => string;
-  /** Локаль активного языка ('ru-RU' | 'en-US') для toLocale*. */
+  /** Locale of the active language ('ru-RU' | 'en-US') for toLocale*. */
   locale: string;
 }
 
@@ -33,16 +33,16 @@ function readInitialLang(): Lang {
   try {
     saved = localStorage.getItem('sc-lang');
   } catch {
-    /* localStorage может быть недоступен */
+    /* localStorage may be unavailable */
   }
   return detectLang(saved, typeof navigator !== 'undefined' ? navigator.language : undefined);
 }
 
 /**
- * Провайдер языка. Монтируется в main.tsx вокруг <App /> — выше
- * auth-guard, чтобы LoginPage тоже имел доступ к контексту. Переключение —
- * setState + localStorage, без перезагрузки: keep-alive вкладки и
- * WS-панель агента не перемонтируются (тот же инвариант, что у темы).
+ * The language provider. Mounted in main.tsx around <App /> — above the
+ * auth guard, so LoginPage has access to the context too. Switching is
+ * setState + localStorage, no reload: keep-alive tabs and the agent's WS
+ * panel do not remount (the same invariant as the theme).
  */
 export function LangProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>(() => {
@@ -63,7 +63,7 @@ export function LangProvider({ children }: { children: ReactNode }) {
         try {
           localStorage.setItem('sc-lang', next);
         } catch {
-          /* localStorage может быть недоступен */
+          /* localStorage may be unavailable */
         }
       },
       t: (key, params) => translate(lang, key, params),

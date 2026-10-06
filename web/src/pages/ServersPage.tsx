@@ -12,13 +12,13 @@ interface Props {
   visible: boolean;
   onOpenProfile: (profileId: string) => void;
   onAskAgent: (text: string, mode?: AgentAskMode) => void;
-  /** Профили из стейта App — цели запуска сниппетов (обзор бывает не загружен). */
+  /** Profiles from the App state — snippet run targets (the overview may not be loaded). */
   profiles: Profile[];
 }
 
 const POLL_INTERVAL_MS = 5000;
 
-/** Основной диск сервера: корень, иначе первый в списке. */
+/** The server's main disk: the root, otherwise the first in the list. */
 function mainDisk(entry: OverviewServerEntry) {
   const disks = entry.metrics?.disks ?? [];
   return disks.find((d) => d.mount === '/') ?? disks[0] ?? null;
@@ -109,9 +109,9 @@ export function ServersPage({ showError, visible, onOpenProfile, onAskAgent, pro
   const [history, setHistory] = useState<Map<string, HistorySample[]>>(new Map());
   const [reloadKey, setReloadKey] = useState(0);
 
-  // Последовательный polling только на видимой вкладке (keep-alive):
-  // ошибки запроса — в toast, последний снимок остаётся на экране. История
-  // нагрузки для спарклайнов грузится тем же тиком и падает тихо.
+  // Sequential polling only on the visible tab (keep-alive): request errors
+  // go to a toast, the last snapshot stays on screen. Load history for the
+  // sparklines is fetched by the same tick and fails silently.
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;

@@ -68,8 +68,8 @@
   box-sizing: border-box;
 }
 
-/* Чекбоксы: акцентная галочка + тёмный трек по color-scheme (иначе в тёмной
-   теме нативные чекбоксы остаются ярко-белыми). */
+/* Checkboxes: an accent checkmark + a dark track via color-scheme (otherwise
+   in the dark theme native checkboxes stay bright white). */
 input[type='checkbox'] {
   accent-color: var(--accent);
 }
@@ -196,7 +196,7 @@ button {
   border-radius: 4px;
 }
 
-/* Кнопка-иконка фиксированной ширины — ровный ряд действий в строке таблицы. */
+/* Fixed-width icon button — an even row of actions in a table row. */
 .icon-btn {
   min-width: 25px;
   display: inline-flex;
@@ -238,8 +238,8 @@ button {
   margin: 0;
 }
 
-/* Первичная настройка (docs/onboarding-plan.md): та же карточка, что у логина,
-   плюс подписи полей и компактная подсказка. */
+/* First-run setup (docs/onboarding-plan.md): the same card as the login one,
+   plus field labels and a compact hint. */
 .onboarding .field-label {
   font-size: 12px;
   color: var(--muted);
@@ -279,7 +279,7 @@ button {
   letter-spacing: 0.3px;
 }
 
-/* Шапка сайдбара: логотип + колокольчик алертов (эпик 20). */
+/* Sidebar header: the logo + the alerts bell (epic 20). */
 .sidebar-head {
   display: flex;
   align-items: center;
@@ -308,7 +308,7 @@ button {
   background: var(--bg-hover);
 }
 
-/* Алерты выключены — колокольчик приглушён, но остаётся входом в настройки. */
+/* Alerts disabled — the bell is dimmed but remains an entry point to the settings. */
 .alerts-bell.disabled {
   opacity: 0.45;
 }
@@ -430,7 +430,7 @@ button {
   gap: 4px;
 }
 
-/* Чип проблемного профиля рядом с именем в сайдбаре (паттерн agent-dot). */
+/* Problem profile chip next to the name in the sidebar (the agent-dot pattern). */
 .profile-alert-chip {
   flex-shrink: 0;
   font-size: 10px;
@@ -447,7 +447,7 @@ button {
   color: var(--danger);
 }
 
-/* Форма порогов алертов (раздел «Алерты» модалки настроек). */
+/* Alert thresholds form (the "Alerts" section of the settings modal). */
 .alerts-settings {
   display: flex;
   flex-direction: column;
@@ -504,7 +504,7 @@ button {
   margin-top: auto;
 }
 
-/* Переключатель темы — прямоугольный свитч с иконками луна/солнце */
+/* Theme switch — a rectangular toggle with moon/sun icons */
 .theme-switch-row {
   display: flex;
   align-items: center;
@@ -569,7 +569,7 @@ button {
   color: var(--on-accent);
 }
 
-/* Переключатель языка — две кнопки RU/EN по образцу свитча темы */
+/* Language switch — two RU/EN buttons modeled after the theme toggle */
 .lang-switch {
   display: flex;
   height: 30px;
@@ -597,7 +597,7 @@ button {
   color: var(--on-accent);
 }
 
-/* Кнопки футера сайдбара («Настройки», «Выйти») — полноширинные, с иконкой */
+/* Sidebar footer buttons ("Settings", "Log out") — full-width, with an icon */
 .footer-btn-label {
   display: inline-flex;
   align-items: center;
@@ -615,7 +615,7 @@ button {
   height: 14px;
 }
 
-/* Список серверов в сайдбаре (вместо выпадающего списка) */
+/* Server list in the sidebar (instead of a dropdown) */
 .sidebar-profiles {
   flex: 1;
   min-height: 0;
@@ -681,7 +681,7 @@ button {
   margin: 4px 0;
 }
 
-/* Результат «Проверить подключение» в форме сервера */
+/* "Test connection" result in the server form */
 .test-result {
   margin: 10px 0 0;
   font-size: 12px;
@@ -703,7 +703,7 @@ button {
   flex-direction: column;
 }
 
-/* Верхний таббар разделов */
+/* Top tab bar of sections */
 .topbar {
   display: flex;
   align-items: center;
@@ -715,8 +715,8 @@ button {
   min-width: 0;
 }
 
-/* Вкладок стало много (в т.ч. «Службы») — при открытой панели агента таббар
-   не должен уводить крайние вкладки за экран: скролл вместо обрезки. */
+/* There are many tabs now (incl. "Services") — with the agent panel open the
+   tab bar must not push the outer tabs off-screen: scroll instead of clipping. */
 .topbar-tabs {
   align-self: stretch;
   display: flex;
@@ -737,7 +737,7 @@ button {
   border-bottom: 2px solid transparent;
   color: var(--muted);
   padding: 12px 14px 10px;
-  /* Подчёркивание на 1px «наезжает» на нижнюю линию топбара — стык без зазора. */
+  /* The 1px underline "rides up" onto the topbar's bottom line — a seam without a gap. */
   margin-bottom: -1px;
   font-size: 13px;
   cursor: pointer;
@@ -770,7 +770,7 @@ button {
   position: relative;
 }
 
-/* Keep-alive вкладки: скрываются, но не размонтируются */
+/* Keep-alive tabs: hidden but not unmounted */
 .tab-page {
   flex: 1;
   min-width: 0;
@@ -783,8 +783,8 @@ button {
   display: none;
 }
 
-/* Keep-alive панели агента: по слоту на посещённый профиль, неактивные
-   скрываются — WS и чат-стейт при переключении профиля не рвутся. */
+/* Agent panel keep-alive: a slot per visited profile, inactive ones hidden —
+   WS and chat state survive profile switching. */
 .agent-page-slot {
   flex: 1;
   min-width: 0;
@@ -797,7 +797,7 @@ button {
   display: none;
 }
 
-/* Правая панель агента */
+/* Right agent panel */
 .agent-resizer {
   width: 5px;
   flex-shrink: 0;
@@ -837,12 +837,12 @@ body.resizing-agent {
   background: var(--bg-raised);
 }
 
-/* Dropdown истории диалогов растягивается на всю ширину панели агента */
+/* The dialogue history dropdown stretches across the whole agent panel width */
 .agent-panel .agent-history-dropdown {
   max-height: 50vh;
 }
 
-/* Чипы серверов, подключённых к диалогу агента (событие WS `servers`) */
+/* Chips of servers attached to the agent dialogue (the WS `servers` event) */
 .agent-servers {
   display: flex;
   align-items: center;
@@ -886,7 +886,7 @@ body.resizing-agent {
   color: var(--danger);
 }
 
-/* Кнопка «+» и dropdown профилей, которые можно подключить к диалогу */
+/* The "+" button and the dropdown of profiles that can be attached to the dialogue */
 .server-add {
   position: relative;
 }
@@ -936,7 +936,7 @@ body.resizing-agent {
   font-size: 12px;
 }
 
-/* Меню «В чат ▾» в тулбаре терминала: действия над выделением */
+/* The "To chat ▾" menu in the terminal toolbar: actions on the selection */
 .terminal-ask {
   position: relative;
 }
@@ -983,7 +983,7 @@ body.resizing-agent {
   padding: 12px;
 }
 
-/* На узких окнах панель агента — оверлей поверх контента */
+/* On narrow windows the agent panel is an overlay above the content */
 @media (max-width: 900px) {
   .agent-resizer {
     display: none;
@@ -1040,7 +1040,7 @@ body.resizing-agent {
   box-shadow: 0 6px 24px var(--shadow);
 }
 
-/* Успешные действия выделяются зелёным в обеих темах. */
+/* Successful actions are highlighted green in both themes. */
 .toast-success {
   background: var(--toast-success-bg);
   border-color: var(--ok);
@@ -1148,8 +1148,8 @@ body.resizing-agent {
   background: var(--danger);
 }
 
-/* Индикатор активности агента у профиля в сайдбаре:
-   зелёная пульсирующая — работает, жёлтая — ждёт подтверждения. */
+/* Agent activity indicator next to the profile in the sidebar:
+   a green pulsing one — running, yellow — awaiting approval. */
 .agent-dot {
   width: 7px;
   height: 7px;
@@ -1183,8 +1183,8 @@ body.resizing-agent {
   padding: 8px 0 0 8px;
   background: #0f1419;
   overflow: hidden;
-  /* Якорь для палитры истории (эпик 15: позиционируется от области терминала,
-     а не от верха страницы с фиксированным смещением под бары). */
+  /* Anchor for the history palette (epic 15: positioned relative to the
+     terminal area, not the page top with a fixed offset under the bars). */
   position: relative;
 }
 
@@ -1192,8 +1192,8 @@ body.resizing-agent {
   height: 100%;
 }
 
-/* Терминальные вкладки (эпик 15): базовые .tab/.tab.active из Docker-секции,
-   здесь — только специфичное (точка статуса, ✕, «+», keep-alive слоты). */
+/* Terminal tabs (epic 15): the base .tab/.tab.active come from the Docker
+   section, only the specifics live here (status dot, ✕, "+", keep-alive slots). */
 .terminal-tabs {
   display: flex;
   align-items: center;
@@ -1213,8 +1213,8 @@ body.resizing-agent {
   padding: 4px 6px 4px 10px;
 }
 
-/* Кнопка-заголовок (✕ — сиблинг, не вложение: одна кнопка внутри другой
-   невалидна для скринридера). */
+/* The title button (✕ is a sibling, not a child: a button inside a button
+   is invalid for screen readers). */
 .terminal-tab-main {
   display: inline-flex;
   align-items: center;
@@ -1276,7 +1276,7 @@ body.resizing-agent {
   opacity: 0.5;
 }
 
-/* Keep-alive внутренние вкладки терминала: неактивные скрыты, WS живёт. */
+/* Keep-alive inner terminal tabs: inactive ones hidden, WS alive. */
 .terminal-view {
   flex: 1;
   min-height: 0;
@@ -1366,7 +1366,7 @@ body.resizing-agent {
   font-size: 12px;
 }
 
-/* Порт, слушающий наружу, подсвечиваем в самой колонке */
+/* An outward-listening port is highlighted in the column itself */
 .port-public .port-num {
   color: var(--warn);
   font-weight: 600;
@@ -1473,7 +1473,7 @@ body.resizing-agent {
   overflow: visible;
 }
 
-/* Шапка секции: заголовок + действия (скачать), отступ до шапки таблицы */
+/* Section header: title + actions (download), spacing before the table head */
 .cron-section .section-head {
   display: flex;
   align-items: center;
@@ -1492,7 +1492,7 @@ body.resizing-agent {
   gap: 6px;
 }
 
-/* Плашка «только чтение» в заголовке секции */
+/* The "read-only" tag in the section header */
 .readonly-tag {
   display: inline-flex;
   align-items: center;
@@ -1506,17 +1506,17 @@ body.resizing-agent {
   margin-left: 6px;
 }
 
-/* Выравнивание одинаковых колонок между секциями (Table/Статус/Действия) */
+/* Aligning identical columns across sections (Table/Status/Actions) */
 .cron-page .data-table {
   table-layout: fixed;
 }
 
-/* У последней строки таблицы убираем нижний бордер — не конфликтует с линией-разделителем секции */
+/* The table's last row drops its bottom border — does not clash with the section divider line */
 .cron-page .data-table tbody tr:last-child td {
   border-bottom: none;
 }
 
-/* Блок переменных окружения — подложка + пунктирная рамка */
+/* Environment variables block — a background + dashed frame */
 .env-box {
   margin: 16px 12px 0;
   padding: 9px 12px;
@@ -1556,7 +1556,7 @@ body.resizing-agent {
   text-decoration: line-through;
 }
 
-/* Switch статуса задачи (вкл/выкл), readonly — disabled */
+/* Entry status switch (on/off), readonly — disabled */
 .cron-page .svc-switch {
   display: inline-flex;
   align-items: center;
@@ -1617,7 +1617,7 @@ body.resizing-agent {
   cursor: default;
 }
 
-/* Селектор пользователей в тулбаре */
+/* User selector in the toolbar */
 .user-select {
   background: var(--bg-input);
   color: var(--text);
@@ -1691,8 +1691,8 @@ body.resizing-agent {
   font-size: 13px;
   text-align: left;
   padding: 0;
-  /* flex-строка: иконка и текст центрируются по вертикали (иначе inline-flex
-     иконка встаёт по baseline и «уезжает» вверх) */
+  /* A flex row: the icon and the text are vertically centered (otherwise an
+     inline-flex icon sits on the baseline and "floats" upward) */
   display: inline-flex;
   align-items: center;
 }
@@ -1701,7 +1701,7 @@ body.resizing-agent {
   color: var(--accent-hover);
 }
 
-/* SVG-иконки папок/файлов (вместо эмодзи — читаемы на обеих темах) */
+/* SVG icons of folders/files (instead of emoji — readable in both themes) */
 .file-kind {
   display: inline-flex;
   align-items: center;
@@ -1734,7 +1734,7 @@ body.resizing-agent {
   text-decoration: none;
 }
 
-/* Иконки-действия строки файла: компактные кнопки с SVG */
+/* Row action icons of a file: compact SVG buttons */
 .row-actions .btn {
   display: inline-flex;
   align-items: center;
@@ -1749,7 +1749,7 @@ body.resizing-agent {
   display: block;
 }
 
-/* Оверфлоу-меню «Дополнительно» строки файла: fixed (вне скролл-контейнера). */
+/* The file row "More" overflow menu: fixed (outside the scroll container). */
 .files-overflow-menu {
   position: fixed;
   z-index: 60;
@@ -1795,7 +1795,7 @@ body.resizing-agent {
   height: 14px;
 }
 
-/* === Файлы: адресная строка + сгруппированный тулбар (эпик 6) === */
+/* === Files: address bar + grouped toolbar (epic 6) === */
 .files-toolbar {
   flex-direction: column;
   align-items: stretch;
@@ -1861,7 +1861,7 @@ body.resizing-agent {
   background: var(--bg);
 }
 
-/* Группы кнопок тулбара */
+/* Toolbar button groups */
 .tools {
   display: flex;
   align-items: center;
@@ -1887,7 +1887,7 @@ body.resizing-agent {
   padding: 5px 9px;
 }
 
-/* SVG внутри кнопок тулбара (иконка + подпись) */
+/* SVG inside toolbar buttons (icon + label) */
 .btn .ic {
   display: inline-flex;
   align-items: center;
@@ -1900,7 +1900,7 @@ body.resizing-agent {
   height: 13px;
 }
 
-/* Хлебные крошки под адресной строкой */
+/* Breadcrumbs under the address bar */
 .files-toolbar .crumb-rail {
   display: flex;
   align-items: center;
@@ -1983,7 +1983,7 @@ body.resizing-agent {
   margin-top: 16px;
 }
 
-/* Кнопки-футер вне `.modal-body` (кастомные модалки без общего Modal) — отступ от краёв. */
+/* Footer buttons outside `.modal-body` (custom modals without the shared Modal) — inset from the edges. */
 .modal > .modal-actions {
   padding: 0 18px 18px;
 }
@@ -2080,7 +2080,7 @@ body.resizing-agent {
   cursor: not-allowed;
 }
 
-/* «Новый сервер (root + пароль)» — форма bootstrap и отчёт по шагам */
+/* "New server (root + password)" — the bootstrap form and the per-step report */
 .bootstrap-steps {
   display: flex;
   flex-direction: column;
@@ -2297,7 +2297,7 @@ body.resizing-agent {
   scrollbar-gutter: stable;
 }
 
-/* Живой просмотр логов (эпик 14) */
+/* Live log viewer (epic 14) */
 .log-viewer {
   display: flex;
   flex-direction: column;
@@ -2308,7 +2308,7 @@ body.resizing-agent {
   flex-wrap: wrap;
 }
 
-/* Просмотрщик: панель-«редактор» с заголовком (имя · строк · статус) */
+/* Viewer: an "editor"-style pane with a header (name · lines · status) */
 .viewer-pane {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -2394,13 +2394,13 @@ body.resizing-agent {
   color: var(--danger);
 }
 
-/* Ряд закреплённых логов: компактные чипы по имени файла */
+/* The row of pinned logs: compact chips by file name */
 .log-bookmarks {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  /* выравниваем по горизонтали с поиском/таблицей (16px), немного сверху/снизу */
+  /* aligned horizontally with the search/table (16px), slightly inset top/bottom */
   padding: 8px 16px 12px;
 }
 
@@ -2511,8 +2511,8 @@ body.resizing-agent {
   align-items: stretch;
 }
 
-/* Dropdown истории диалогов: обёртка статична, чтобы выпадающий список
-   позиционировался по тулбару и занимал всю ширину панели */
+/* Dialogue history dropdown: the wrapper is static so the dropdown positions
+   against the toolbar and spans the whole panel width */
 .agent-history {
   position: static;
 }
@@ -2601,7 +2601,7 @@ body.resizing-agent {
   color: var(--muted);
 }
 
-/* Бейдж «+N» у мульти-серверного диалога в истории */
+/* The "+N" badge of a multi-server dialogue in the history */
 .dialogue-badge {
   flex-shrink: 0;
   padding: 0 6px;
@@ -2640,14 +2640,14 @@ body.resizing-agent {
   min-height: 0;
 }
 
-/* === Панель агента: шапка (бренд + иконки) и статус-бар === */
+/* === Agent panel: header (brand + icons) and status bar === */
 .agent-head {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
-  position: relative; /* якорь для дропдауна истории */
+  position: relative; /* anchor for the history dropdown */
 }
 
 .agent-brand {
@@ -2704,7 +2704,7 @@ body.resizing-agent {
   height: 16px;
 }
 
-/* Статус-бар: статус + контекст сервера + стоимость + «План» + «Стоп» */
+/* Status bar: status + server context + cost + "Plan" + "Stop" */
 .agent-status {
   display: flex;
   align-items: center;
@@ -2745,7 +2745,7 @@ body.resizing-agent {
   white-space: nowrap;
 }
 
-/* Мини-переключатель «План» */
+/* The "Plan" mini toggle */
 .mini-switch {
   display: inline-flex;
   align-items: center;
@@ -2830,7 +2830,7 @@ body.resizing-agent {
   border-color: var(--accent-soft-border);
 }
 
-/* Кнопка «Скопировать» в бабле сообщения агента — внизу, появляется при наведении */
+/* The "Copy" button in an agent message bubble — at the bottom, appears on hover */
 .chat-row.assistant .bubble {
   position: relative;
   padding-bottom: 28px;
@@ -2959,7 +2959,7 @@ body.resizing-agent {
   scrollbar-gutter: stable;
 }
 
-/* Обёртка блока кода с кнопкой копирования */
+/* Wrapper of a code block with a copy button */
 .code-block-wrap {
   position: relative;
   margin: 0 0 10px;
@@ -3066,13 +3066,13 @@ body.resizing-agent {
   opacity: 0.7;
 }
 
-/* Read-only вызов исполняется прямо сейчас (tool_start → tool_result). */
+/* A read-only call is executing right now (tool_start → tool_result). */
 .tool-card.running {
   border-left-color: var(--warn);
 }
 
-/* Сетевой вызов (web_search) — доступ наружу подсвечен акцентом,
-   чтобы внешне отличался от чтения управляемого сервера. */
+/* A network call (web_search) — outbound access is highlighted with the accent,
+   so it visually differs from reading the managed server. */
 .tool-card.web,
 .tool-card.web.running,
 .tool-card.web.ok,
@@ -3136,7 +3136,7 @@ body.resizing-agent {
   text-overflow: ellipsis;
 }
 
-/* Бейдж сервера в карточке инструмента (поле `server` событий WS) */
+/* Server badge in a tool card (the `server` field of WS events) */
 .tool-server {
   flex-shrink: 0;
   max-width: 120px;
@@ -3243,7 +3243,7 @@ body.resizing-agent {
   max-height: 160px;
 }
 
-/* Overview (мониторинг сервера) */
+/* Overview (server monitoring) */
 .overview-scroll {
   flex: 1;
   min-height: 0;
@@ -3309,8 +3309,8 @@ body.resizing-agent {
   background: var(--danger);
 }
 
-/* Графики нагрузки (история метрик): SVG растягивается по контейнеру,
-   толщина линии не искажается благодаря non-scaling-stroke. */
+/* Load charts (metrics history): the SVG stretches across the container,
+   the line width stays undistorted thanks to non-scaling-stroke. */
 .sparkline {
   display: block;
   width: 100%;
@@ -3346,7 +3346,7 @@ body.resizing-agent {
   fill: var(--ok);
 }
 
-/* Место под спарклайн, пока история не накопилась. */
+/* Space reserved for the sparkline until history accumulates. */
 .sparkline-pending {
   height: 28px;
   margin-top: 8px;
@@ -3362,7 +3362,7 @@ body.resizing-agent {
   border-top: 1px dashed var(--border);
 }
 
-/* Крупный график на вкладке «Обзор». */
+/* The large chart on the "Overview" tab. */
 .load-chart {
   margin-top: 12px;
   padding-top: 10px;
@@ -3430,7 +3430,7 @@ body.resizing-agent {
   margin-left: auto;
 }
 
-/* Навигатор «Что занимает» (эпик 16) */
+/* The "What takes space" navigator (epic 16) */
 .du-toolbar {
   display: flex;
   align-items: center;
@@ -3561,7 +3561,7 @@ body.resizing-agent {
   margin-bottom: 10px;
 }
 
-/* Кнопка «Подробнее» анализa диска — видимая (bordered), с иконкой-лупой */
+/* The disk analysis "Details" button — visible (bordered), with a magnifier icon */
 .disk-analyze {
   display: inline-flex;
   align-items: center;
@@ -3577,7 +3577,7 @@ body.resizing-agent {
   color: var(--accent);
 }
 
-/* Статус-бар длительного опроса du/find (эпик 16) */
+/* Status bar of a long du/find scan (epic 16) */
 .du-scan {
   display: flex;
   flex-direction: column;
@@ -3616,7 +3616,7 @@ body.resizing-agent {
   overflow: hidden;
 }
 
-/* Индетерминированная полоса: du не отдаёт прогресс, показываем «выполняется» */
+/* Indeterminate bar: du provides no progress, we show "in progress" */
 .scan-bar::after {
   content: "";
   position: absolute;
@@ -3680,7 +3680,7 @@ body.resizing-agent {
   font-size: 12px;
 }
 
-/* Обновления пакетов (эпик 19): карточка на «Обзоре» и раздел списка */
+/* Package updates (epic 19): the card on "Overview" and the list section */
 .packages-actions {
   display: flex;
   gap: 8px;
@@ -3704,8 +3704,8 @@ body.resizing-agent {
   overflow: hidden;
 }
 
-/* Несколько сотен пакетов не растягивают «Обзор»: таблица живёт в своей
-   скролл-области (scrollbar-gutter: stable — без дёргания layout). */
+/* Several hundred packages must not stretch "Overview": the table lives in
+   its own scroll area (scrollbar-gutter: stable — no layout jitter). */
 .packages-table-wrap {
   max-height: 360px;
   overflow: auto;
@@ -3718,7 +3718,7 @@ body.resizing-agent {
   font-size: 12px;
 }
 
-/* Servers (сводный дашборд всех профилей) */
+/* Servers (a consolidated dashboard of all profiles) */
 .servers-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -3791,7 +3791,7 @@ body.resizing-agent {
   overflow-wrap: anywhere;
 }
 
-/* === Эпик 18: раздел «Команды» (SnippetsSection на странице «Серверы») === */
+/* === Epic 18: the "Commands" section (SnippetsSection on the "Servers" page) === */
 .snippets-section {
   margin-top: 24px;
   padding-top: 16px;
@@ -4024,7 +4024,7 @@ body.resizing-agent {
   align-items: flex-start;
 }
 
-/* Mono-блок вывода: скролл вместо растяжения, стабильно под scrollbar-gutter */
+/* Output mono block: scroll instead of stretching, stable under scrollbar-gutter */
 .snippets-output {
   align-self: stretch;
   margin: 0;
@@ -4061,7 +4061,7 @@ body.resizing-agent {
   max-height: 180px;
 }
 
-/* === Эпики 2–3: поиск по файлам и перенос директорий (FilesPage) === */
+/* === Epics 2–3: file search and moving directories (FilesPage) === */
 .search-panel {
   display: flex;
   gap: 8px;
@@ -4138,9 +4138,9 @@ body.resizing-agent {
   word-break: break-all;
 }
 
-/* === Эпик 5: docker stats / exec / prune / compose === */
+/* === Epic 5: docker stats / exec / prune / compose === */
 
-/* Чип «контейнер: …» в шапке терминала при контейнерной сессии. */
+/* The "container: …" chip in the terminal header for a container session. */
 .container-chip {
   padding: 2px 8px;
   border-radius: 10px;
@@ -4151,13 +4151,13 @@ body.resizing-agent {
   white-space: nowrap;
 }
 
-/* Toast для информационных сообщений (результат prune/compose) —
-   без красной рамки ошибочного варианта. */
+/* Toast for informational messages (prune/compose results) —
+   without the red frame of the error variant. */
 .toast.toast-notice {
   border-color: var(--border);
 }
 
-/* Секция Compose на DockerPage. */
+/* The Compose section on DockerPage. */
 .compose-section {
   padding: 12px 16px;
 }
@@ -4183,14 +4183,14 @@ body.resizing-agent {
   min-width: 260px;
 }
 
-/* === Таблица контейнеров (эпик 5): карточка «Имя», CPU/MEM с барами, порты-чипы === */
+/* === Containers table (epic 5): a "Name" card, CPU/MEM with bars, port chips === */
 
-/* Цвета точки статуса контейнера (переиспользуем .status-dot из сайдбара). */
+/* Container status dot colors (reusing .status-dot from the sidebar). */
 .status-dot.running { background: var(--ok); }
 .status-dot.pending { background: var(--warn); }
 .status-dot.stopped { background: var(--muted); }
 
-/* Первая ячейка — самодостаточная карточка: точка+аптайм+ID / имя / образ. */
+/* The first cell is a self-sufficient card: dot+uptime+ID / name / image. */
 .cell-main {
   display: flex;
   flex-direction: column;
@@ -4234,7 +4234,7 @@ body.resizing-agent {
   cursor: help;
 }
 
-/* CPU / MEM: значение + мини-бар (компактный вариант .meter). */
+/* CPU / MEM: value + mini bar (a compact variant of .meter). */
 .cell-metric {
   display: flex;
   flex-direction: column;
@@ -4252,7 +4252,7 @@ body.resizing-agent {
   margin-top: 0;
 }
 
-/* Порты контейнера — компактными чипами; публично опубликованные подсвечены. */
+/* Container ports as compact chips; publicly published ones highlighted. */
 .port-list {
   display: flex;
   flex-wrap: wrap;
@@ -4276,7 +4276,7 @@ body.resizing-agent {
   border-color: var(--warn-soft-border);
 }
 
-/* Разделитель между операционными и разрушающими действиями строки. */
+/* Separator between operational and destructive row actions. */
 .action-sep {
   width: 1px;
   height: 18px;
@@ -4284,7 +4284,7 @@ body.resizing-agent {
   margin: 0 3px;
 }
 
-/* === Редактор файлов (CodeMirror, эпик 6) === */
+/* === File editor (CodeMirror, epic 6) === */
 .code-editor-wrap {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -4303,7 +4303,7 @@ body.resizing-agent {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
 
-/* Светлая тема: вписываем стандартные цвета CM в палитру приложения */
+/* Light theme: fitting the standard CM colors into the app palette */
 [data-theme='light'] .code-editor-wrap .cm-editor {
   background: var(--bg-input);
   color: var(--text);
@@ -4328,7 +4328,7 @@ body.resizing-agent {
   outline-offset: -1px;
 }
 
-/* Панель поиска (Ctrl+F) поверх редактора */
+/* Search panel (Ctrl+F) above the editor */
 .code-editor-wrap .cm-panels {
   background: var(--bg-raised);
   color: var(--text);
@@ -4349,16 +4349,16 @@ body.resizing-agent {
   background: rgba(229, 192, 123, 0.6);
 }
 
-/* Эпик 4: палитра истории команд терминала (поверх xterm, в стиле модалок). */
+/* Epic 4: the terminal command history palette (above xterm, in the modal style). */
 .terminal-page {
   position: relative;
 }
 
 .history-palette {
   position: absolute;
-  /* Эпик 15: палитра — дочерний элемент .terminal-container (position:
-     relative), якорь — область терминала, смещение не зависит от высоты
-     бара вкладок и тулбара. */
+  /* Epic 15: the palette is a child of .terminal-container (position:
+     relative), anchored to the terminal area; the offset does not depend on
+     the height of the tab bar and the toolbar. */
   top: 24px;
   left: 50%;
   transform: translateX(-50%);
@@ -4408,9 +4408,9 @@ body.resizing-agent {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  /* overflow: hidden обнуляет автоматический min-height flex-item'а: без
-     этого строки сжимаются в полоски, когда палитра ограничена max-height,
-     вместо прокрутки списка */
+  /* overflow: hidden zeroes the automatic min-height of a flex item: without
+     it the rows collapse into slivers when the palette is constrained by
+     max-height, instead of the list scrolling */
   flex-shrink: 0;
 }
 
@@ -4426,9 +4426,9 @@ body.resizing-agent {
   text-align: center;
 }
 
-/* === Эпик 8: режим планирования агента (planMode) === */
+/* === Epic 8: the agent's plan mode (planMode) === */
 
-/* Переключатель «План» в тулбаре чата агента. */
+/* The "Plan" toggle in the agent chat toolbar. */
 .plan-toggle {
   display: inline-flex;
   align-items: center;
@@ -4446,7 +4446,7 @@ body.resizing-agent {
   margin: 0;
 }
 
-/* Карточка «План готов» под списком сообщений. */
+/* The "Plan ready" card under the message list. */
 .plan-card {
   display: flex;
   align-items: center;
@@ -4480,10 +4480,10 @@ body.resizing-agent {
   flex-shrink: 0;
 }
 
-/* Закреплённая плашка подтверждения мутирующего вызова (tool_pending) —
-   единая точка решения, всегда видна у поля ввода, вне скроллируемой ленты.
-   Рамка warn: подтверждение = внимание. Высота строки кнопок фиксированная,
-   чтобы смена pending-вызова в очереди не моргала размерами. */
+/* A pinned approval bar for a mutating call (tool_pending) — a single
+   decision point, always visible at the input, outside the scrolling feed.
+   The warn frame: approval = attention. The button row height is fixed so
+   that switching the pending call in the queue does not flicker sizes. */
 .pending-bar {
   display: flex;
   flex-direction: column;
@@ -4528,16 +4528,16 @@ body.resizing-agent {
   white-space: nowrap;
 }
 
-/* Раскрытый полный аргумент (команда exec целиком и т.п.) — mono-блок
-   со внутренним скроллом, чтобы не раздувать панель. */
+/* The expanded full argument (a whole exec command etc.) — a mono block
+   with inner scroll so it does not bloat the panel. */
 .pending-bar-details {
   max-height: 200px;
 }
 
-/* === Вкладка «Базы данных» (эпик 12) === */
+/* === The "Databases" tab (epic 12) === */
 
 .db-page {
-  position: relative; /* якорь палитры истории запросов */
+  position: relative; /* anchor of the query history palette */
 }
 
 .db-layout {
@@ -4548,7 +4548,7 @@ body.resizing-agent {
   padding: 12px 16px;
 }
 
-/* Левая колонка: инстансы → базы → таблицы */
+/* Left column: instances → databases → tables */
 .db-sidebar {
   width: 280px;
   flex-shrink: 0;
@@ -4637,7 +4637,7 @@ body.resizing-agent {
   color: #e5a06b;
 }
 
-/* Светлая тема: приглушённые заливки и тёмный текст для контраста */
+/* Light theme: muted fills and dark text for contrast */
 [data-theme='light'] .db-engine-badge.postgres {
   background: rgba(51, 103, 145, 0.15);
   color: #23557e;
@@ -4693,7 +4693,7 @@ body.resizing-agent {
   gap: 2px;
 }
 
-/* Строка таблицы: шеврон (раскрытие) + имя (вставка SELECT) */
+/* Table row: a chevron (expand) + the name (inserts a SELECT) */
 .db-table-row {
   border-radius: 6px;
 }
@@ -4759,7 +4759,7 @@ body.resizing-agent {
   color: var(--accent);
 }
 
-/* Раскрытая деталь таблицы: поля + индексы */
+/* Expanded table detail: columns + indexes */
 .db-table-detail {
   display: flex;
   flex-direction: column;
@@ -4866,7 +4866,7 @@ body.resizing-agent {
   font-size: 12px;
 }
 
-/* Правая колонка: редактор + результат */
+/* Right column: editor + result */
 .db-main {
   flex: 1;
   min-width: 0;
@@ -4890,10 +4890,10 @@ body.resizing-agent {
   color: var(--text);
   cursor: pointer;
   user-select: none;
-  white-space: nowrap; /* не переносить «только чтение» и не растягивать чекбокс */
+  white-space: nowrap; /* do not wrap "read-only" and do not stretch the checkbox */
 }
 
-/* глобальный `input { width:100% }` растянул бы чекбокс — возвращаем компактный */
+/* the global `input { width:100% }` would stretch the checkbox — back to compact */
 .db-readonly-toggle input {
   width: auto;
   margin: 0;
@@ -4908,7 +4908,7 @@ body.resizing-agent {
   height: 200px;
 }
 
-/* Ошибка запроса: mono-блок со stderr клиента и exit code */
+/* Query error: a mono block with the client's stderr and exit code */
 .db-query-error {
   border: 1px solid var(--danger);
   border-radius: 8px;
@@ -4991,7 +4991,7 @@ body.resizing-agent {
   font-size: 12px;
 }
 
-/* Кнопки code-блоков в чате агента: «Копировать» + опциональная «→ SQL» */
+/* Code block buttons in the agent chat: "Copy" + an optional "→ SQL" */
 .code-block-actions {
   position: absolute;
   top: 6px;
@@ -5000,7 +5000,7 @@ body.resizing-agent {
   gap: 4px;
 }
 
-/* Внутри обёртки кнопки позиционирует флекс, а не собственный absolute */
+/* Inside the wrapper the button is positioned by flex, not its own absolute */
 .code-block-actions .code-copy-btn {
   position: static;
   top: auto;
@@ -5013,7 +5013,7 @@ body.resizing-agent {
   font-size: 11px;
 }
 
-/* Узкие экраны: колонки вкладки БД складываются вертикально */
+/* Narrow screens: the DB tab columns stack vertically */
 @media (max-width: 1100px) {
   .db-layout {
     flex-direction: column;
@@ -5030,7 +5030,7 @@ body.resizing-agent {
   }
 }
 
-/* Вкладка «Nginx»: сайты сервера (docs/nginx-plan.md) */
+/* The "Nginx" tab: the server's sites (docs/nginx-plan.md) */
 .nginx-source-header {
   display: flex;
   align-items: center;
@@ -5056,7 +5056,7 @@ body.resizing-agent {
   flex-wrap: wrap;
 }
 
-/* Ошибка источника / вывод nginx -t — mono-блок (паттерн db-query-error) */
+/* Source error / nginx -t output — a mono block (the db-query-error pattern) */
 .nginx-error-block {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -5076,7 +5076,7 @@ body.resizing-agent {
   margin: 0;
 }
 
-/* Статус сертификата */
+/* Certificate status */
 .cert-badge {
   display: inline-block;
   padding: 1px 8px;
@@ -5106,7 +5106,7 @@ body.resizing-agent {
   margin-left: 6px;
 }
 
-/* Слушающий сокет — чип (как порты контейнера); ssl подсвечен зелёным. */
+/* A listening socket — a chip (like container ports); ssl highlighted green. */
 .port-chip.ssl {
   color: var(--ok);
   border-color: var(--ok-soft-border);
@@ -5132,8 +5132,8 @@ body.resizing-agent {
   font-size: 11px;
 }
 
-/* ИИ-расходы (docs/ai-costs-plan.md) */
-/* Бейдж стоимости диалога в тулбаре агента */
+/* AI costs (docs/ai-costs-plan.md) */
+/* Dialogue cost badge in the agent toolbar */
 .cost-badge {
   padding: 2px 8px;
   border-radius: 10px;
@@ -5146,7 +5146,7 @@ body.resizing-agent {
   cursor: help;
 }
 
-/* Карточки итогов периода */
+/* Period totals cards */
 .cost-cards {
   display: flex;
   gap: 12px;
@@ -5227,9 +5227,9 @@ body.resizing-agent {
   font-variant-numeric: tabular-nums;
 }
 
-/* === Вкладка «Службы» (эпик 13): systemd === */
+/* === The "Services" tab (epic 13): systemd === */
 
-/* Статус unit'а — чип с цветной точкой: running/ok, failed/red, exited|activating/amber */
+/* Unit status — a chip with a colored dot: running/ok, failed/red, exited|activating/amber */
 .status-badge {
   display: inline-flex;
   align-items: center;
@@ -5270,7 +5270,7 @@ body.resizing-agent {
   border-color: var(--warn-soft-border);
 }
 
-/* Бейдж автозапуска в карточке службы */
+/* Autostart badge in the service card */
 .unit-auto {
   display: inline-flex;
   align-items: center;
@@ -5298,7 +5298,7 @@ body.resizing-agent {
   border-color: var(--accent-soft-border);
 }
 
-/* Шапка детали (модалка): статус + имя + switch автозапуска */
+/* Detail header (modal): status + name + the autostart switch */
 .svc-head {
   display: flex;
   align-items: center;
@@ -5314,7 +5314,7 @@ body.resizing-agent {
   gap: 8px;
 }
 
-/* Переключатель автозапуска: on=enabled, off=disabled; disabled — static/masked/generated */
+/* Autostart switch: on=enabled, off=disabled; disabled — static/masked/generated */
 .svc-switch .switch {
   position: relative;
   display: inline-block;
@@ -5382,7 +5382,7 @@ body.resizing-agent {
   font-size: 12px;
 }
 
-/* Сетка полей `systemctl show` детали — мелкими ячейками */
+/* Grid of `systemctl show` fields of the detail — small cells */
 .detail-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -5409,14 +5409,14 @@ body.resizing-agent {
   font-family: Menlo, Consolas, "JetBrains Mono", "Fira Code", monospace;
 }
 
-/* Raw-вывод `systemctl status` — компактнее общего logs-view */
+/* Raw `systemctl status` output — more compact than the common logs-view */
 .services-status {
   min-height: 120px;
   max-height: 260px;
   margin-top: 4px;
 }
 
-/* Жирное предупреждение для критичных unit'ов в модалке подтверждения */
+/* A bold warning for critical units in the confirmation modal */
 .critical-warning {
   color: var(--danger);
   font-weight: 600;
@@ -5426,14 +5426,14 @@ body.resizing-agent {
   background: var(--bg-input);
 }
 
-/* Подсказка про группы журнала под просмотрщиком */
+/* The journal groups hint under the viewer */
 .services-log-hint {
   margin: 8px 0 0;
   font-size: 12px;
   line-height: 1.5;
 }
 
-/* Действия над процессами (эпик 17) */
+/* Process actions (epic 17) */
 .process-summary {
   margin-bottom: 4px;
 }
@@ -5471,10 +5471,10 @@ body.resizing-agent {
   margin: 2px 0;
 }
 
-/* Модалка «Настройки»: левый вертикальный список разделов + контент
-   (стиль настроек VS Code). Секции — карточки на --bg-raised, форма уже
-   на всю ширину (глобальные input). Фиксированная высота — навигация
-   не прыгает при переключении разделов. */
+/* The "Settings" modal: a vertical section list on the left + content
+   (VS Code settings style). Sections are cards on --bg-raised; the form is
+   already full width (global inputs). Fixed height — the navigation does
+   not jump when switching sections. */
 .settings-modal {
   height: 620px;
 }
@@ -5531,7 +5531,7 @@ body.resizing-agent {
   scrollbar-gutter: stable;
 }
 
-/* Ряды «подпись + контрол» в разделе «Интерфейс» — с отступом друг от друга. */
+/* "Label + control" rows in the "Interface" section — spaced apart. */
 .settings-section .theme-switch-row + .theme-switch-row {
   margin-top: 12px;
 }

@@ -1,7 +1,7 @@
 /**
- * Чистые хелперы кольцевого буфера строк для просмотрщика логов.
- * Модуль без React-зависимостей — держим чистым ради будущих юнит-тестов
- * (тест-раннера в web/ пока нет, эпик 20).
+ * Pure ring-buffer-of-lines helpers for the log viewer. The module has no
+ * React dependencies — kept pure for future unit tests (no test runner in
+ * web/ yet, epic 20).
  */
 
 export interface LogBufferState {
@@ -10,9 +10,9 @@ export interface LogBufferState {
 }
 
 /**
- * Делит накопленный текст по `\n`: полные строки уходят в буфер, неполная
- * хвостовая остаётся в `pending` до следующего чанка. Буфер обрезается до
- * `maxLines` с конца (кольцо).
+ * Splits the accumulated text by `\n`: complete lines go into the buffer,
+ * the trailing partial one stays in `pending` until the next chunk. The
+ * buffer is trimmed to the last `maxLines` lines (a ring).
  */
 export function appendChunk(
   lines: string[],
@@ -38,7 +38,7 @@ export function appendChunk(
   return { lines: next, pending: rest };
 }
 
-/** Хвост склеенного текста не длиннее `n` символов (для «В чат»). */
+/** A tail of the joined text no longer than `n` chars (for "To chat"). */
 export function lastNChars(lines: string[], n: number): string {
   return lines.join('\n').slice(-n);
 }

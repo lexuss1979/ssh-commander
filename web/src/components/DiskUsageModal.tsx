@@ -7,18 +7,18 @@ import { useT } from '../i18n';
 
 interface Props {
   profile: Profile;
-  /** Точка монтирования (или путь), с которой начинается навигация. */
+  /** Mount point (or path) where navigation starts. */
   initialPath: string;
   onClose: () => void;
-  /** Переход на путь во вкладке «Файлы» (App переключает вкладку). */
+  /** Jump to the path in the "Files" tab (App switches the tab). */
   onOpenInFiles: (path: string) => void;
 }
 
 /**
- * Навигатор «Что занимает» (эпик 16): проваливание по каталогам с размерами
- * и топ крупнейших файлов. Запрос на уровень — du -d 1; клик по подкаталогу
- * спускается вглубь, хлебные крошки возвращают назад. Режим «Файлы» — топ
- * файлов с переходом в FilesPage.
+ * The "What takes space" navigator (epic 16): drilling down into directories
+ * with sizes and a top list of the largest files. A level request is
+ * du -d 1; clicking a subdirectory descends into it, breadcrumbs go back.
+ * The "Files" mode is a top files list with a jump into FilesPage.
  */
 export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }: Props) {
   const { t } = useT();
@@ -29,12 +29,12 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  // Опрос длительный — показываем статус-бар со счётчиком и кнопкой «Отмена».
+  // The scan is long — show a status bar with a counter and a "Cancel" button.
   const [cancelled, setCancelled] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const controllerRef = useRef<AbortController | null>(null);
 
-  // Свежий fetch на смену пути/режима; закрытие модалки (unmount) рвёт запрос.
+  // A fresh fetch on path/mode change; closing the modal (unmount) aborts the request.
   useEffect(() => {
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -42,7 +42,7 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
     setError(null);
     setCancelled(false);
     setElapsed(0);
-    // Старые данные прошлого пути/режима не показываем под новыми крошками.
+    // Do not show stale data from the previous path/mode under the new breadcrumbs.
     setData(null);
     setFilesData(null);
     if (mode === 'dirs') {
@@ -71,7 +71,7 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
     return () => controller.abort();
   }, [profile.id, path, mode, reloadKey]);
 
-  // Счётчик секунд сканирования: тикает, пока идёт опрос.
+  // Seconds counter of the scan: ticks while the request is running.
   useEffect(() => {
     if (!loading) return;
     const id = window.setInterval(() => setElapsed((e) => e + 1), 1000);
@@ -165,7 +165,7 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
           <div className="du-list">
             <div className="du-row du-row-total">
               <span className="du-row-name">{t('diskUsage.total')}</span>
-              {/* truncated — сумма посчитана по детям, «100%» было бы враньём */}
+              {/* truncated — the total is computed from the children, "100%" would be a lie */}
               <span className="du-pct">{data.truncated ? '—' : '100%'}</span>
               <span className="du-size">{formatSize(data.totalBytes)}</span>
             </div>
@@ -234,9 +234,10 @@ export function DiskUsageModal({ profile, initialPath, onClose, onOpenInFiles }:
   );
 }
 
-/** Статус-бар длительного опроса du/find: спиннер + индетерминированная полоса
- * + счётчик секунд + кнопка «Отмена». Процент невозможен — сервер не стримит
- * прогресс, полоса лишь показывает, что запрос выполняется. */
+/** Status bar of a long du/find scan: a spinner + an indeterminate bar
+ * + a seconds counter + a "Cancel" button. A percentage is impossible — the
+ * server does not stream progress, the bar only shows that the request is
+ * running. */
 function ScanStatusBar({
   mode,
   elapsed,

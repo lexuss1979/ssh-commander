@@ -5,11 +5,11 @@ import { useT } from '../i18n';
 import type { I18nKey, I18nParams } from '../i18n';
 
 /**
- * Раздел «Расходы AI» модалки настроек (docs/ai-costs-plan.md; раньше —
- * глобальная страница в сайдбаре). Отчёт по дням × профилям с итогами.
- * Данные кросс-профильные: затраты привязаны к домашнему профилю диалога.
- * Ошибки загрузки показываются через empty-state (showError не нужен —
- * страница read-only, тостов нет).
+ * The "AI costs" section of the settings modal (docs/ai-costs-plan.md;
+ * previously a global page in the sidebar). A report by days × profiles
+ * with totals. The data is cross-profile: costs are attributed to the home
+ * profile of the dialogue. Load errors are shown via empty-state (showError
+ * is not needed — the page is read-only, there are no toasts).
  */
 interface Props {
   visible: boolean;
@@ -62,7 +62,7 @@ function cellTooltip(agg: AiUsageAgg, t: TFn, locale: string): string {
   return parts.join('\n');
 }
 
-/** Ячейка матрицы: стоимость; запросы и токены — в tooltip. */
+/** Matrix cell: the cost; calls and tokens go into the tooltip. */
 function CostCell({ agg }: { agg: AiUsageAgg }) {
   const { t, locale } = useT();
   return (
@@ -90,7 +90,7 @@ export function AiCostsPage({ visible }: Props) {
   const [updatedAt, setUpdatedAt] = useState<number>(0);
   const [reloadKey, setReloadKey] = useState(0);
 
-  // Загрузка при видимости + polling 60 с; на паузе при скрытой вкладке.
+  // Load on visibility + 60s polling; paused while the tab is hidden.
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
@@ -104,8 +104,8 @@ export function AiCostsPage({ visible }: Props) {
         setUpdatedAt(Date.now());
       } catch (err) {
         if (cancelled) return;
-        // Фоновая ошибка при уже показанном отчёте не роняет страницу —
-        // остаётся последний снимок, статус в тулбаре показывает «нет связи».
+        // A background error with a report already shown does not crash the page —
+        // the last snapshot stays, and the toolbar status shows "no connection".
         setError((err as Error).message);
       }
       if (!cancelled) {
@@ -119,7 +119,7 @@ export function AiCostsPage({ visible }: Props) {
     };
   }, [visible, days, reloadKey]);
 
-  // Итог по колонке профиля (сумма по всем дням отчёта).
+  // Per-profile column total (sum over all days of the report).
   const profileTotals = (report?.profiles ?? []).map((p) => ({
     profile: p,
     total: sumAgg((report?.days ?? []).map((d) => d.byProfile[p.id])),

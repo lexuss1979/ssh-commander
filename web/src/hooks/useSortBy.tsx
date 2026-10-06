@@ -8,7 +8,7 @@ export interface SortState {
 }
 
 /**
- * Клиентская сортировка массива по ключу столбца.
+ * Client-side sorting of an array by a column key.
  */
 export function useSortBy<T>(
   items: T[],
@@ -46,7 +46,7 @@ export function useSortBy<T>(
   return { sort, toggle, sorted };
 }
 
-/** Сортируемый заголовок столбца. */
+/** A sortable column header. */
 export function SortableTh({
   sortKey,
   currentSort,

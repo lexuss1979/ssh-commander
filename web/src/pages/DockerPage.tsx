@@ -22,7 +22,7 @@ interface ComposeStatus {
   kind: 'v2' | 'v1' | null;
 }
 
-// Лимит буфера логов в LogsModal (~500 КБ текста).
+// Log buffer limit in LogsModal (~500 KB of text).
 const LOG_BUFFER_LIMIT = 500 * 1024;
 
 type TFn = (key: I18nKey, params?: I18nParams | number) => string;
@@ -39,11 +39,11 @@ function q(profileId: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Чистые хелперы таблицы контейнеров (парсинг docker-строк) — держим вне
-// компонента, чтобы не ре-создавать на каждый рендер и иметь под тесты.
+// Pure container-table helpers (parsing docker lines) — kept outside the
+// component so they are not re-created on every render and stay testable.
 // ---------------------------------------------------------------------------
 
-/** Максимум символов отображаемого имени образа до обрезки (полный — в title). */
+/** Max characters of the displayed image name before truncation (the full one in title). */
 const IMAGE_MAX_CHARS = 50;
 
 const UPTIME_UNIT_KEYS: Record<string, I18nKey> = {
@@ -56,14 +56,14 @@ const UPTIME_UNIT_KEYS: Record<string, I18nKey> = {
   second: 'docker.unitSecond',
 };
 
-/** Статус контейнера → класс точки. running — зелёная, restarting — жёлтая, иначе нейтральная. */
+/** Container status → dot class. running — green, restarting — yellow, otherwise neutral. */
 function containerDotClass(status: string, running: boolean): string {
   if (running) return 'running';
   if (/^Restarting/i.test(status.trim())) return 'pending';
   return 'stopped';
 }
 
-/** Короткий текст статуса для не-работающего контейнера (вместо аптайма). */
+/** Short status text for a non-running container (instead of uptime). */
 function containerStatusLabel(status: string, t: TFn): string {
   const s = status.trim();
   if (/^Exited/i.test(s)) return t('docker.statusExited');
@@ -74,7 +74,7 @@ function containerStatusLabel(status: string, t: TFn): string {
   return s;
 }
 
-/** «Up 6 months (healthy)» → «6 мес». `About an hour` → «≈1 ч». null — не запущен. */
+/** "Up 6 months (healthy)" → "6 мес". `About an hour` → "≈1 ч". null — not running. */
 function containerUptimeLabel(status: string, t: TFn): string | null {
   const m = /^Up\s+(.+?)(?:\s*\(.*\))?$/i.exec(status.trim());
   if (!m) return null;
@@ -93,7 +93,7 @@ function containerUptimeLabel(status: string, t: TFn): string | null {
   return approx ? `≈${n} ${unit}` : `${n} ${unit}`;
 }
 
-/** Слушающий наружу (не loopback, не wildcard) → public (подсветка warn). */
+/** Bound outward (not loopback, not wildcard) → public (warn highlight). */
 function isPublicBind(host: string): boolean {
   const ip = host.slice(0, host.lastIndexOf(':'));
   if (ip === '0.0.0.0' || ip === '::' || ip === '[::]') return true;
@@ -101,7 +101,7 @@ function isPublicBind(host: string): boolean {
   return ip !== '';
 }
 
-/** «0.0.0.0:5601->5601/tcp, :::5601->5601/tcp» → чипы. Без `->` — порт только в сети. */
+/** "0.0.0.0:5601->5601/tcp, :::5601->5601/tcp" → chips. Without `->` — a port only inside the docker network. */
 function parseDockerPorts(ports: string): Array<{ text: string; pub: boolean }> {
   if (!ports) return [];
   return ports
@@ -117,7 +117,7 @@ function parseDockerPorts(ports: string): Array<{ text: string; pub: boolean }> 
     });
 }
 
-/** Процент → цвет бара (как в метриках «Обзора»): >=90 danger, >=75 warn. */
+/** Percentage → bar color (like the "Overview" metrics): >=90 danger, >=75 warn. */
 function meterClass(pct: number | null): string {
   if (pct === null) return '';
   if (pct >= 90) return ' danger';
@@ -125,12 +125,12 @@ function meterClass(pct: number | null): string {
   return '';
 }
 
-/** NaN (нет stats) → null, чтобы meterClass не считал его цветным. */
+/** NaN (no stats) → null so that meterClass does not color it. */
 function numberOrNull(n: number): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Ширина бара: NaN/отрицательное → 0, >100 → 100. */
+/** Bar width: NaN/negative → 0, >100 → 100. */
 function pctWidth(n: number): string {
   const v = Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 0;
   return `${v}%`;
@@ -173,7 +173,7 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
     try {
       localStorage.setItem(`sc-compose-path:${profile.id}`, p);
     } catch {
-      /* localStorage может быть недоступен */
+      /* localStorage may be unavailable */
     }
   };
 
@@ -236,8 +236,8 @@ export function DockerPage({ profile, showError, visible, onExecContainer }: Pro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile.id, section]);
 
-  // Снимок docker stats polling'ом 3 с; только когда вкладка видима и
-  // активна секция контейнеров. Если stats недоступен — отключаемся тихо.
+  // docker stats snapshot polled every 3s; only while the tab is visible and
+  // the containers section is active. If stats is unavailable — back off silently.
   const statsActive = visible && section === 'containers' && !statsFailed;
   useEffect(() => {
     if (!statsActive) return;
@@ -810,7 +810,7 @@ function LogsModal({ profile, target, visible, onClose, showError }: {
     const el = preRef.current;
     if (!el) return;
     let next = (el.textContent ?? '') + text;
-    // Буфер не растёт бесконечно: держим хвост ~500 КБ, отрезая по границе строки.
+    // The buffer does not grow without bound: keep the last ~500 KB, cutting at a line boundary.
     if (next.length > LOG_BUFFER_LIMIT) {
       const nl = next.indexOf('\n', next.length - LOG_BUFFER_LIMIT);
       next = next.slice(nl >= 0 ? nl + 1 : next.length - LOG_BUFFER_LIMIT);
@@ -820,14 +820,14 @@ function LogsModal({ profile, target, visible, onClose, showError }: {
   };
 
   useEffect(() => {
-    // Вкладка скрыта (keep-alive) — стрим логов на паузе, возобновится при возврате.
+    // Tab hidden (keep-alive) — the log stream is paused and resumes on return.
     if (!visible) return;
     const params = new URLSearchParams({ profileId: profile.id, tail: '200' });
     if (follow) params.set('stream', '1');
     let cancelled = false;
     const controller = new AbortController();
     setStarted(true);
-    // Перезапуск стрима (смена follow, возврат на вкладку) — начинаем с чистого буфера.
+    // Stream restart (follow toggled, return to the tab) — start with an empty buffer.
     if (preRef.current) preRef.current.textContent = '';
 
     void fetch(`/api/docker/containers/${encodeURIComponent(target.id)}/logs?${params}`, {

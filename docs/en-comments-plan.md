@@ -64,10 +64,10 @@
 | W1 ✅ | `App.tsx`, `api.ts` | ~9k |
 | W2 ✅ | `pages/AgentPage.tsx`, `pages/TerminalPage.tsx` | ~9.9k |
 | W3 ✅ | `pages/DatabasesPage.tsx`, `pages/OverviewPage.tsx`, `pages/FilesPage.tsx` | ~6.9k |
-| W4 | `pages/ServicesPage.tsx`, `pages/NginxPage.tsx`, `pages/DockerPage.tsx`, `pages/AiCostsPage.tsx`, `pages/OnboardingPage.tsx`, `pages/CronPage.tsx`, `pages/ServersPage.tsx`, `pages/PortsPage.tsx`, `pages/LoginPage.tsx` | ~4.3k |
-| W5 | `components/LogViewer.tsx`, `components/SnippetsSection.tsx`, `components/ProfileModal.tsx`, `components/SettingsModal.tsx`, `components/DiskUsageModal.tsx` | ~6.8k |
-| W6 | `components/CodeEditor.tsx`, `components/Modal.tsx`, `components/AlertsBell.tsx`, `components/AlertsSettingsForm.tsx`, `components/Sparkline.tsx`, `components/Markdown.tsx`, `alerts.ts`, `log-buffer.ts`, `ai-providers.ts`, `hooks/useSortBy.tsx`, `types.ts`, `i18n/core.ts`, `i18n/index.tsx`, `i18n/en.ts`, `main.tsx` | ~4.9k |
-| W7 | `styles.css` (комментарии в CSS) | ~6.2k |
+| W4 ✅ | `pages/ServicesPage.tsx`, `pages/NginxPage.tsx`, `pages/DockerPage.tsx`, `pages/AiCostsPage.tsx`, `pages/OnboardingPage.tsx`, `pages/CronPage.tsx`, `pages/ServersPage.tsx`, `pages/PortsPage.tsx`, `pages/LoginPage.tsx` | ~4.3k |
+| W5 ✅ | `components/LogViewer.tsx`, `components/SnippetsSection.tsx`, `components/ProfileModal.tsx`, `components/SettingsModal.tsx`, `components/DiskUsageModal.tsx` | ~6.8k |
+| W6 ✅ | `components/CodeEditor.tsx`, `components/Modal.tsx`, `components/AlertsBell.tsx`, `components/AlertsSettingsForm.tsx`, `components/Sparkline.tsx`, `components/Markdown.tsx`, `alerts.ts`, `log-buffer.ts`, `ai-providers.ts`, `hooks/useSortBy.tsx`, `types.ts`, `i18n/core.ts`, `i18n/index.tsx`, `i18n/en.ts`, `main.tsx` | ~4.9k |
+| W7 ✅ | `styles.css` (комментарии в CSS) | ~6.2k |
 
 ## Батчи: server/test (~48k кириллицы)
 

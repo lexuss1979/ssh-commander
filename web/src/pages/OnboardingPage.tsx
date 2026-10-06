@@ -9,10 +9,11 @@ interface Props {
 }
 
 /**
- * Первичная настройка (docs/settings-model-plan.md): экран вместо LoginPage
- * при первом запуске (пароля в settings.json нет). Задаёт пароль веб-интерфейса
- * и опционально AI-конфиг (провайдер, ключ, модель); успех POST /api/setup —
- * авто-вход (cookie уже стоит), приложение открывается сразу.
+ * First-run setup (docs/settings-model-plan.md): the screen shown instead of
+ * LoginPage on the first launch (no password in settings.json yet). Sets the
+ * web interface password and optionally the AI config (provider, key, model);
+ * a successful POST /api/setup logs the user in automatically (the cookie is
+ * already set) and the app opens right away.
  */
 export function OnboardingPage({ onComplete, showError }: Props) {
   const { t } = useT();
@@ -44,15 +45,15 @@ export function OnboardingPage({ onComplete, showError }: Props) {
       return;
     }
     if (key && provider === 'custom' && !base) {
-      // Иначе ключ молча ушёл бы на дефолтную базу OpenAI (getAiSettings).
+      // Otherwise the key would silently go to the default OpenAI base (getAiSettings).
       setError(t('onboarding.errorBaseUrlRequired'));
       return;
     }
     setBusy(true);
     try {
-      // AI-поля уходят только вместе с непустым ключом: иначе setup затёр бы
-      // посеянные env'ом AI-поля пустой формой (мерж на сервере, но честнее
-      // не отправлять пустоту вовсе).
+      // AI fields are sent only together with a non-empty key: otherwise setup
+      // would overwrite the env-seeded AI fields with an empty form (the merge
+      // happens on the server, but it is cleaner not to send emptiness at all).
       await submitSetup({
         password,
         aiApiKey: key || undefined,
@@ -121,7 +122,7 @@ export function OnboardingPage({ onComplete, showError }: Props) {
           onChange={(e) => {
             const p = e.target.value as AiProvider;
             setProvider(p);
-            // Смена провайдера подставляет модель пресета — остаётся редактируемой.
+            // Switching the provider fills in the preset's model — it stays editable.
             setModel(PROVIDERS[p].model);
           }}
         >

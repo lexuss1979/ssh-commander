@@ -9,7 +9,7 @@ import { Modal } from './Modal';
 import { useT } from '../i18n';
 import type { I18nKey } from '../i18n';
 
-// Иконки тумблера темы (луна/солнце) — в фирменном SVG-стиле.
+// Theme toggle icons (moon/sun) in the project's SVG style.
 const MOON_ICON = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
@@ -43,11 +43,11 @@ interface Props {
 }
 
 /**
- * Модалка «Настройки» — всё настроечное в одном окне: интерфейс (тема/язык),
- * пароль веб-интерфейса, AI-конфиг, расходы AI и пороги алертов. Открывается
- * шестерёнкой в футере сайдбара. Без keep-alive: модалка и разделы
- * монтируются при открытии, GET /api/settings уходит при каждом открытии
- * раздела «AI-агент» (как у прежней страницы «Настройки»).
+ * The "Settings" modal — everything configurable in one window: interface
+ * (theme/language), the web interface password, the AI config, AI costs and
+ * alert thresholds. Opened by the gear in the sidebar footer. No keep-alive:
+ * the modal and its sections mount on open, GET /api/settings goes out on
+ * every opening of the "AI agent" section (like the old "Settings" page).
  */
 export function SettingsModal({
   theme,
@@ -61,7 +61,7 @@ export function SettingsModal({
   const { lang, setLang, t } = useT();
   const [section, setSection] = useState<SettingsSection>('interface');
 
-  // Закрытие по Escape (✕ и клик по оверлею обрабатывает общий Modal).
+  // Close on Escape (✕ and overlay clicks are handled by the shared Modal).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -139,7 +139,7 @@ export function SettingsModal({
   );
 }
 
-/** Раздел «Безопасность»: смена пароля веб-интерфейса (эпик 23). */
+/** The "Security" section: changing the web interface password (epic 23). */
 function PasswordSection({ showError, showSuccess }: { showError: (msg: string) => void; showSuccess: (msg: string) => void }) {
   const { t } = useT();
   const [currentPassword, setCurrentPassword] = useState('');
@@ -159,7 +159,7 @@ function PasswordSection({ showError, showSuccess }: { showError: (msg: string) 
     }
     setPasswordBusy(true);
     try {
-      // Сессия не прерывается: cookie живёт до истечения TTL (см. план).
+      // Sessions are not invalidated: the cookie lives until its TTL expires (see the plan).
       await updateSettings({ currentPassword, newPassword });
       setCurrentPassword('');
       setNewPassword('');
@@ -217,11 +217,11 @@ function PasswordSection({ showError, showSuccess }: { showError: (msg: string) 
 }
 
 /**
- * Раздел «AI-агент»: замена AI-конфига (эпик 23). Статус запрашивается GET
- * при монтировании (каждое открытие раздела — свежий снимок), ответ PUT
- * освежает статус. Ключ write-only: пустое поле сохраняет его при смене
- * модели; ввод заменяет,
- * «Очистить ключ» шлёт aiApiKey: null (агент становится недоступен).
+ * The "AI agent" section: replacing the AI config (epic 23). The status is
+ * fetched with GET on mount (every opening of the section — a fresh
+ * snapshot), the PUT response refreshes the status. The key is write-only:
+ * an empty field keeps it on a model change; typing replaces it, and
+ * "Clear key" sends aiApiKey: null (the agent becomes unavailable).
  */
 function AiSection({ showError, showSuccess }: { showError: (msg: string) => void; showSuccess: (msg: string) => void }) {
   const { t } = useT();
@@ -229,21 +229,22 @@ function AiSection({ showError, showSuccess }: { showError: (msg: string) => voi
   const [loadError, setLoadError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
 
-  // AI: поле ключа всегда пустое (значение сервером не отдаётся).
+  // AI: the key field is always empty (the value is never returned by the server).
   const [provider, setProvider] = useState<AiProvider>('deepseek');
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState('');
   const [customBase, setCustomBase] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
 
-  // Статус с сервера → форма (пресет, модель, base для custom).
+  // Server status → form (preset, model, base for custom).
   const applyStatus = useCallback((ai: AiSettingsStatus) => {
     setStatus(ai);
     const p = ai.provider ?? 'deepseek';
     setProvider(p);
-    // Без провайдера серверные base/model — рантайм-дефолты (OpenAI-ориентированные),
-    // а не подсказка форме: под выбранный пресет подставляем модель пресета,
-    // иначе «DeepSeek + gpt-4.1-mini» ушло бы на сервер молча сломанной связкой.
+    // Without a provider, the server base/model are runtime defaults
+    // (OpenAI-oriented), not a hint for the form: for the selected preset we
+    // fill in the preset's model, otherwise "DeepSeek + gpt-4.1-mini" would
+    // go to the server silently as a broken pairing.
     setModel(ai.provider ? ai.model : PROVIDERS[p].model);
     setCustomBase(p === 'custom' ? ai.apiBase : '');
   }, []);
@@ -266,7 +267,7 @@ function AiSection({ showError, showSuccess }: { showError: (msg: string) => voi
     };
   }, [applyStatus, reloadKey]);
 
-  // Смена модели не меняет адрес сохранённого пресета, включая прокси.
+  // Changing the model does not change the saved preset's address, including a proxy.
   const base = provider === 'custom' ? customBase.trim()
     : provider === status?.provider ? status.apiBase : PROVIDERS[provider].base;
   const canKeepKey = Boolean(status?.apiKeySet && provider === status.provider
@@ -349,8 +350,8 @@ function AiSection({ showError, showSuccess }: { showError: (msg: string) => voi
           onChange={(e) => {
             const p = e.target.value as AiProvider;
             setProvider(p);
-            // Смена провайдера подставляет модель пресета — остаётся
-            // редактируемой (как в onboarding).
+            // Switching the provider fills in the preset's model — it stays
+            // editable (as in onboarding).
             setModel(PROVIDERS[p].model);
           }}
         >

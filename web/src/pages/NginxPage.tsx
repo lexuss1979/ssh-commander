@@ -6,10 +6,10 @@ import { Modal } from '../components/Modal';
 import { useT } from '../i18n';
 import type { I18nKey, I18nParams } from '../i18n';
 
-// Редактор с подсветкой (nginx-конфиг по полному пути) — ленивый чанк.
+// Highlighting editor (nginx config by full path) — a lazy chunk.
 const CodeEditor = lazy(() => import('../components/CodeEditor'));
 
-// Открыть конфиг — «квадрат со стрелкой наружу» (в стиле приложения).
+// Open config — "square with an arrow out" (in the app's style).
 const OPEN_ICON = (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
@@ -19,10 +19,10 @@ const OPEN_ICON = (
 );
 
 /**
- * Вкладка «Nginx» (docs/nginx-plan.md): сайты сервера из `nginx -T`.
- * Паттерн CronPage: polling 5 с только при видимой вкладке, секции по
- * источникам (native + контейнеры), точечные мутации (test/reload) за
- * confirm'ом, 409 показывает вывод `nginx -t` mono-блоком.
+ * The "Nginx" tab (docs/nginx-plan.md): the server's sites from `nginx -T`.
+ * The CronPage pattern: 5s polling only while the tab is visible, sections
+ * per source (native + containers), targeted mutations (test/reload) behind
+ * a confirm, 409 shows the `nginx -t` output in a mono block.
  */
 
 interface Props {
@@ -32,7 +32,7 @@ interface Props {
 }
 
 const POLL_INTERVAL_MS = 5000;
-/** ≤ этого срока сертификат подсвечивается жёлтым (просрочен — красным). */
+/** A certificate expiring within this many days is highlighted yellow (expired — red). */
 const CERT_WARN_DAYS = 14;
 
 type TFn = (key: I18nKey, params?: I18nParams | number) => string;
@@ -43,8 +43,8 @@ function sourceTitle(source: NginxSourceSnapshot, t: TFn): string {
     : t('nginx.sourceContainer', { name: source.containerName ?? source.containerId ?? '' });
 }
 
-/** Бейдж `nginx -t`: «конфиг цел» / «конфиг с ошибками»; permission denied
- * (конфиг может быть цел, но не читается) — отдельный честный текст. */
+/** The `nginx -t` badge: "config is clean" / "config has errors"; permission
+ * denied (the config may be clean but unreadable) gets its own honest text. */
 function ConfigTestBadge({ source }: { source: NginxSourceSnapshot }) {
   const { t } = useT();
   if (source.configTest.ok) {
@@ -122,7 +122,7 @@ function SitesTable({
   onOpenFile,
 }: {
   sites: NginxSite[];
-  /** Ключ источника (nginxSourceKey): 'native' | 'container:<id>'. */
+  /** Source key (nginxSourceKey): 'native' | 'container:<id>'. */
   sourceKey: string;
   onOpenFile: (path: string, sourceKey: string) => void;
 }) {
@@ -209,7 +209,7 @@ function SitesTable({
   );
 }
 
-/** Mono-блок вывода nginx -t / ошибки источника (паттерн db-query-error). */
+/** Mono block for nginx -t output / a source error (the db-query-error pattern). */
 function OutputBlock({ text }: { text: string }) {
   return (
     <div className="nginx-error-block">
@@ -223,16 +223,16 @@ export function NginxPage({ profile, visible, showError }: Props) {
   const [snapshot, setSnapshot] = useState<NginxSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  // Модалка вывода: результат «Проверить конфиг» или 409 reload'а.
+  // Output modal: the "Test config" result or a 409 from reload.
   const [outputModal, setOutputModal] = useState<{ title: string; output: string } | null>(null);
-  // Confirm reload'а: ключ источника + заголовок.
+  // Reload confirmation: source key + title.
   const [confirmReload, setConfirmReload] = useState<{ key: string; title: string } | null>(null);
-  // Идёт test/reload источника (кнопки блокируются).
+  // A test/reload of the source is in progress (buttons disabled).
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  // Информационное сообщение (успех test/reload) — без красной рамки ошибки.
+  // Informational message (test/reload success) — no red error frame.
   const [notice, setNotice] = useState('');
   const noticeTimer = useRef<number | null>(null);
-  // Модалка «Открыть конфиг»: содержимое файла из nginx -T, с подсветкой.
+  // The "Open config" modal: file content from nginx -T, with highlighting.
   const [fileModal, setFileModal] = useState<{ path: string } | null>(null);
   const [fileContent, setFileContent] = useState('');
   const [fileLoading, setFileLoading] = useState(false);
@@ -293,7 +293,7 @@ export function NginxPage({ profile, visible, showError }: Props) {
       const result = await reloadNginx(profile.id, key);
       if (result.ok) {
         showNotice(t('nginx.reloaded'));
-        // Свежий снапшот: бейдж конфиг-теста и сертификаты.
+        // Fresh snapshot: the config-test badge and certificates.
         setReloadKey((k) => k + 1);
       } else {
         setOutputModal({ title: 'nginx -s reload', output: result.output });
@@ -301,7 +301,7 @@ export function NginxPage({ profile, visible, showError }: Props) {
     } catch (err) {
       const e = err as Error & { status?: number; output?: string };
       if (e.status === 409) {
-        // Guard: конфиг красный — reload не выполнялся, показываем вывод теста.
+        // Guard: the config is red — reload never ran, show the test output.
         setOutputModal({ title: t('nginx.testFailedTitle'), output: e.output ?? e.message });
       } else {
         showError(e.message);
@@ -311,7 +311,7 @@ export function NginxPage({ profile, visible, showError }: Props) {
     }
   };
 
-  // «Открыть конфиг»: прочитать содержимое файла (native cat / docker exec cat).
+  // "Open config": read the file content (native cat / docker exec cat).
   const openConfigFile = async (path: string, sourceKey: string) => {
     setFileModal({ path });
     setFileLoading(true);

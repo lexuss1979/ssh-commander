@@ -3,57 +3,59 @@ import { appendChunk, lastNChars, type LogBufferState } from '../log-buffer';
 import { useT } from '../i18n';
 
 const MAX_LINES = 5000;
-// Флеш буфера в стейт интервалом, а не на каждый чанк — батчинг против
-// ререндера на каждый кусок стрима. Интервал общий для обоих режимов и живёт
-// вне стрим-эффекта: oneShot-стрим переживает переключение вкладок, и флеш
-// не должен умирать вместе с его эффектом.
+// Flush the buffer into state on an interval, not on every chunk — batching
+// against a re-render per stream piece. The interval is shared by both modes
+// and lives outside the stream effect: the oneShot stream survives tab
+// switches, so the flush must not die with its effect.
 const FLUSH_MS = 250;
-// Контекст для «В чат»: хвост отфильтрованного буфера до 4 КБ.
+// Context for "To chat": the tail of the filtered buffer, up to 4 KB.
 const ASK_TAIL_CHARS = 4096;
-// Ручной скролл дальше от дна выключает автоскролл, возврат к дну — включает.
+// Manual scrolling away from the bottom turns autoscroll off, returning to the bottom turns it back on.
 const AUTOSCROLL_THRESHOLD_PX = 40;
 
 export type LogViewerStatus = 'loading' | 'live' | 'stopped' | 'error';
 
 /**
- * Обычный стрим (tail, journalctl) строится на `buildUrl` (`kind: 'url'`);
- * мутирующий POST-стрим (эпик 19: применение обновлений) — на
- * `buildRequest` + `abortSignal` (`kind: 'request'`, по сути oneShot).
- * Дискриминированное объединение по `kind` делает состояние «не передан ни
- * один» непредставимым (обязательный литерал — дискриминант).
+ * A regular stream (tail, journalctl) is built on `buildUrl` (`kind: 'url'`);
+ * the mutating POST stream (epic 19: applying updates) — on `buildRequest` +
+ * `abortSignal` (`kind: 'request'`, essentially oneShot). The discriminated
+ * union on `kind` makes the "neither passed" state unrepresentable (the
+ * required literal is the discriminant).
  */
 type Props = {
-  /** Заголовок источника (для сноски, если не задан logPath). */
+  /** Source title (for the footer line, when logPath is not set). */
   title: string;
   visible: boolean;
   onAskAgent?: (text: string) => void;
-  /** Слот для дополнительных контролов тулбара (например «★ Закрепить»). */
+  /** Slot for extra toolbar controls (e.g. "★ Pin"). */
   toolbarExtra?: ReactNode;
-  /** Путь файла для сообщения «В чат» — агент знает, что смотрит пользователь. */
+  /** File path for the "To chat" message — the agent learns what the user is looking at. */
   logPath?: string;
   serverName?: string;
-  /** Терминальное состояние стрима — родителю (нужен ли confirm при закрытии). */
+  /** Terminal stream state — to the parent (whether closing needs a confirm). */
   onStatusChange?: (status: LogViewerStatus) => void;
 } & (
   | {
       kind: 'url';
-      /** URL стрима; вызывающий стабилизирует useCallback, иначе identity
-       * пропа будет перезапускать стрим. */
+      /** Stream URL; the caller stabilizes it with useCallback, otherwise the
+       * identity of the prop would restart the stream. */
       buildUrl: (follow: boolean) => string;
     }
   | {
       kind: 'request';
       /**
-       * POST-стрим мутации (пароль — в теле запроса, не в URL). Обязательно
-       * стабилизировать useCallback с явными зависимостями — смена identity
-       * перезапустила бы стрим, то есть повторно выполнила мутацию.
+       * The mutation's POST stream (the password goes in the request body,
+       * not the URL). The useCallback must be stabilized with explicit
+       * dependencies — an identity change would restart the stream, i.e.
+       * execute the mutation a second time.
        */
       buildRequest: () => { url: string; init?: RequestInit };
       /**
-       * Сигнал прерывания: родитель рвёт стрим при закрытии модалки. Стрим
-       * НЕ завязан на `visible` и не рвётся cleanup'ом эффекта — переключение
-       * вкладок и StrictMode-перезапуск эффекта не должны убивать идущую
-       * мутацию (иначе `apt-get upgrade` обрывался бы при смене вкладки).
+       * Abort signal: the parent tears the stream down when the modal closes.
+       * The stream is NOT tied to `visible` and is not aborted by the effect
+       * cleanup — tab switches and StrictMode effect re-runs must not kill a
+       * running mutation (otherwise `apt-get upgrade` would break on a tab
+       * switch).
        */
       abortSignal: AbortSignal;
     }
@@ -70,25 +72,27 @@ export function LogViewer(props: Props) {
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   const [lines, setLines] = useState<string[]>([]);
-  // Неполная хвостовая строка без \n: её видно сразу, а не после следующего
-  // чанка — иначе пустой лог и пометка об обрезке (обе без \n) терялись бы.
+  // Trailing partial line without \n: it becomes visible right away rather
+  // than after the next chunk — otherwise an empty log and the truncation
+  // marker (both without \n) would be lost.
   const [pendingLine, setPendingLine] = useState('');
   const bufferRef = useRef<LogBufferState>({ lines: [], pending: '' });
   const dirtyRef = useRef(false);
   const preRef = useRef<HTMLPreElement>(null);
-  // oneShot: guard «запуск ровно один на монтирование» — StrictMode в dev
-  // монтирует эффекты дважды, без guard'а POST (apt-get upgrade) ушёл бы
-  // двумя запросами. Abort в cleanup нет, поэтому первый (живой) fetch
-  // переживает двойной вызов; новый монтаж (повторное открытие модалки)
-  // получает свежий экземпляр ref.
+  // oneShot: the "start exactly once per mount" guard — StrictMode in dev
+  // mounts effects twice, and without the guard the POST (apt-get upgrade)
+  // would go out twice. There is no abort in cleanup, so the first (live)
+  // fetch survives the double invocation; a new mount (reopening the modal)
+  // gets a fresh ref instance.
   const oneShotStartedRef = useRef(false);
-  // Подавление setState после размонтирования (в т.ч. StrictMode-перезапуск:
-  // эффект с [] переустанавливает флаг в false после двойного вызова).
+  // Suppress setState after unmount (including the StrictMode re-run: the
+  // [] effect resets the flag to false after the double invocation).
   const unmountedRef = useRef(false);
-  // Метрики скролла прошлого события/эффекта. Клампинг браузера при сжатии
-  // контента (фильтр, вытеснение кольцом) прижимает scrollTop к низу без
-  // жеста пользователя — его подпись: упали ОБА, scrollHeight и scrollTop.
-  // Жест вверх роняет только scrollTop, жест к дну scrollTop растит.
+  // Scroll metrics of the previous event/effect. Browser clamping when the
+  // content shrinks (filter, ring eviction) pushes scrollTop to the bottom
+  // without a user gesture — its signature: BOTH scrollHeight and scrollTop
+  // dropped. An upward gesture drops only scrollTop; a gesture toward the
+  // bottom grows scrollTop.
   const lastMetricsRef = useRef({ height: 0, top: 0 });
 
   useEffect(() => {
@@ -98,7 +102,7 @@ export function LogViewer(props: Props) {
     };
   }, []);
 
-  // Флеш буфера в стейт интервалом (батчинг против ререндера на каждый чанк).
+  // Flush the buffer into state on an interval (batching against a re-render per chunk).
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (!dirtyRef.current) return;
@@ -123,9 +127,9 @@ export function LogViewer(props: Props) {
     onStatusChange?.(nextStatus);
   };
 
-  // Общий цикл стрима: fetch + reader + кольцевой буфер + статусы. Живёт в
-  // ref'ах и не привязан к идентичности вызова — оба эффекта зовут его
-  // один раз за свой жизненный цикл.
+  // Shared stream loop: fetch + reader + ring buffer + statuses. Lives in
+  // refs and is not tied to call identity — both effects invoke it once per
+  // their own lifecycle.
   const runStream = (opts: { url: string; init?: RequestInit; signal: AbortSignal }) => {
     bufferRef.current = { lines: [], pending: '' };
     setLines([]);
@@ -154,15 +158,15 @@ export function LogViewer(props: Props) {
           dirtyRef.current = true;
         }
         if (!unmountedRef.current) {
-          // Финальный флеш: продолжения не будет, неполная строка — весь
-          // остаток вывода (частый случай у follow=0-снимка).
+          // Final flush: there will be no more data, the partial line is the
+          // whole rest of the output (a common case for a follow=0 snapshot).
           dirtyRef.current = true;
           flushNow();
           finish('stopped');
         }
       })
       .catch((err) => {
-        if ((err as Error).name === 'AbortError') return; // родитель закрыл модалку
+        if ((err as Error).name === 'AbortError') return; // the parent closed the modal
         if (unmountedRef.current) return;
         dirtyRef.current = true;
         flushNow();
@@ -170,30 +174,30 @@ export function LogViewer(props: Props) {
       });
   };
 
-  // Сужение дискриминированного пропса до конкретных значений: локальные
-  // переменные проще для TS в массивах зависимостей, чем доступ через union.
+  // Narrowing the discriminated prop down to concrete values: plain local
+  // variables are easier for TS in dependency arrays than access through the union.
   const buildUrl = props.kind === 'url' ? props.buildUrl : undefined;
   const buildRequest = props.kind === 'request' ? props.buildRequest : undefined;
   const abortSignal = props.kind === 'request' ? props.abortSignal : undefined;
 
-  // Обычные стримы: пауза при скрытой вкладке, рестарт при смене
-  // follow/retry/возврате видимости — cleanup рвёт fetch (для follow-стрима
-  // перезапуск безвреден).
+  // Regular streams: pause on a hidden tab, restart on follow/retry changes
+  // or on visibility return — the cleanup aborts the fetch (a restart is
+  // harmless for a follow stream).
   useEffect(() => {
     if (!buildUrl) return;
     if (!visible) return;
     const controller = new AbortController();
     runStream({ url: buildUrl(follow), signal: controller.signal });
     return () => controller.abort();
-    // runStream намеренно не в зависимостях: он пересоздаётся каждый рендер,
-    // а стрим должен жить по своим стабильным пропсам.
+    // runStream is intentionally left out of the dependencies: it is re-created
+    // on every render, while the stream should live by its stable props.
   }, [buildUrl, visible, follow, retry]);
 
-  // kind='request' (мутация): старт ровно один раз на монтирование, жизнь
-  // стрима НЕ зависит от visible и перезапусков эффекта; прерывание — только
-  // по abortSignal родителя (закрытие модалки) или естественному завершению
-  // команды. Cleanup не делает abort: StrictMode-двойной вызов эффекта не
-  // должен рвать первый (живой) POST.
+  // kind='request' (mutation): starts exactly once per mount; the stream
+  // lifetime does NOT depend on visible or effect re-runs; interruption is
+  // only via the parent's abortSignal (modal close) or the command finishing
+  // naturally. The cleanup does not abort: the StrictMode double invocation
+  // must not tear down the first (live) POST.
   useEffect(() => {
     if (!buildRequest || !abortSignal) return;
     if (oneShotStartedRef.current) return;
@@ -202,16 +206,16 @@ export function LogViewer(props: Props) {
     runStream({ url, init, signal: abortSignal });
   }, [buildRequest, abortSignal]);
 
-  // Автоскролл после каждого флеша.
+  // Autoscroll after every flush.
   useEffect(() => {
     const el = preRef.current;
     if (!el) return;
     if (autoscroll) el.scrollTop = el.scrollHeight;
-    // Рост контента без событий скролла (автоскролл выключен) должен
-    // попадать в метрики — иначе сжатие после роста не распознается как
-    // сжатие. При уменьшении метрики НЕ трогаем: пассивный эффект выполняется
-    // раньше события клампинга, и реф, обновлённый здесь, погасил бы
-    // подавление в onScroll.
+    // Content growth without scroll events (autoscroll off) must still land
+    // in the metrics — otherwise shrinkage after growth would not be
+    // recognized as shrinkage. On decrease the metrics are NOT touched: the
+    // passive effect runs before the clamping event, and a ref updated here
+    // would cancel out the suppression in onScroll.
     if (autoscroll || el.scrollHeight > lastMetricsRef.current.height) {
       lastMetricsRef.current = { height: el.scrollHeight, top: el.scrollTop };
     }
@@ -224,16 +228,16 @@ export function LogViewer(props: Props) {
     const sh = el.scrollHeight;
     const st = el.scrollTop;
     lastMetricsRef.current = { height: sh, top: st };
-    // Оба упали — браузер прижал scrollTop при сжатии контента: жеста не
-    // было, автоскролл не трогаем (пользователь его выключал).
+    // Both dropped — the browser pushed scrollTop while the content shrank:
+    // there was no gesture, autoscroll is left alone (the user turned it off).
     if (sh < height && st < top) return;
     const atBottom = sh - st - el.clientHeight <= AUTOSCROLL_THRESHOLD_PX;
     if (atBottom !== autoscroll) setAutoscroll(atBottom);
   };
 
   const normalizedFilter = filter.trim().toLowerCase();
-  // Отображаемый буфер: полные строки + неполная хвостовая (если матчится
-  // фильтру) — фильтр, копирование и «В чат» работают по одному набору.
+  // Displayed buffer: full lines + the trailing partial one (if it matches
+  // the filter) — filter, copy and "To chat" all work off the same set.
   const visibleLines = useMemo(() => {
     const withPending =
       pendingLine && (!normalizedFilter || pendingLine.toLowerCase().includes(normalizedFilter))
@@ -247,12 +251,13 @@ export function LogViewer(props: Props) {
     try {
       await navigator.clipboard.writeText(visibleLines.join('\n'));
     } catch {
-      /* clipboard может быть недоступен */
+      /* clipboard may be unavailable */
     }
   };
 
-  // 'send': текст уже собран и не оборачивается в «вывод терминала» — путь
-  // файла попадает в сообщение, агент знает, что смотрит пользователь.
+  // 'send': the text is already assembled and is not wrapped in "terminal
+  // output" — the file path goes into the message, so the agent learns what
+  // the user is looking at.
   const ask = () => {
     if (!onAskAgent) return;
     const where = logPath ?? title;

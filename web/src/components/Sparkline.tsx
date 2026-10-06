@@ -2,13 +2,13 @@ import { useMemo } from 'react';
 import type { HistorySample } from '../api';
 import { useT } from '../i18n';
 
-/** Точка графика: момент сэмпла и значение (null — данных нет). */
+/** Chart point: the sample time and value (null — no data). */
 interface ChartPoint {
   t: number;
   v: number | null;
 }
 
-/** Отрезок непрерывной линии между разрывами (null или гэп во времени). */
+/** A continuous line segment between breaks (null or a time gap). */
 interface ChartSegment {
   line: string;
   area: string;
@@ -21,15 +21,16 @@ export interface ChartProps {
 }
 
 /**
- * Геометрия в системе 0..100: x — позиция по времени сэмпла, y — проценты
- * сверху вниз. Ось именно временная: частота опросов непостоянна (3/5/10 с на
- * разных экранах, паузы скрытых вкладок), индексная ось «схлопывала» бы
- * ночные паузы и меняла масштаб плотных участков.
+ * Geometry in a 0..100 system: x — the position by sample time, y — percent
+ * top-down. The axis is a time axis on purpose: the polling rate is not
+ * constant (3/5/10 s on different screens, pauses of hidden tabs), an index
+ * axis would "collapse" overnight pauses and change the scale of dense
+ * stretches.
  *
- * Линия рвётся не только на null-значениях, но и на гэпах во времени
- * (t[i] − t[i−1] > 3 × медианного интервала): пауза опроса не должна
- * выглядеть сплошной линией между вечером и утром. Для LoadChart это же
- * согласует шкалу с подписями времени по краям.
+ * The line breaks not only on null values but also on time gaps
+ * (t[i] − t[i−1] > 3 × the median interval): a polling pause must not look
+ * like a solid line between evening and morning. For LoadChart this also
+ * aligns the scale with the time labels at the edges.
  */
 function buildSegments(points: ChartPoint[]): ChartSegment[] {
   const n = points.length;
@@ -96,7 +97,7 @@ function SparkSvg({ segments, tone, className }: { segments: ChartSegment[]; ton
   );
 }
 
-/** Компактный график-спарклайн для карточек экрана «Серверы». */
+/** Compact sparkline chart for the cards of the "Servers" screen. */
 export function Sparkline({ samples, value, tone }: ChartProps) {
   const segments = useSegments(samples, value);
   if (segments.length === 0) {
@@ -109,7 +110,7 @@ function formatPct(v: number): string {
   return `${v.toFixed(1)}%`;
 }
 
-/** Длительность окна в минутах (минимум 1) — аргумент ключа sparkline.span. */
+/** Window duration in minutes (minimum 1) — the argument of the sparkline.span key. */
 function spanMinutes(ms: number): number {
   return Math.max(1, Math.round(ms / 60000));
 }
@@ -118,7 +119,7 @@ function formatTime(t: number, locale: string): string {
   return new Date(t).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
 }
 
-/** График нагрузки с мин/сред/макс и подписями времени — вкладка «Обзор». */
+/** Load chart with min/avg/max and time labels — the "Overview" tab. */
 export function LoadChart({ samples, value, tone }: ChartProps) {
   const { t, locale } = useT();
   const segments = useSegments(samples, value);

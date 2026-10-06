@@ -9,9 +9,9 @@ import { nginx as nginxMode } from '@codemirror/legacy-modes/mode/nginx';
 import { oneDark } from '@codemirror/theme-one-dark';
 import type { Extension } from '@codemirror/state';
 
-/** Подсветка nginx-конфигов по полному пути (не только name *.conf):
- *  открытые из файлового менеджера `/etc/nginx/sites-available/…` или
- *  `/etc/nginx/conf.d/*.conf` не содержат «nginx» в баснейме. */
+/** Highlighting of nginx configs by full path (not only name *.conf):
+ *  those opened from the file manager, `/etc/nginx/sites-available/…` or
+ *  `/etc/nginx/conf.d/*.conf`, do not contain "nginx" in the basename. */
 const NGINX_LANG = LanguageDescription.of({
   name: 'Nginx',
   filename: /(^|\/)nginx\/|(^|\/)sites-(available|enabled)\//i,
@@ -23,7 +23,7 @@ interface Props {
   fileName: string;
   onChange: (value: string) => void;
   readOnly?: boolean;
-  /** Ctrl/Cmd+Enter — «выполнить» (SQL-консоль вкладки «Базы данных»). */
+  /** Ctrl/Cmd+Enter — "run" (the SQL console of the "Databases" tab). */
   onRun?: () => void;
 }
 
@@ -34,23 +34,23 @@ function currentThemeIsDark(): boolean {
 export default function CodeEditor({ value, fileName, onChange, readOnly, onRun }: Props) {
   const [dark, setDark] = useState(currentThemeIsDark);
   const [langExtension, setLangExtension] = useState<Extension | null>(null);
-  // Стабильный ref: onRun у SQL-консоли меняет identity на каждый ввод —
-  // иначе keymap пересобирал бы extensions на каждое нажатие клавиши.
+  // A stable ref: the SQL console's onRun changes identity on every input —
+  // otherwise the keymap would rebuild extensions on every keystroke.
   const onRunRef = useRef(onRun);
   useEffect(() => {
     onRunRef.current = onRun;
   }, [onRun]);;
 
-  // Тема редактора синхронизирована с data-theme документа
+  // The editor theme is synchronized with the document's data-theme
   useEffect(() => {
     const observer = new MutationObserver(() => setDark(currentThemeIsDark()));
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     return () => observer.disconnect();
   }, []);
 
-  // Подсветка по имени/расширению файла (language-data грузит режимы лениво).
-  // Сначала пробуем баснейм (Dockerfile/sh/json и т.п. матчатся по расширению
-  // и специальным именам), затем — nginx по полному пути (conf.d/sites-*).
+  // Highlighting by file name/extension (language-data loads modes lazily).
+  // First try the basename (Dockerfile/sh/json etc. match by extension and
+  // special names), then nginx by the full path (conf.d/sites-*).
   useEffect(() => {
     let cancelled = false;
     const base = fileName.split('/').pop() ?? fileName;
@@ -77,8 +77,8 @@ export default function CodeEditor({ value, fileName, onChange, readOnly, onRun 
 
   const extensions = useMemo(() => {
     const exts: Extension[] = [EditorView.lineWrapping, search({ top: true })];
-    // Модификатор никогда не «включается» посреди жизни редактора: FilesPage
-    // не передаёт onRun, DatabasesPage — передаёт всегда.
+    // The modifier never "turns on" in the middle of the editor's life: FilesPage
+    // does not pass onRun, DatabasesPage always does.
     if (onRun !== undefined) {
       exts.push(
         Prec.highest(keymap.of([
