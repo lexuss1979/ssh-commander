@@ -67,14 +67,25 @@ const TABS: Array<{ id: Tab; labelKey: I18nKey }> = [
 ];
 
 const AGENT_MIN_WIDTH = 360;
-const AGENT_MAX_WIDTH = 720;
 const AGENT_DEFAULT_WIDTH = 420;
+// No fixed cap on the panel width: the panel may take the window down to a
+// minimal strip of the main area (sidebar 240 + resizer 5 + main minimum).
+// The bound is recomputed at drag time, so a window resize is picked up.
+const AGENT_MAIN_MIN_WIDTH = 360;
 const SERVER_STATUS_POLL_MS = 10000;
+
+function agentMaxWidth(): number {
+  return Math.max(AGENT_MIN_WIDTH, window.innerWidth - 240 - 5 - AGENT_MAIN_MIN_WIDTH);
+}
+
+function clampAgentWidth(w: number): number {
+  return Math.min(Math.max(w, AGENT_MIN_WIDTH), agentMaxWidth());
+}
 
 function loadAgentWidth(): number {
   try {
     const v = Number(localStorage.getItem('sc-agent-width'));
-    if (v >= AGENT_MIN_WIDTH && v <= AGENT_MAX_WIDTH) return v;
+    if (Number.isFinite(v) && v >= AGENT_MIN_WIDTH) return v;
   } catch {
     /* localStorage may be unavailable */
   }
@@ -479,7 +490,7 @@ export default function App() {
       const startWidth = agentWidth;
       const onMove = (ev: MouseEvent) => {
         const next = startWidth + (startX - ev.clientX);
-        setAgentWidth(Math.min(AGENT_MAX_WIDTH, Math.max(AGENT_MIN_WIDTH, next)));
+        setAgentWidth(clampAgentWidth(next));
       };
       const onUp = () => {
         window.removeEventListener('mousemove', onMove);
@@ -788,7 +799,10 @@ export default function App() {
           {activeProfile && (
             <aside
               className={`agent-panel ${agentOpen ? '' : 'collapsed'}`}
-              style={agentOpen ? { width: agentWidth } : undefined}
+              // The stored width is a raw preference; clamping against the
+              // current window happens here so a width saved on a larger
+              // monitor does not squeeze the main area on a smaller one.
+              style={agentOpen ? { width: clampAgentWidth(agentWidth) } : undefined}
             >
               <div className="agent-panel-head">
                 <span className="sidebar-label">{t('app.agent')}</span>
