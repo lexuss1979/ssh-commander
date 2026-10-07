@@ -305,6 +305,49 @@ describe('streamChatCompletion — errors inside HTTP 200', () => {
   });
 });
 
+describe('streamChatCompletion — transport failures', () => {
+  const transportError = (causeMessage: string) =>
+    Object.assign(new TypeError('fetch failed'), { cause: new Error(causeMessage) });
+
+  it('a transport failure is retried once; a successful retry is transparent', async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(transportError('connect ECONNRESET 1.2.3.4:443'))
+      .mockResolvedValueOnce(jsonResponse({ choices: [{ message: { role: 'assistant', content: 'готово' } }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { message } = await client.streamChatCompletion({ messages: [{ role: 'user', content: 'hi' }] });
+    expect(message.content).toBe('готово');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  }, 10000);
+
+  it('a repeated transport failure surfaces the cause, not a bare "fetch failed"', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(transportError('getaddrinfo EAI_AGAIN mock-api'));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(client.streamChatCompletion({ messages: [{ role: 'user', content: 'hi' }] }))
+      .rejects.toThrow('Сбой сети при вызове AI API: getaddrinfo EAI_AGAIN mock-api');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  }, 10000);
+
+  it.each([
+    ['ru', 'Сбой сети при вызове AI API: connect ECONNRESET'],
+    ['en', 'Network failure while calling the AI API: connect ECONNRESET'],
+  ] as const)('the transport failure message is localized (%s)', async (lang, expected) => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(transportError('connect ECONNRESET')));
+    await expect(client.streamChatCompletion({ messages: [{ role: 'user', content: 'hi' }], lang }))
+      .rejects.toThrow(expected);
+  }, 10000);
+
+  it('an abort (user stop) is not a transport failure and is not retried', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const fetchMock = vi.fn().mockRejectedValue(controller.signal.reason);
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(
+      client.streamChatCompletion({ messages: [{ role: 'user', content: 'hi' }], signal: controller.signal }),
+    ).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('streamChatCompletion — SSE edge cases', () => {
   it('keeps the response when the stream ends without the final newline and across chunk boundaries', async () => {
     const frame = dataLine({ choices: [{ delta: { content: 'готово' } }] }).trimEnd();

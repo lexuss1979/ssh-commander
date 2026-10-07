@@ -164,6 +164,40 @@ function normalizeResponse(
 }
 
 /**
+ * A transport-level fetch failure (undici `TypeError: fetch failed`): the
+ * real reason (DNS, ECONNRESET, TLS...) sits in `err.cause` — surface it
+ * instead of the bare "fetch failed".
+ */
+function describeFetchFailure(err: unknown, lang: PromptLang): Error {
+  const cause = (err as { cause?: unknown } | null)?.cause;
+  const detail =
+    cause instanceof Error && cause.message
+      ? cause.message
+      : String((err as Error | null)?.message ?? err);
+  return new Error(aiStr(lang, 'apiNetworkError', { detail: detail.slice(0, 300) }));
+}
+
+/** undici signals transport failures with a TypeError; aborts and timeouts
+ * come through as the AbortSignal reason (DOMException or our own Error). */
+function isTransportFailure(err: unknown): boolean {
+  return err instanceof TypeError;
+}
+
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason);
+      },
+      { once: true },
+    );
+  });
+}
+
+/**
  * Streaming client: Chat Completions, and Responses for the matching Go
  * models. On a plain JSON response it parses without streaming.
  */
@@ -193,19 +227,6 @@ export async function streamChatCompletion(opts: StreamOptions): Promise<ChatCom
     stream_options: { include_usage: true },
   });
 
-  // The timeout covers only establishing the connection and receiving the
-  // headers (the first response byte): once the SSE stream starts it is
-  // lifted, because streaming the answer itself may take long. A user stop
-  // (opts.signal) keeps working for the whole duration of the request.
-  const connectTimeout = new AbortController();
-  const timer = setTimeout(
-    () => connectTimeout.abort(new Error(aiStr(opts.lang ?? 'ru', 'apiTimeout'))),
-    120_000,
-  );
-  const signal = opts.signal
-    ? AbortSignal.any([opts.signal, connectTimeout.signal])
-    : connectTimeout.signal;
-
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     authorization: `Bearer ${apiKey}`,
@@ -216,16 +237,44 @@ export async function streamChatCompletion(opts: StreamOptions): Promise<ChatCom
     headers['x-opencode-session'] = opts.sessionId;
   }
 
+  // The timeout covers only establishing the connection and receiving the
+  // headers (the first response byte): once the SSE stream starts it is
+  // lifted, because streaming the answer itself may take long. A user stop
+  // (opts.signal) keeps working for the whole duration of the request.
+  const fetchOnce = (): Promise<Response> => {
+    const connectTimeout = new AbortController();
+    const timer = setTimeout(
+      () => connectTimeout.abort(new Error(aiStr(lang, 'apiTimeout'))),
+      120_000,
+    );
+    const signal = opts.signal
+      ? AbortSignal.any([opts.signal, connectTimeout.signal])
+      : connectTimeout.signal;
+    return fetch(url, { method: 'POST', headers, body, signal }).finally(() => clearTimeout(timer));
+  };
+
+  // One retry of a pure transport failure (DNS/TCP/TLS — no response was
+  // received, the stream never started, so a repeat cannot duplicate tokens).
+  // Aborts (user stop, the connect timeout) and HTTP error statuses are not
+  // retried. The final failure is logged: the agent loop reports errors only
+  // to the UI, without the server log there is nothing to diagnose.
   let res: Response;
   try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers,
-      body,
-      signal,
-    });
-  } finally {
-    clearTimeout(timer);
+    res = await fetchOnce();
+  } catch (err) {
+    if (!isTransportFailure(err) || opts.signal?.aborted) {
+      if (isTransportFailure(err)) console.warn('AI API transport failure:', describeFetchFailure(err, lang).message);
+      throw err;
+    }
+    console.warn('AI API transport failure, retrying once in 2 s:', describeFetchFailure(err, lang).message);
+    await delay(2000, opts.signal);
+    try {
+      res = await fetchOnce();
+    } catch (retryErr) {
+      const described = isTransportFailure(retryErr) ? describeFetchFailure(retryErr, lang) : retryErr;
+      console.warn('AI API transport failure (final):', (described as Error).message ?? described);
+      throw described;
+    }
   }
 
   if (!res.ok || !res.body) {

@@ -53,6 +53,7 @@ export const AI_STRINGS = {
     diskFilesUnavailable: 'крупнейшие файлы недоступны: {message}',
     // client.ts — AI API response timeout
     apiTimeout: 'AI API не ответил за 120 секунд (таймаут ожидания ответа)',
+    apiNetworkError: 'Сбой сети при вызове AI API: {detail}',
     apiResponseError: 'Ошибка AI API: {message}',
     apiErrorUnknown: 'Провайдер сообщил об ошибке без описания.',
     apiEmptyResponse: 'AI API завершил ответ без текста и вызовов инструментов. Повторите запрос.',
@@ -169,6 +170,7 @@ export const AI_STRINGS = {
     errorPrefix: 'Error',
     diskFilesUnavailable: 'largest files unavailable: {message}',
     apiTimeout: 'The AI API did not respond within 120 seconds (response timeout)',
+    apiNetworkError: 'Network failure while calling the AI API: {detail}',
     apiResponseError: 'AI API error: {message}',
     apiErrorUnknown: 'The provider reported an error without details.',
     apiEmptyResponse: 'The AI API completed the response without text or tool calls. Retry the request.',
