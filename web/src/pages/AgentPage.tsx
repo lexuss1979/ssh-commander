@@ -153,6 +153,14 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   // DOM cards of calls in the feed — clicking the confirmation bar scrolls to the card.
   const cardRefs = useRef(new Map<string, HTMLDivElement>());
   const listRef = useRef<HTMLDivElement>(null);
+  // Scroll state: 'follow' keeps the feed at the bottom (the tool phase of a
+  // run — new call cards stay in view); 'off' freezes it (the model is
+  // writing the text reply — the view was pinned to its top edge).
+  // anchorPendingRef requests that one-shot pin on the next commit;
+  // pinnedRowRef holds the reply row that got extra height for the pin.
+  const scrollModeRef = useRef<'follow' | 'off'>('follow');
+  const anchorPendingRef = useRef(false);
+  const pinnedRowRef = useRef<HTMLElement | null>(null);
   const historyRef = useRef<HTMLDivElement>(null);
   const addRef = useRef<HTMLDivElement>(null);
   // Current values for the "Ask the agent" effect — kept out of deps,
@@ -175,8 +183,22 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       if (last?.role === 'assistant' && last.streaming) {
         return [...prev.slice(0, -1), { ...last, content: last.content + token }];
       }
+      // The model started writing the text reply — pin the view to the top
+      // edge of the new bubble (see the scroll effect).
+      anchorPendingRef.current = true;
       return [...prev, { id: nextId++, role: 'assistant', content: token, streaming: true }];
     });
+  }, []);
+
+  // The single place where a user message enters the feed: it also re-arms
+  // following the bottom for the tool phase of the new turn and releases the
+  // extra height reserved for the previous reply.
+  const pushUserMessage = useCallback((content: string) => {
+    scrollModeRef.current = 'follow';
+    anchorPendingRef.current = false;
+    pinnedRowRef.current?.style.removeProperty('min-height');
+    pinnedRowRef.current = null;
+    setMessages((prev) => [...prev, { id: nextId++, role: 'user', content }]);
   }, []);
 
   const finalizeAssistant = useCallback((content: string, toolCalls?: ToolCallView[]) => {
@@ -185,12 +207,17 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       if (last?.role === 'assistant' && last.streaming) {
         return [...prev.slice(0, -1), { ...last, content, streaming: false, toolCalls: [...(last.toolCalls ?? []), ...(toolCalls ?? [])] }];
       }
+      // A text reply without streaming (e.g. a drafted plan) — pin to its top.
+      anchorPendingRef.current = true;
       return [...prev, { id: nextId++, role: 'assistant', content, toolCalls }];
     });
   }, []);
 
   // Tool card: 'running' — a read-only call is executing (tool_start),
-  // 'pending' — a mutating one awaits approval (tool_pending).
+  // 'pending' — a mutating one awaits approval (tool_pending). A call also
+  // (re)arms following the bottom: the tool phase keeps the new cards in
+  // view; a call landing mid-answer releases the reply's pinned height,
+  // otherwise the follow would scroll into the reserved whitespace.
   const addToolCard = useCallback((
     callId: string,
     name: string,
@@ -198,6 +225,9 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     status: 'running' | 'pending',
     server?: string,
   ) => {
+    scrollModeRef.current = 'follow';
+    pinnedRowRef.current?.style.removeProperty('min-height');
+    pinnedRowRef.current = null;
     setMessages((prev) => {
       const last = prev[prev.length - 1];
       const toolCall: ToolCallView = { callId, name, args, status, server };
@@ -365,6 +395,12 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     setDecidedCalls(new Set());
     setLiveUsage(null);
     setSuggestion('');
+    // A dialogue switch re-arms following: the history loaded below lands at
+    // the bottom, and a run in progress keeps its tool cards in view.
+    scrollModeRef.current = 'follow';
+    anchorPendingRef.current = false;
+    pinnedRowRef.current?.style.removeProperty('min-height');
+    pinnedRowRef.current = null;
 
     void api<{ dialogue: Dialogue }>(`/api/ai/dialogues/${encodeURIComponent(activeDialogueId)}`)
       .then(({ dialogue }) => {
@@ -387,7 +423,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       const pending = pendingSendRef.current;
       if (pending && pending.dialogueId === activeDialogueId) {
         pendingSendRef.current = null;
-        setMessages((prev) => [...prev, { id: nextId++, role: 'user', content: pending.content }]);
+        pushUserMessage(pending.content);
         setPlanReady(false);
         ws.send(JSON.stringify({ type: 'message', content: pending.content, planMode: false }));
       }
@@ -527,6 +563,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     // prompt language. A mid-stream break on this rare action is acceptable.
     lang,
     pushAssistantToken,
+    pushUserMessage,
     finalizeAssistant,
     addToolCard,
     updateTool,
@@ -534,8 +571,39 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     refreshDialogues,
   ]);
 
+  // Scroll model: while the agent is in the tool phase, the feed follows the
+  // bottom (new call cards stay in view); as soon as the model starts writing
+  // the text reply, the view is pinned once to the top edge of that message —
+  // the reply is read from the beginning, scrolling down manually. A freshly
+  // loaded dialogue history lands at the bottom (follow is the default mode).
   useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
+    const list = listRef.current;
+    if (!list || messages.length === 0) return;
+    if (anchorPendingRef.current) {
+      // The pin target is the bubble that was just created — the last
+      // assistant row of the feed.
+      const rows = list.querySelectorAll<HTMLElement>('.chat-row.assistant');
+      const row = rows[rows.length - 1];
+      if (!row) return; // not committed yet — retried on the next change
+      anchorPendingRef.current = false;
+      scrollModeRef.current = 'off';
+      // Reserve a viewport of height for the reply: a just-born one-line
+      // bubble cannot be pinned to the top — the scroll clamps to the
+      // content bottom and the reply would stick to the bottom edge while
+      // streaming. The extra height is released on the next sent message or
+      // dialogue switch.
+      pinnedRowRef.current?.style.removeProperty('min-height');
+      row.style.minHeight = `${list.clientHeight}px`;
+      pinnedRowRef.current = row;
+      list.scrollTo({
+        top: row.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop,
+        behavior: 'smooth',
+      });
+      return;
+    }
+    if (scrollModeRef.current === 'follow') {
+      list.scrollTo({ top: list.scrollHeight });
+    }
   }, [messages]);
 
   // History dropdown: closes on an outside click and on Escape.
@@ -648,14 +716,14 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       ? agentRequest.text
       : terminalContextMessage(t, agentRequest.text, profile.name);
     if (connectedRef.current && !runningRef.current && activeDialogueIdRef.current) {
-      setMessages((prev) => [...prev, { id: nextId++, role: 'user', content }]);
+      pushUserMessage(content);
       setPlanReady(false);
       sendWs({ type: 'message', content, planMode });
     } else {
       setInput(content);
     }
     onAgentRequestConsumed?.();
-  }, [agentRequest, planMode, sendWs, onAgentRequestConsumed, profile.name, showError, startNewDialogue, t]);
+  }, [agentRequest, planMode, sendWs, pushUserMessage, onAgentRequestConsumed, profile.name, showError, startNewDialogue, t]);
 
   // "→ SQL" from a sql block of a reply: the SQL goes to the console editor of
   // the right profile, App switches to the "Databases" tab.
@@ -705,7 +773,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   const send = () => {
     const content = input.trim();
     if (!content || !connected || running || !activeDialogueId) return;
-    setMessages((prev) => [...prev, { id: nextId++, role: 'user', content }]);
+    pushUserMessage(content);
     setInput('');
     setPlanReady(false);
     setSuggestion('');
@@ -738,7 +806,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       (targetId !== profile.id ? t('agent.auditPromptServer', { name: targetName }) : '') +
       (password ? t('agent.auditPromptPrivileged') : '') +
       t('agent.auditPromptTail');
-    setMessages((prev) => [...prev, { id: nextId++, role: 'user', content }]);
+    pushUserMessage(content);
     setPlanReady(false);
     // planMode: false — the audit starts right away, bypassing planning mode.
     sendWs({ type: 'message', content, planMode: false });
