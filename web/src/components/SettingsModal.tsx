@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { fetchSettings, updateSettings } from '../api';
-import type { AiSettingsStatus } from '../api';
+import { fetchProfilePrivileges, fetchSettings, updateSettings } from '../api';
+import type { AgentApprovalMode, AiSettingsStatus, ProfilePrivileges, SettingsStatus } from '../api';
 import { PROVIDERS, type AiProvider } from '../ai-providers';
 import type { AlertsSettings } from '../alerts';
 import { AiCostsPage } from '../pages/AiCostsPage';
@@ -39,6 +39,8 @@ interface Props {
   onSaveAlertsSettings: (s: AlertsSettings) => void;
   showError: (msg: string) => void;
   showSuccess: (msg: string) => void;
+  /** The active profile id — the privileges probe when enabling 'never'; null — skip the probe. */
+  activeProfileId: string | null;
   onClose: () => void;
 }
 
@@ -56,19 +58,24 @@ export function SettingsModal({
   onSaveAlertsSettings,
   showError,
   showSuccess,
+  activeProfileId,
   onClose,
 }: Props) {
   const { lang, setLang, t } = useT();
   const [section, setSection] = useState<SettingsSection>('interface');
+  // The access-level confirmation is rendered inside the "AI agent" section,
+  // but the state lives here: while it is open, Escape closes that modal —
+  // not the settings one.
+  const [accessConfirmOpen, setAccessConfirmOpen] = useState(false);
 
   // Close on Escape (✕ and overlay clicks are handled by the shared Modal).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !accessConfirmOpen) onClose();
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+  }, [onClose, accessConfirmOpen]);
 
   return (
     <Modal title={t('app.settings')} onClose={onClose} wide className="settings-modal">
@@ -121,7 +128,15 @@ export function SettingsModal({
           </section>
         )}
         {section === 'security' && <PasswordSection showError={showError} showSuccess={showSuccess} />}
-        {section === 'ai' && <AiSection showError={showError} showSuccess={showSuccess} />}
+        {section === 'ai' && (
+          <AiSection
+            showError={showError}
+            showSuccess={showSuccess}
+            activeProfileId={activeProfileId}
+            confirmOpen={accessConfirmOpen}
+            setConfirmOpen={setAccessConfirmOpen}
+          />
+        )}
         {section === 'ai-costs' && <AiCostsPage visible />}
         {section === 'alerts' && (
           <section className="settings-section">
@@ -216,16 +231,48 @@ function PasswordSection({ showError, showSuccess }: { showError: (msg: string) 
   );
 }
 
+// The stable render order of the access-level radio group and its i18n keys
+// (hoisted — the group re-renders on every radio change).
+const APPROVAL_MODES = ['always', 'needed', 'never'] as const;
+
+const MODE_TITLE_KEYS: Record<AgentApprovalMode, I18nKey> = {
+  always: 'settings.accessLevelAlways',
+  needed: 'settings.accessLevelNeeded',
+  never: 'settings.accessLevelNever',
+};
+
+const MODE_DESC_KEYS: Record<AgentApprovalMode, I18nKey> = {
+  always: 'settings.accessLevelAlwaysDesc',
+  needed: 'settings.accessLevelNeededDesc',
+  never: 'settings.accessLevelNeverDesc',
+};
+
 /**
- * The "AI agent" section: replacing the AI config (epic 23). The status is
- * fetched with GET on mount (every opening of the section — a fresh
- * snapshot), the PUT response refreshes the status. The key is write-only:
- * an empty field keeps it on a model change; typing replaces it, and
- * "Clear key" sends aiApiKey: null (the agent becomes unavailable).
+ * The "AI agent" section: replacing the AI config (epic 23) and the agent
+ * access level (docs/agent-access-levels-plan.md). The status is fetched
+ * with GET on mount (every opening of the section — a fresh snapshot), the
+ * PUT response refreshes the status. The key is write-only: an empty field
+ * keeps it on a model change; typing replaces it, and "Clear key" sends
+ * aiApiKey: null (the agent becomes unavailable). The access level is a
+ * standalone patch; 'never' goes through the confirmation modal.
  */
-function AiSection({ showError, showSuccess }: { showError: (msg: string) => void; showSuccess: (msg: string) => void }) {
+function AiSection({
+  showError,
+  showSuccess,
+  activeProfileId,
+  confirmOpen,
+  setConfirmOpen,
+}: {
+  showError: (msg: string) => void;
+  showSuccess: (msg: string) => void;
+  activeProfileId: string | null;
+  /** The 'never' confirmation is open — the outer modal's Escape is muted. */
+  confirmOpen: boolean;
+  setConfirmOpen: (open: boolean) => void;
+}) {
   const { t } = useT();
   const [status, setStatus] = useState<AiSettingsStatus | null>(null);
+  const [approvalMode, setApprovalMode] = useState<AgentApprovalMode>('always');
   const [loadError, setLoadError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -236,9 +283,11 @@ function AiSection({ showError, showSuccess }: { showError: (msg: string) => voi
   const [customBase, setCustomBase] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
 
-  // Server status → form (preset, model, base for custom).
-  const applyStatus = useCallback((ai: AiSettingsStatus) => {
-    setStatus(ai);
+  // Server status → form (preset, model, base for custom) + the access level.
+  const applyStatus = useCallback((s: SettingsStatus) => {
+    setStatus(s.ai);
+    setApprovalMode(s.agentApprovalMode);
+    const ai = s.ai;
     const p = ai.provider ?? 'deepseek';
     setProvider(p);
     // Without a provider, the server base/model are runtime defaults
@@ -255,7 +304,7 @@ function AiSection({ showError, showSuccess }: { showError: (msg: string) => voi
       try {
         const s = await fetchSettings();
         if (cancelled) return;
-        applyStatus(s.ai);
+        applyStatus(s);
         setLoadError('');
       } catch (err) {
         if (cancelled) return;
@@ -297,7 +346,7 @@ function AiSection({ showError, showSuccess }: { showError: (msg: string) => voi
         aiApiBase: base,
         aiModel: modelName,
       } : { aiModel: modelName });
-      applyStatus(res.ai);
+      applyStatus(res);
       setApiKey('');
       showSuccess(t('settings.aiSaved'));
     } catch (err) {
@@ -312,7 +361,7 @@ function AiSection({ showError, showSuccess }: { showError: (msg: string) => voi
     setAiBusy(true);
     try {
       const res = await updateSettings({ aiApiKey: null });
-      applyStatus(res.ai);
+      applyStatus(res);
       setApiKey('');
       showSuccess(t('settings.keyCleared'));
     } catch (err) {
@@ -320,6 +369,30 @@ function AiSection({ showError, showSuccess }: { showError: (msg: string) => voi
     } finally {
       setAiBusy(false);
     }
+  };
+
+  // Access level: always/needed apply immediately (a standalone patch);
+  // 'never' opens the confirmation modal — the radio moves only on success.
+  // A single in-flight PUT: two overlapping requests could arrive at the
+  // server in an order different from the clicks and flip the mode twice.
+  const [modeBusy, setModeBusy] = useState(false);
+  const selectMode = (mode: AgentApprovalMode) => {
+    if (mode === approvalMode || modeBusy) return;
+    if (mode === 'never') {
+      setConfirmOpen(true);
+      return;
+    }
+    setModeBusy(true);
+    void (async () => {
+      try {
+        const res = await updateSettings({ agentApprovalMode: mode });
+        setApprovalMode(res.agentApprovalMode);
+      } catch (err) {
+        showError((err as Error).message);
+      } finally {
+        setModeBusy(false);
+      }
+    })();
   };
 
   if (loadError) {
@@ -429,6 +502,148 @@ function AiSection({ showError, showSuccess }: { showError: (msg: string) => voi
           )}
         </div>
       </form>
+
+      <div className="access-level-block">
+        <span className="field-label">{t('settings.accessLevel')}</span>
+        <div className="access-level-group" role="radiogroup" aria-label={t('settings.accessLevel')}>
+          {APPROVAL_MODES.map((mode) => (
+            <label key={mode} className={`access-level-option${approvalMode === mode ? ' active' : ''}`}>
+              <input
+                type="radio"
+                name="agent-approval-mode"
+                checked={approvalMode === mode}
+                disabled={modeBusy}
+                onChange={() => selectMode(mode)}
+              />
+              <span className="access-level-text">
+                <span className="access-level-title">{t(MODE_TITLE_KEYS[mode])}</span>
+                <span className="access-level-desc">{t(MODE_DESC_KEYS[mode])}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {confirmOpen && (
+        <AgentAccessConfirm
+          activeProfileId={activeProfileId}
+          onEnabled={(mode) => {
+            setApprovalMode(mode);
+            setConfirmOpen(false);
+          }}
+          showError={showError}
+          onClose={() => setConfirmOpen(false)}
+        />
+      )}
     </section>
+  );
+}
+
+/**
+ * The confirmation modal for enabling the 'never' access level
+ * (docs/agent-access-levels-plan.md). Lazily probes the active profile's
+ * privileges: root/sudo (or a failed probe — fail-closed UX) show the strong
+ * warning with the mandatory "I understand the risks" checkbox. While the
+ * probe is in flight the whole decision is locked: the user must see the
+ * final warning strength before acknowledging anything. No profile — the
+ * strong warning too (the privileges are unknown). Cancel keeps the previous
+ * mode; the server rejects 'never' without riskAcknowledged.
+ */
+function AgentAccessConfirm({
+  activeProfileId,
+  onEnabled,
+  showError,
+  onClose,
+}: {
+  activeProfileId: string | null;
+  onEnabled: (mode: AgentApprovalMode) => void;
+  showError: (msg: string) => void;
+  onClose: () => void;
+}) {
+  const { t } = useT();
+  const [privileges, setPrivileges] = useState<ProfilePrivileges | null>(null);
+  const [probeFailed, setProbeFailed] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!activeProfileId) return;
+    let cancelled = false;
+    fetchProfilePrivileges(activeProfileId)
+      .then((p) => {
+        if (!cancelled) setPrivileges(p);
+      })
+      .catch(() => {
+        if (!cancelled) setProbeFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProfileId]);
+
+  // Escape closes the confirmation, not the settings modal behind it (the
+  // outer handler is muted while this modal is open).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  // The probe has been sent and has not answered yet — the decision is locked.
+  const probePending = Boolean(activeProfileId) && !probeFailed && privileges === null;
+  // Fail-closed: no profile, a failed probe, root or sudo all mean the strong
+  // warning with the acknowledgement checkbox.
+  const privileged = probeFailed || !activeProfileId || Boolean(privileges?.isRoot) || Boolean(privileges?.sudo);
+  const canEnable = !busy && !probePending && (!privileged || acknowledged);
+
+  const enable = async () => {
+    setBusy(true);
+    try {
+      const res = await updateSettings({ agentApprovalMode: 'never', riskAcknowledged: true });
+      onEnabled(res.agentApprovalMode);
+    } catch (err) {
+      // 400 (e.g. the server-side gate): show the text, the radio stays on
+      // the previous mode.
+      showError((err as Error).message);
+      onClose();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title={t('settings.accessLevelConfirmTitle')} onClose={onClose}>
+      {probeFailed ? (
+        <p className="access-level-warning">{t('settings.accessLevelProbeFailed')}</p>
+      ) : !activeProfileId ? (
+        <p className="access-level-warning">{t('settings.accessLevelConfirmUnknown')}</p>
+      ) : probePending ? (
+        <p className="muted">{t('common.loading')}</p>
+      ) : privileges!.isRoot || privileges!.sudo ? (
+        <p className="access-level-warning">{t('settings.accessLevelConfirmRoot')}</p>
+      ) : (
+        <p className="muted">{t('settings.accessLevelConfirmGeneric')}</p>
+      )}
+      {privileged && !probePending && (
+        <label className="access-level-ack">
+          <input
+            type="checkbox"
+            checked={acknowledged}
+            onChange={(e) => setAcknowledged(e.target.checked)}
+          />
+          {t('settings.accessLevelRiskAck')}
+        </label>
+      )}
+      <div className="modal-actions">
+        <button className="btn btn-ghost" onClick={onClose}>
+          {t('common.cancel')}
+        </button>
+        <button className="btn btn-danger" disabled={!canEnable} onClick={() => void enable()}>
+          {busy ? t('settings.saving') : t('settings.accessLevelEnable')}
+        </button>
+      </div>
+    </Modal>
   );
 }

@@ -862,6 +862,7 @@ export default function App() {
           onSaveAlertsSettings={handleAlertsSettingsSaved}
           showError={showError}
           showSuccess={showSuccess}
+          activeProfileId={activeProfileId || null}
           onClose={() => setShowSettings(false)}
         />
       )}

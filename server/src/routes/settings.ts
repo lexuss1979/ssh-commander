@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import {
+  getAgentApprovalMode,
   getAiSettings,
   hashPassword,
   updateSettings,
@@ -33,6 +34,9 @@ function settingsStatus() {
       // Honest search status, including the env override for non-DeepSeek.
       searchAvailable: isSearchConfigured(),
     },
+    // The agent access level at the root, not inside `ai` — it is not about
+    // the provider (docs/agent-access-levels-plan.md).
+    agentApprovalMode: getAgentApprovalMode(),
   };
 }
 
@@ -69,19 +73,57 @@ const putBodySchema = z
       .trim()
       .refine((v) => !v || !/\s/.test(v), 'Модель не может содержать пробелы')
       .optional(),
+    agentApprovalMode: z
+      .enum(['always', 'needed', 'never'], {
+        errorMap: () => ({ message: 'Уровень доступа агента должен быть always, needed или never' }),
+      })
+      .optional(),
+    // One-shot request field, never persisted: the server-side gate for
+    // enabling the 'never' mode (docs/agent-access-levels-plan.md).
+    riskAcknowledged: z.literal(true, {
+      errorMap: () => ({ message: 'riskAcknowledged должен быть true' }),
+    }).optional(),
   })
   .superRefine((v, ctx) => {
     const hasPasswordChange = v.currentPassword !== undefined || v.newPassword !== undefined;
     const otherAiPresent =
       v.aiProvider !== undefined || v.aiApiBase !== undefined || v.aiModel !== undefined;
     const hasAiChange = v.aiApiKey !== undefined || otherAiPresent;
-    if (!hasPasswordChange && !hasAiChange) {
+    const hasModeChange = v.agentApprovalMode !== undefined;
+    if (!hasPasswordChange && !hasAiChange && !hasModeChange) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: [],
         message: 'Нечего менять: передайте смену пароля или AI-конфиг',
       });
       return;
+    }
+    // The access-level patch is standalone (like the model-only change): the
+    // settings modal sends the sections separately, a mixed body is a client
+    // bug rather than an intent.
+    if (hasModeChange && (hasPasswordChange || hasAiChange)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['agentApprovalMode'],
+        message: 'Смена уровня доступа агента передаётся отдельно от других настроек',
+      });
+    }
+    // The acknowledgement belongs only to enabling 'never'.
+    if (v.riskAcknowledged !== undefined && v.agentApprovalMode !== 'never') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['riskAcknowledged'],
+        message: 'riskAcknowledged передаётся только вместе с agentApprovalMode: never',
+      });
+    }
+    // Full Access is gated server-side: without the UI checkbox the mode
+    // does not change. Every re-enable requires a fresh acknowledgement.
+    if (hasModeChange && v.agentApprovalMode === 'never' && v.riskAcknowledged !== true) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['agentApprovalMode'],
+        message: 'Подтвердите осознание рисков',
+      });
     }
     // Password changes come in pairs: both the current and the new one are required.
     if (hasPasswordChange && (v.currentPassword === undefined || v.newPassword === undefined)) {
@@ -149,6 +191,8 @@ const putBodySchema = z
     // Trailing '/' stripped — same as config.ts and setup.
     aiApiBase: v.aiApiBase ? v.aiApiBase.replace(/\/+$/, '') : undefined,
     aiModel: v.aiModel,
+    agentApprovalMode: v.agentApprovalMode,
+    riskAcknowledged: v.riskAcknowledged,
   }));
 
 settingsRouter.put('/', (req, res) => {
@@ -159,7 +203,15 @@ settingsRouter.put('/', (req, res) => {
       .json({ error: parsed.error.issues[0]?.message ?? 'Некорректные данные' });
     return;
   }
-  const { currentPassword, newPassword, aiApiKey, aiProvider, aiApiBase, aiModel } = parsed.data;
+  const {
+    currentPassword,
+    newPassword,
+    aiApiKey,
+    aiProvider,
+    aiApiBase,
+    aiModel,
+    agentApprovalMode,
+  } = parsed.data;
   const modelOnly = aiApiKey === undefined && aiProvider === undefined && aiApiBase === undefined && aiModel !== undefined;
   if (modelOnly && !getAiSettings().apiKey) {
     res.status(400).json({ error: 'Сначала задайте ключ API и AI-конфиг' });
@@ -170,6 +222,11 @@ settingsRouter.put('/', (req, res) => {
     return;
   }
   try {
+    // The access-level patch: riskAcknowledged was validated by superRefine
+    // and is never persisted (a one-shot request field, docs/agent-access-levels-plan.md).
+    if (agentApprovalMode !== undefined) {
+      updateSettings({ agentApprovalMode });
+    }
     if (currentPassword !== undefined && newPassword !== undefined) {
       updateSettings({ passwordHash: hashPassword(newPassword) });
     }

@@ -45,6 +45,9 @@ export function submitSetup(input: {
 // The "Settings" page (epic 23): password and AI config changes after the
 // first launch. The server never returns the API key — only the fact that it is set.
 
+/** The agent access level (docs/agent-access-levels-plan.md). */
+export type AgentApprovalMode = 'always' | 'needed' | 'never';
+
 /** Masked AI status (the GET/PUT /api/settings response). */
 export interface AiSettingsStatus {
   /** null — no provider preset selected (no key set). */
@@ -59,6 +62,7 @@ export interface AiSettingsStatus {
 
 export interface SettingsStatus {
   ai: AiSettingsStatus;
+  agentApprovalMode: AgentApprovalMode;
 }
 
 export function fetchSettings(): Promise<SettingsStatus> {
@@ -69,7 +73,9 @@ export function fetchSettings(): Promise<SettingsStatus> {
  * PUT /api/settings: password change — the currentPassword+newPassword pair;
  * model change — aiModel alone (the stored key is kept); the rest of the AI
  * config is replaced all at once; the key is write-only, aiApiKey: null
- * clears the key (agent unavailable). The response is the updated GET status.
+ * clears the key (agent unavailable); the access level is a standalone patch,
+ * 'never' additionally requires riskAcknowledged: true (server-validated,
+ * never persisted). The response is the updated GET status.
  */
 export function updateSettings(input: {
   currentPassword?: string;
@@ -78,8 +84,21 @@ export function updateSettings(input: {
   aiProvider?: AiProvider;
   aiApiBase?: string;
   aiModel?: string;
+  agentApprovalMode?: AgentApprovalMode;
+  riskAcknowledged?: true;
 }): Promise<SettingsStatus> {
   return api<SettingsStatus>('/api/settings', { method: 'PUT', body: JSON.stringify(input) });
+}
+
+/** Privileges of the profile's SSH user — picks the warning strength for enabling 'never'. */
+export interface ProfilePrivileges {
+  isRoot: boolean;
+  sudo: boolean;
+}
+
+/** Read-only probe (GET /api/profiles/:id/privileges); an error means the strong warning. */
+export function fetchProfilePrivileges(profileId: string): Promise<ProfilePrivileges> {
+  return api<ProfilePrivileges>(`/api/profiles/${encodeURIComponent(profileId)}/privileges`);
 }
 
 // Global 401 handler: App subscribes so that an expired session sends the

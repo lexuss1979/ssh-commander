@@ -14,6 +14,7 @@ import { BootstrapError, bootstrapServer } from '../services/bootstrap.js';
 import { ProfileTransferError, buildExport, importBackup } from '../services/profile-transfer.js';
 import { clearHistory } from '../services/metrics-history.js';
 import { clearNginxCaches } from '../services/nginx.js';
+import { getProfilePrivileges } from '../services/privileges.js';
 import { closeProfileConnection, testConnection } from '../ssh/manager.js';
 
 export const profilesRouter = Router();
@@ -71,6 +72,27 @@ profilesRouter.post('/test-connection', async (req, res) => {
 profilesRouter.post('/:id/reconnect', (req, res) => {
   closeProfileConnection(req.params.id);
   res.json({ ok: true });
+});
+
+/**
+ * Privileges of the profile's SSH user (root / sudo) — the agent access
+ * level UI probes it lazily to pick the warning strength when enabling the
+ * 'never' mode (docs/agent-access-levels-plan.md). The probe influences only
+ * the warning, never the availability of the mode; a transport failure → 502
+ * (the routes/metrics.ts pattern) and the frontend falls back to the strong
+ * warning (fail-closed UX).
+ */
+profilesRouter.get('/:id/privileges', async (req, res) => {
+  const profile = getProfile(req.params.id);
+  if (!profile) {
+    res.status(404).json({ error: `Profile ${req.params.id} not found` });
+    return;
+  }
+  try {
+    res.json(await getProfilePrivileges(profile));
+  } catch (err) {
+    res.status(502).json({ error: `Сервер недоступен: ${(err as Error).message}` });
+  }
 });
 
 /**

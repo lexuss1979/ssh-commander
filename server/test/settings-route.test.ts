@@ -224,10 +224,13 @@ describe('PUT /api/settings — AI config', () => {
       aiApiBase: 'https://opencode.ai/zen/go/v1/', aiModel: 'glm-5.3-flash',
     });
     expect(res.status).toBe(200);
-    const expected = { ai: {
-      provider: 'opencode-go', apiKeySet: true, apiBase: 'https://opencode.ai/zen/go/v1',
-      model: 'glm-5.3-flash', searchAvailable: false,
-    } };
+    const expected = {
+      ai: {
+        provider: 'opencode-go', apiKeySet: true, apiBase: 'https://opencode.ai/zen/go/v1',
+        model: 'glm-5.3-flash', searchAvailable: false,
+      },
+      agentApprovalMode: 'always',
+    };
     expect(await res.json()).toEqual(expected);
     expect(await (await get()).json()).toEqual(expected);
     expect(onDisk()).toMatchObject({ aiProvider: 'opencode-go', aiApiKey: 'go-secret-key' });
@@ -308,5 +311,82 @@ describe('PUT /api/settings — AI config', () => {
   it('an empty {} body → 400', async () => {
     const res = await put({});
     expect(res.status).toBe(400);
+  });
+});
+
+// The agent access level (docs/agent-access-levels-plan.md): a standalone
+// patch; enabling 'never' is gated server-side by riskAcknowledged, which is
+// validated but never persisted. The describe is deliberately last: it
+// mutates agentApprovalMode (and re-seeds — the describes above cleared the
+// AI fields and changed the password), and the exact-match GET assertions
+// above assume the default 'always'.
+describe('PUT /api/settings — agent approval mode', () => {
+  beforeAll(() => {
+    settings.saveSettings({
+      passwordHash: settings.hashPassword(PASSWORD),
+      aiProvider: 'deepseek',
+      aiApiKey: 'super-secret-key',
+      aiApiBase: 'https://api.deepseek.com/v1',
+      aiModel: 'deepseek-chat',
+    });
+  });
+
+  it('GET returns the default always while the field is absent', async () => {
+    const body = (await (await get()).json()) as { agentApprovalMode: string };
+    expect(body.agentApprovalMode).toBe('always');
+  });
+
+  it('needed is a valid standalone patch; GET reflects it', async () => {
+    const res = await put({ agentApprovalMode: 'needed' });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { agentApprovalMode: string };
+    expect(body.agentApprovalMode).toBe('needed');
+    const after = (await (await get()).json()) as { agentApprovalMode: string };
+    expect(after.agentApprovalMode).toBe('needed');
+    expect(onDisk().agentApprovalMode).toBe('needed');
+    // Other fields are untouched (merge patch).
+    expect(onDisk().aiProvider).toBe('deepseek');
+    expect(onDisk().passwordHash).toMatch(/^scrypt\$/);
+  });
+
+  it("never without riskAcknowledged → 400, the mode unchanged", async () => {
+    const res = await put({ agentApprovalMode: 'never' });
+    expect(res.status).toBe(400);
+    expect(await errorOf(res)).toContain('осознание рисков');
+    expect(onDisk().agentApprovalMode).toBe('needed');
+  });
+
+  it('never with riskAcknowledged → 200, the flag is not persisted, a re-enable needs a fresh one', async () => {
+    const res = await put({ agentApprovalMode: 'never', riskAcknowledged: true });
+    expect(res.status).toBe(200);
+    expect((await res.json() as { agentApprovalMode: string }).agentApprovalMode).toBe('never');
+    const disk = onDisk();
+    expect(disk.agentApprovalMode).toBe('never');
+    expect('riskAcknowledged' in disk).toBe(false);
+    // Back to a safe mode...
+    expect((await put({ agentApprovalMode: 'always' })).status).toBe(200);
+    // ...and 'never' again requires a fresh acknowledgement (a stale flag
+    // from the earlier request would not count — it is never stored).
+    expect((await put({ agentApprovalMode: 'never' })).status).toBe(400);
+  });
+
+  it('riskAcknowledged without the never mode → 400', async () => {
+    const res = await put({ riskAcknowledged: true });
+    expect(res.status).toBe(400);
+    const res2 = await put({ agentApprovalMode: 'needed', riskAcknowledged: true });
+    expect(res2.status).toBe(400);
+  });
+
+  it.each(['sometimes', 42, null])('an invalid agentApprovalMode %s → 400', async (value) => {
+    const res = await put({ agentApprovalMode: value });
+    expect(res.status).toBe(400);
+  });
+
+  it('the mode patch mixed with other settings → 400, nothing applied', async () => {
+    const before = onDisk();
+    expect((await put({ agentApprovalMode: 'needed', aiModel: 'other-model' })).status).toBe(400);
+    expect((await put({ agentApprovalMode: 'needed', currentPassword: PASSWORD, newPassword: 'whatever-999' })).status).toBe(400);
+    // The byte-equality of the on-disk settings proves no partial apply.
+    expect(onDisk()).toEqual(before);
   });
 });

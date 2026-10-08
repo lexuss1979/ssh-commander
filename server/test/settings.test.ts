@@ -317,6 +317,38 @@ describe('updateSettings (epic 23, routes/settings.ts)', () => {
     settings.updateSettings({ aiApiKey: 'sk-seed' });
     expect(settings.getSettings()).toEqual({ aiApiKey: 'sk-seed' });
   });
+
+  it('agentApprovalMode merges and the absence of the field reads as always', async () => {
+    cleanDir();
+    const settings = await freshSettings();
+    settings.saveSettings({ ...fullSettings });
+    expect(settings.getAgentApprovalMode()).toBe('always');
+
+    settings.updateSettings({ agentApprovalMode: 'needed' });
+    expect(settings.getAgentApprovalMode()).toBe('needed');
+    expect(onDisk()).toEqual({ ...fullSettings, agentApprovalMode: 'needed' });
+
+    // null removes the field — back to the default.
+    settings.updateSettings({ agentApprovalMode: null });
+    expect(settings.getAgentApprovalMode()).toBe('always');
+    expect('agentApprovalMode' in onDisk()).toBe(false);
+  });
+
+  it('the schema rejects an unknown agentApprovalMode (the corrupt-guard)', async () => {
+    cleanDir();
+    writeFileSync(
+      path.join(dataDir, 'settings.json'),
+      JSON.stringify({ agentApprovalMode: 'sometimes' }),
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const fresh = await freshSettings();
+    expect(fresh.getSettings()).toBeNull();
+    expect(fresh.getAgentApprovalMode()).toBe('always');
+    expect(
+      readdirSync(dataDir).filter((f) => f.startsWith('settings.json.corrupt-')),
+    ).toHaveLength(1);
+    warn.mockRestore();
+  });
 });
 
 describe('the onboarding trigger', () => {

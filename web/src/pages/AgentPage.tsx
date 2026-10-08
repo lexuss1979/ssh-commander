@@ -48,6 +48,8 @@ interface ToolCallView {
   truncated?: boolean;
   /** Server name from the tool_start/tool_pending/tool_result events (badge). */
   server?: string;
+  /** A mutating call that ran without confirmation (a mode other than 'always'). */
+  autoApproved?: boolean;
 }
 
 interface ChatMessageView {
@@ -224,13 +226,14 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     args: Record<string, unknown>,
     status: 'running' | 'pending',
     server?: string,
+    autoApproved?: boolean,
   ) => {
     scrollModeRef.current = 'follow';
     pinnedRowRef.current?.style.removeProperty('min-height');
     pinnedRowRef.current = null;
     setMessages((prev) => {
       const last = prev[prev.length - 1];
-      const toolCall: ToolCallView = { callId, name, args, status, server };
+      const toolCall: ToolCallView = { callId, name, args, status, server, autoApproved };
       if (last?.role === 'assistant') {
         return [...prev.slice(0, -1), { ...last, toolCalls: [...(last.toolCalls ?? []), toolCall] }];
       }
@@ -471,6 +474,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
             (msg.args ?? {}) as Record<string, unknown>,
             'running',
             typeof msg.server === 'string' && msg.server ? msg.server : undefined,
+            msg.autoApproved === true,
           );
           break;
         case 'tool_pending':
@@ -1407,6 +1411,7 @@ function ToolCard({ tool, decided, registerCard }: {
       <div className="tool-card-row">
         <span className={`tool-dot ${tool.status}`} />
         <span className="tool-name" title={name}>{name}</span>
+        {tool.autoApproved && <span className="tool-auto">{t('agent.autoApproved')}</span>}
         {tool.server && tool.name !== 'connect_server' && (
           <span className="tool-server" title={t('agent.serverBadgeTitle', { name: tool.server })}>
             {tool.server}

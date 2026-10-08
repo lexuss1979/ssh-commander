@@ -4,11 +4,12 @@ import { streamChatCompletion, type ChatMessage, type TokenUsage, type ToolCall 
 import { sanitizeMessages } from './messages.js';
 import { buildPlanRequestMessages, toolsForRequest } from './plan.js';
 import { getToolDefs, isAutoRunnable } from './tools.js';
+import { needsApproval } from './approval.js';
 import { checkReadOnlyCommand } from './guard.js';
 import { redactDockerEnv, redactSecrets } from './redact.js';
 import { readMemory, writeMemory, memoryPromptBlock } from './memory.js';
 import { isSearchConfigured, searchWeb, type WebSearchUsage } from './web-search.js';
-import { getAiSettings } from '../services/settings.js';
+import { getAgentApprovalMode, getAiSettings } from '../services/settings.js';
 import { computeCostUsd } from './pricing.js';
 import { recordUsage, usageTotalsByDialogue } from './usage.js';
 import {
@@ -610,15 +611,29 @@ export class AgentSession {
         for (const call of calls) {
           if (this.stopRequested) break;
           const { name, args } = this.parseCall(call);
-          // Auto-run — only a read-only call with no signs of reading
-          // secrets (ai/tools.ts): `read_file .env` goes to approve.
-          const readOnly = isAutoRunnable(name, args);
+          // The approval decision (docs/agent-access-levels-plan.md): made
+          // per call by needsApproval — the mode is read from settings here,
+          // so a mode change acts immediately, without reconnecting the WS.
+          // Read-only calls without signs of reading secrets are auto in
+          // every mode (`read_file .env` still goes to approve).
+          const needsAsk = needsApproval(getAgentApprovalMode(), name, args);
+          // A mutating call that runs without approve (a mode other than
+          // 'always'): the tool_start event carries autoApproved for the UI
+          // badge — the user must see that no confirmation happened.
+          const autoApproved = !needsAsk && !isAutoRunnable(name, args);
           const server = this.serverLabelFor(name, args);
 
-          if (readOnly) {
-            // Live visibility of a read-only call: a "running…" card until
+          if (!needsAsk) {
+            // Live visibility of an auto-run call: a "running…" card until
             // the result (no approval buttons — unlike tool_pending).
-            this.send({ type: 'tool_start', callId: call.id, name, args, server });
+            this.send({
+              type: 'tool_start',
+              callId: call.id,
+              name,
+              args,
+              server,
+              ...(autoApproved ? { autoApproved: true } : {}),
+            });
             const result = await this.runTool(name, args);
             this.send({
               type: 'tool_result',

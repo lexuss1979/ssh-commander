@@ -3202,6 +3202,18 @@ body.resizing-agent {
   text-overflow: ellipsis;
 }
 
+/* "auto" badge: a mutating tool ran without confirmation (an access level
+   other than 'always', the autoApproved flag of the tool_start event) */
+.tool-auto {
+  flex-shrink: 0;
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--warn);
+  border: 1px solid var(--warn-soft-border);
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
 .tool-status {
   flex-shrink: 0;
   font-size: 11px;
@@ -5623,4 +5635,87 @@ body.resizing-agent {
   display: flex;
   gap: 8px;
   margin-top: 4px;
+}
+
+/* Agent access level (docs/agent-access-levels-plan.md): a radio group of
+   three modes in the "AI agent" section of the settings modal. */
+.access-level-block {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.access-level-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.access-level-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.access-level-option.active {
+  border-color: var(--accent-soft-border);
+  background: var(--accent-soft);
+}
+
+/* The global `input { width: 100% }` would stretch the radio. */
+.access-level-option input[type='radio'] {
+  width: auto;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.access-level-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.access-level-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.access-level-desc {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+/* The strong warning of the 'never' confirmation modal (root/sudo or a
+   failed probe) */
+.access-level-warning {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--danger);
+  background: var(--danger-soft-bg);
+  border: 1px solid var(--danger-soft-border);
+  border-radius: 8px;
+}
+
+.access-level-ack {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* The global `input { width: 100% }` would stretch the checkbox. */
+.access-level-ack input[type='checkbox'] {
+  width: auto;
+  flex-shrink: 0;
 }

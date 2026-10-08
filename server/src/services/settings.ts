@@ -3,6 +3,9 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import { config } from '../config.js';
+// Type-only import: erased at compile time, so the runtime chain stays
+// acyclic (approval → tools → web-search → settings).
+import type { AgentApprovalMode } from '../ai/approval.js';
 
 /**
  * Application settings (`data/settings.json`), plan in
@@ -40,6 +43,9 @@ export interface AppSettings {
   aiApiBase?: string;
   /** Agent model: a provider preset without a model does not work. */
   aiModel?: string;
+  /** Agent access level (docs/agent-access-levels-plan.md): how often
+   * mutating tools pause for a confirmation. Absent = 'always'. */
+  agentApprovalMode?: AgentApprovalMode;
 }
 
 const settingsSchema = z.object({
@@ -48,6 +54,7 @@ const settingsSchema = z.object({
   aiApiKey: z.string().optional(),
   aiApiBase: z.string().optional(),
   aiModel: z.string().optional(),
+  agentApprovalMode: z.enum(['always', 'needed', 'never']).optional(),
 });
 
 // undefined — not read yet; null — no file (or a broken one → corrupt = true).
@@ -212,6 +219,15 @@ export function getAiSettings(): {
     apiBase: s?.aiApiBase ?? (s?.aiProvider === 'opencode-go' ? OPENCODE_GO_API_BASE : DEFAULT_API_BASE),
     model: s?.aiModel ?? (s?.aiProvider === 'opencode-go' ? OPENCODE_GO_MODEL : DEFAULT_MODEL),
   };
+}
+
+/**
+ * The agent access level (docs/agent-access-levels-plan.md); the absence of
+ * the field in settings.json is the default 'always'. Read per tool call in
+ * the agent loop — a mode change acts immediately, without a WS reconnect.
+ */
+export function getAgentApprovalMode(): AgentApprovalMode {
+  return load()?.agentApprovalMode ?? 'always';
 }
 
 /**
