@@ -4,12 +4,12 @@ import { streamChatCompletion, type ChatMessage, type TokenUsage, type ToolCall 
 import { sanitizeMessages } from './messages.js';
 import { buildPlanRequestMessages, toolsForRequest } from './plan.js';
 import { getToolDefs, isAutoRunnable } from './tools.js';
-import { needsApproval } from './approval.js';
+import { needsApproval, type AgentApprovalMode } from './approval.js';
 import { checkReadOnlyCommand } from './guard.js';
 import { redactDockerEnv, redactSecrets } from './redact.js';
 import { readMemory, writeMemory, memoryPromptBlock } from './memory.js';
 import { isSearchConfigured, searchWeb, type WebSearchUsage } from './web-search.js';
-import { getAgentApprovalMode, getAiSettings } from '../services/settings.js';
+import { getAiSettings } from '../services/settings.js';
 import { computeCostUsd } from './pricing.js';
 import { recordUsage, usageTotalsByDialogue } from './usage.js';
 import {
@@ -61,8 +61,10 @@ import {
   attachProfileToDialogue,
   createDialogue,
   detachProfileFromDialogue,
+  dialogueApprovalMode,
   getDialogue,
   saveDialogueMessages,
+  setDialogueApprovalMode,
   type Dialogue,
 } from './dialogues.js';
 
@@ -100,6 +102,11 @@ export class AgentSession {
   // Servers attached to the dialogue: the home one always, the rest via
   // connect_server (approve) or attach_server (a user action).
   private attached = new Map<string, Profile>();
+  // The dialogue's access level (docs/agent-access-levels-plan.md, v2):
+  // read from the persisted dialogue at attach, changed live by the
+  // set_approval_mode frame. Read per tool call in runLoop — a mode change
+  // acts on the next decision without touching a pending confirmation.
+  private approvalMode: AgentApprovalMode;
 
   constructor(
     private homeProfile: Profile,
@@ -111,6 +118,9 @@ export class AgentSession {
     private readonly lang: PromptLang = 'ru',
   ) {
     this.dialogueId = dialogue?.id ?? createDialogue(homeProfile.id).id;
+    // The access level comes from the dialogue ('needed' for a new one and
+    // for all dialogues without the field — the read-time migration).
+    this.approvalMode = dialogue ? dialogueApprovalMode(dialogue) : 'needed';
     this.attached.set(homeProfile.id, homeProfile);
     // Load servers saved into the dialogue by the previous session;
     // missing profiles are skipped — the dialogue keeps working.
@@ -174,6 +184,14 @@ export class AgentSession {
   /** The `servers` event — the agent panel header is synced from it. */
   notifyServers(): void {
     this.send(this.serversEvent());
+  }
+
+  /**
+   * The `approval_mode` event — sent on attach (the selector renders before
+   * the first action) and after every successful set_approval_mode.
+   */
+  notifyApprovalMode(): void {
+    this.send({ type: 'approval_mode', mode: this.approvalMode });
   }
 
   /**
@@ -358,6 +376,36 @@ export class AgentSession {
         if (!result.ok) {
           this.send({ type: 'error', message: result.error });
         }
+        break;
+      }
+      case 'set_approval_mode': {
+        // The per-dialogue access level (docs/agent-access-levels-plan.md,
+        // v2): enum-validated; 'never' additionally requires riskAcknowledged
+        // in the same frame — the server-side ack gate, the same as the v1
+        // REST route had. On success: applied to the live session (the next
+        // tool call decides by the new mode; a pending confirmation is not
+        // touched), persisted on the dialogue and broadcast back.
+        const mode = data.mode;
+        if (mode !== 'always' && mode !== 'needed' && mode !== 'never') {
+          this.send({
+            type: 'error',
+            message: aiStr(this.lang, 'invalidApprovalMode', { mode: String(mode ?? '') }),
+          });
+          break;
+        }
+        if (mode === 'never' && data.riskAcknowledged !== true) {
+          this.send({ type: 'error', message: aiStr(this.lang, 'riskAckRequired') });
+          break;
+        }
+        this.approvalMode = mode;
+        try {
+          setDialogueApprovalMode(this.dialogueId, mode);
+        } catch (err) {
+          // A persist failure must not kill the session: the mode still acts
+          // live, it just may not survive a restart (same as save()).
+          console.warn(`Failed to persist approval mode for dialogue ${this.dialogueId}:`, err);
+        }
+        this.notifyApprovalMode();
         break;
       }
       case 'stop': {
@@ -612,11 +660,11 @@ export class AgentSession {
           if (this.stopRequested) break;
           const { name, args } = this.parseCall(call);
           // The approval decision (docs/agent-access-levels-plan.md): made
-          // per call by needsApproval — the mode is read from settings here,
-          // so a mode change acts immediately, without reconnecting the WS.
-          // Read-only calls without signs of reading secrets are auto in
-          // every mode (`read_file .env` still goes to approve).
-          const needsAsk = needsApproval(getAgentApprovalMode(), name, args);
+          // per call from the session's per-dialogue mode — a mode change
+          // acts immediately, without reconnecting the WS. Read-only calls
+          // without signs of reading secrets are auto in every mode
+          // (`read_file .env` still goes to approve).
+          const needsAsk = needsApproval(this.approvalMode, name, args);
           // A mutating call that runs without approve (a mode other than
           // 'always'): the tool_start event carries autoApproved for the UI
           // badge — the user must see that no confirmation happened.
@@ -1078,6 +1126,8 @@ export function attachAgent(
   sessions.set(profile.id, session);
   session.notifyDialogue();
   session.notifyServers();
+  // The access-level selector renders before the first action.
+  session.notifyApprovalMode();
   ws.on('close', () => {
     session.onWsClose();
     if (sessions.get(profile.id) === session) {

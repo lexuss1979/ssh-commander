@@ -62,7 +62,6 @@ export interface AiSettingsStatus {
 
 export interface SettingsStatus {
   ai: AiSettingsStatus;
-  agentApprovalMode: AgentApprovalMode;
 }
 
 export function fetchSettings(): Promise<SettingsStatus> {
@@ -73,9 +72,7 @@ export function fetchSettings(): Promise<SettingsStatus> {
  * PUT /api/settings: password change — the currentPassword+newPassword pair;
  * model change — aiModel alone (the stored key is kept); the rest of the AI
  * config is replaced all at once; the key is write-only, aiApiKey: null
- * clears the key (agent unavailable); the access level is a standalone patch,
- * 'never' additionally requires riskAcknowledged: true (server-validated,
- * never persisted). The response is the updated GET status.
+ * clears the key (agent unavailable). The response is the updated GET status.
  */
 export function updateSettings(input: {
   currentPassword?: string;
@@ -84,8 +81,6 @@ export function updateSettings(input: {
   aiProvider?: AiProvider;
   aiApiBase?: string;
   aiModel?: string;
-  agentApprovalMode?: AgentApprovalMode;
-  riskAcknowledged?: true;
 }): Promise<SettingsStatus> {
   return api<SettingsStatus>('/api/settings', { method: 'PUT', body: JSON.stringify(input) });
 }

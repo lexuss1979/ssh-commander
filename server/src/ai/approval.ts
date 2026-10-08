@@ -3,16 +3,18 @@ import { isAutoRunnable } from './tools.js';
 import { isSensitivePath } from './redact.js';
 
 /**
- * Agent access levels (docs/agent-access-levels-plan.md): the user chooses
- * how often mutating tools pause for a confirmation.
+ * Agent access levels (docs/agent-access-levels-plan.md, revision v2): a
+ * per-dialogue choice of how often mutating tools pause for a confirmation.
  *
- * - `always` (default) — every mutating tool waits for approve/reject.
- * - `needed` — low-risk mutations run automatically; arbitrary shell (`exec`),
- *   attaching a server, destructive docker actions and writes to system or
- *   sensitive paths still go through approval.
+ * - `always` — every mutating tool waits for approve/reject.
+ * - `needed` (the default for new dialogues and for all pre-v2 dialogues
+ *   without the field — a deliberate, user-approved lowering of the v1
+ *   `always` bar) — low-risk mutations run automatically; arbitrary shell
+ *   (`exec`), attaching a server, destructive docker actions and writes to
+ *   system or sensitive paths still go through approval.
  * - `never` (Full Access) — everything runs without confirmations; enabled
- *   only with an explicit risk acknowledgement, validated by the server
- *   (routes/settings.ts).
+ *   only with an explicit risk acknowledgement in the same WS frame
+ *   (`set_approval_mode`, gated in ai/agent.ts).
  *
  * The mode switches off only the pause on confirmation: secret redaction,
  * the exec_readonly allow-list, timeouts and output limits stay in place in
@@ -49,8 +51,8 @@ function isSystemPath(path: string): boolean {
  * Whether this tool call must wait for the user's decision. The decision
  * point is exactly one — AgentSession.runLoop (ai/agent.ts); runTool never
  * checks approvals itself. An unknown tool fails closed: approval requested.
- * The mode is read by the caller on every call (a settings change acts
- * immediately, without reconnecting the WS).
+ * The mode is read from the session field on every call — a WS
+ * set_approval_mode acts immediately, without reconnecting.
  */
 export function needsApproval(mode: AgentApprovalMode, name: string, args: Record<string, unknown>): boolean {
   // Read-only without signs of reading secrets is auto in every mode.

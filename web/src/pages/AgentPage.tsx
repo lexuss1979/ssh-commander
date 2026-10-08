@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, formatRelativeDate, formatUsd } from '../api';
+import type { AgentApprovalMode } from '../api';
 import type {
   AgentAskMode,
   Dialogue,
@@ -9,6 +10,7 @@ import type {
   Profile,
 } from '../types';
 import { Markdown } from '../components/Markdown';
+import { AgentAccessConfirm } from '../components/AgentAccessConfirm';
 import { Modal } from '../components/Modal';
 import { TipBanner } from '../components/TipBanner';
 import { useT } from '../i18n';
@@ -16,6 +18,22 @@ import type { I18nKey, I18nParams } from '../i18n';
 import { markTipSeen } from '../tips';
 
 type TFn = (key: I18nKey, params?: I18nParams | number) => string;
+
+// The access-level selector (docs/agent-access-levels-plan.md, v2): the
+// stable render order and the i18n keys of the three modes.
+const APPROVAL_MODES = ['always', 'needed', 'never'] as const;
+
+const MODE_LABEL_KEYS: Record<AgentApprovalMode, I18nKey> = {
+  always: 'agent.accessLevelAlways',
+  needed: 'agent.accessLevelNeeded',
+  never: 'agent.accessLevelNever',
+};
+
+const MODE_DESC_KEYS: Record<AgentApprovalMode, I18nKey> = {
+  always: 'agent.accessLevelAlwaysDesc',
+  needed: 'agent.accessLevelNeededDesc',
+  never: 'agent.accessLevelNeverDesc',
+};
 
 interface Props {
   profile: Profile;
@@ -96,6 +114,23 @@ function CheckIcon() {
   );
 }
 
+// Shield icon of the access-level selector (the same shape as the audit button).
+function ShieldIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z" />
+    </svg>
+  );
+}
+
 // Template of a request built from terminal output ('explain' and 'new-dialogue' modes).
 function terminalContextMessage(
   t: (key: I18nKey, params?: I18nParams | number) => string,
@@ -136,6 +171,16 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   // The decision on a mutating call has been sent (the bar buttons stay
   // disabled until tool_result); a dialogue switch resets it.
   const [decidedCalls, setDecidedCalls] = useState<Set<string>>(() => new Set());
+  // The dialogue's access level (docs/agent-access-levels-plan.md, v2). The
+  // source of truth is the WS `approval_mode` event — the selector does not
+  // move on a click; null — the attach event has not arrived yet.
+  const [approvalMode, setApprovalMode] = useState<AgentApprovalMode | null>(null);
+  // The mode dropdown by the input field, the 'never' confirmation modal and
+  // an in-flight set_approval_mode frame (the selector is locked until the
+  // event or error settles it).
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  const [accessConfirmOpen, setAccessConfirmOpen] = useState(false);
+  const [modeSetPending, setModeSetPending] = useState(false);
   // Live spend totals of the dialogue (the WS `usage` event): updated after
   // every journal write — the badge moves during long runs, not only on
   // done (refreshDialogues). Reset on a dialogue switch.
@@ -165,6 +210,8 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   const pinnedRowRef = useRef<HTMLElement | null>(null);
   const historyRef = useRef<HTMLDivElement>(null);
   const addRef = useRef<HTMLDivElement>(null);
+  // The access-level dropdown by the input field.
+  const modeMenuRef = useRef<HTMLDivElement>(null);
   // Current values for the "Ask the agent" effect — kept out of deps,
   // so a state change does not consume the request twice.
   const connectedRef = useRef(connected);
@@ -398,6 +445,12 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     setDecidedCalls(new Set());
     setLiveUsage(null);
     setSuggestion('');
+    // The mode belongs to the dialogue: reset until the attach event of the
+    // fresh WS announces it.
+    setApprovalMode(null);
+    setModeMenuOpen(false);
+    setAccessConfirmOpen(false);
+    setModeSetPending(false);
     // A dialogue switch re-arms following: the history loaded below lands at
     // the bottom, and a run in progress keeps its tool cards in view.
     scrollModeRef.current = 'follow';
@@ -437,10 +490,13 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     ws.onclose = () => {
       setConnected(false);
       setDecidedCalls(new Set());
+      // A dropped socket will never deliver approval_mode — unlock.
+      setModeSetPending(false);
     };
     ws.onerror = () => {
       setConnected(false);
       setDecidedCalls(new Set());
+      setModeSetPending(false);
     };
     ws.onmessage = (e) => {
       let msg: Record<string, unknown>;
@@ -491,6 +547,18 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           setServersInfo({ home: String(msg.home ?? profile.id), attached });
           break;
         }
+        case 'approval_mode': {
+          // The dialogue's access level: on attach and after every accepted
+          // set_approval_mode — the selector moves only here.
+          const mode = msg.mode;
+          if (mode === 'always' || mode === 'needed' || mode === 'never') {
+            setApprovalMode(mode);
+            setModeSetPending(false);
+            // 'never' is applied — the confirmation modal did its job.
+            if (mode === 'never') setAccessConfirmOpen(false);
+          }
+          break;
+        }
         case 'usage': {
           // Cumulative dialogue totals after each spend-journal write.
           const totals = msg.totals as DialogueUsageTotals | undefined;
@@ -533,6 +601,8 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           setRunning(false);
           setPlanReady(false);
           setSuggestion('');
+          // A rejected set_approval_mode unlocks the selector.
+          setModeSetPending(false);
           const error = String(msg.message ?? tRef.current('agent.errorFallback'));
           // The error stays visible in the chat; the partial reply is no longer streaming.
           setMessages((prev) => [
@@ -647,6 +717,42 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [addOpen]);
+
+  // The access-level dropdown: closes on an outside click and on Escape.
+  useEffect(() => {
+    if (!modeMenuOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (modeMenuRef.current && !modeMenuRef.current.contains(e.target as Node)) {
+        setModeMenuOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setModeMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [modeMenuOpen]);
+
+  // The access level of the dialogue: always/needed go straight to the WS
+  // frame; 'never' opens the confirmation modal first. The selector state is
+  // driven by the approval_mode events — the frame result, not the click.
+  const selectMode = useCallback(
+    (mode: AgentApprovalMode) => {
+      setModeMenuOpen(false);
+      if (mode === approvalMode || modeSetPending) return;
+      if (mode === 'never') {
+        setAccessConfirmOpen(true);
+        return;
+      }
+      setModeSetPending(true);
+      sendWs({ type: 'set_approval_mode', mode });
+    },
+    [approvalMode, modeSetPending, sendWs],
+  );
 
   // At most one confirmation is pending at a time (the server processes calls
   // sequentially) — the bar shows exactly one pending call.
@@ -1170,15 +1276,65 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
             }
             rows={2}
           />
-          <button
-            className="btn btn-primary"
-            onClick={send}
-            disabled={!connected || running || !input.trim() || !activeDialogueId}
-          >
-            {t('agent.send')}
-          </button>
+          <div className="agent-input-bar">
+            {/* The dialogue's access level: the dropdown opens upward from
+                the input bar; disabled until the attach event announces the
+                mode (not during running — the server applies a mid-run
+                change to the next tool call). */}
+            <div className="access-select" ref={modeMenuRef}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-mini access-select-btn"
+                disabled={!connected || approvalMode === null}
+                title={t('agent.accessLevel')}
+                onClick={() => setModeMenuOpen((v) => !v)}
+              >
+                <ShieldIcon />
+                <span>{approvalMode ? t(MODE_LABEL_KEYS[approvalMode]) : '…'}</span>
+                <span className="access-select-caret">⌄</span>
+              </button>
+              {modeMenuOpen && approvalMode && (
+                <div className="access-select-menu">
+                  {APPROVAL_MODES.map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`access-select-item${approvalMode === mode ? ' active' : ''}`}
+                      disabled={modeSetPending}
+                      onClick={() => selectMode(mode)}
+                    >
+                      <span className="access-select-item-title">
+                        {t(MODE_LABEL_KEYS[mode])}
+                        {approvalMode === mode && <span className="access-select-check"> ✓</span>}
+                      </span>
+                      <span className="access-select-item-desc">{t(MODE_DESC_KEYS[mode])}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button
+              className="btn btn-primary"
+              onClick={send}
+              disabled={!connected || running || !input.trim() || !activeDialogueId}
+            >
+              {t('agent.send')}
+            </button>
+          </div>
         </div>
       </div>
+
+      {accessConfirmOpen && (
+        <AgentAccessConfirm
+          homeProfileId={homeServerId}
+          busy={modeSetPending}
+          onConfirm={() => {
+            setModeSetPending(true);
+            sendWs({ type: 'set_approval_mode', mode: 'never', riskAcknowledged: true });
+          }}
+          onClose={() => setAccessConfirmOpen(false)}
+        />
+      )}
 
       {auditOpen && (
         <Modal title={t('agent.auditTitle')} onClose={() => setAuditOpen(false)}>

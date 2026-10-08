@@ -132,18 +132,21 @@ describe('agent — a stable OpenCode Go session', () => {
   });
 
   it('Responses: a mutating tool waits for the user decision and honors reject', async () => {
+    // Arbitrary shell (`exec`) waits in every mode except `never` — the
+    // needed default (the v2 per-dialogue revision) auto-runs only
+    // low-risk mutations like write_memory.
     const captured = mockResponses([[
-      { type: 'function_call', call_id: 'write-call', name: 'write_memory', arguments: '{"content":"must not be written"}' },
+      { type: 'function_call', call_id: 'exec-call', name: 'exec', arguments: '{"command":"rm -rf /tmp/x"}' },
     ]]);
     const target = makeSession();
-    target.session.handleClientMessage({ type: 'message', content: 'обнови память' });
-    await vi.waitFor(() => expect(target.sent.some((m) => m.type === 'tool_pending' && m.callId === 'write-call')).toBe(true));
+    target.session.handleClientMessage({ type: 'message', content: 'почисти каталог' });
+    await vi.waitFor(() => expect(target.sent.some((m) => m.type === 'tool_pending' && m.callId === 'exec-call')).toBe(true));
     expect(captured).toHaveLength(1);
     expect(target.session.isRunning).toBe(true);
-    await sendMessage(target, { type: 'reject', callId: 'write-call' });
+    await sendMessage(target, { type: 'reject', callId: 'exec-call' });
     expect(captured).toHaveLength(2);
     expect(captured[1].body.input).toContainEqual({
-      type: 'function_call_output', call_id: 'write-call', output: 'Пользователь отклонил выполнение этого действия.',
+      type: 'function_call_output', call_id: 'exec-call', output: 'Пользователь отклонил выполнение этого действия.',
     });
     expect(target.sent.find((m) => m.type === 'tool_result')?.status).toBe('rejected');
   });

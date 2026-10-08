@@ -1,6 +1,6 @@
 # Уровни доступа AI-агента (Ask Always / Ask When Needed / Never Ask) — план
 
-Статус: реализовано (2026-10-08, с правками по ревью: канонизация пути `write_file` в `needed`, блокировка включения `never` до ответа probe).
+Статус: v1 реализован (2026-10-08); **v2 (per-dialogue режим) реализован** (2026-10-08, см. «Ревизия v2» внизу — она заменяет разделы про глобальную настройку; детали — `AGENTS.md` и `docs/architecture.md`).
 
 ## Зачем
 
@@ -174,3 +174,82 @@ export function needsApproval(mode: AgentApprovalMode, name: string, args: Recor
 - **Классификация путей эвристична**: `write_file` по symlink в `/etc` из `/home` не отследить. Формулировка в UI — «опасные действия — с подтверждением», без обещания полноты; `exec` (обход любой классификации) в `needed` всегда на approve.
 - **Probe sudo эвристичен**: `sudo -n true` без пароля ≠ «нет sudo» (может требовать пароль), группы — индикатор. Поэтому probe влияет только на силу предупреждения, а не на доступность режима; при сомнении (ошибка probe) — показываем сильное предупреждение.
 - **`agent-lang.test.ts`**: любые правки ru-описаний инструментов уронят тест — в этой фиче `buildToolDefs` не трогаем.
+
+---
+
+# Ревизия v2 (2026-10-08): режим доступа — per-dialogue, селектор у поля ввода
+
+v1 (глобальная настройка в `settings.json` + радиогруппа в модалке «Настройки») реализован и работает, но это ошибка дизайна: уровень доступа нужен **на конкретный диалог**, переключаемый из панели агента — дропдаун в левой части области ввода сообщения (по образцу селектора «Full access ⌄» в ai-чатах). Ревизия заменяет разделы «Принятые решения» п. 1, «Сервер» п. 2, «Web» п. 1–2 и тесты, касающиеся settings. Ядро (`ai/approval.ts`, `needsApproval`, privileges probe, confirm-модалка, бейдж «авто») **сохраняется без изменений логики**.
+
+## Решения v2 (подтверждены пользователем)
+
+1. **Режим хранится на диалоге**: поле `approvalMode?` в `ai/dialogues.ts` (persisted `data/ai-dialogues.json`). Глобальное поле `agentApprovalMode` из `settings.json` **убирается полностью** (схема, `getAgentApprovalMode()`, GET/PUT `/api/settings`, радиогруппа в SettingsModal).
+2. **Дефолт — `needed`**: новые диалоги и существующие без поля трактуются как `needed`. Это осознанное понижение барьера относительно v1 (там дефолт `always`) — зафиксировать в AGENTS.md.
+3. **Переключение — через WS** `set_approval_mode` (диалог живёт в панели с активным WS; REST для смены режима не вводим). Сервер применяет к живой сессии и персистит в диалог. Для `never` обязателен `riskAcknowledged: true` в том же фрейме — иначе WS `error`, режим не меняется.
+4. **Confirm-модалка `never` переезжает** из SettingsModal в панель агента (тот же UX: ленивый probe привилегий домашнего профиля диалога, `probePending`-блокировка, чекбокс «Я осознаю возможные риски», fail-closed). Probe — по домашнему профилю диалога (`GET /api/profiles/:id/privileges` без изменений); присоединённые серверы не пробятся (как и в v1 — зафиксировано в рисках).
+
+## Сервер
+
+### 1. `ai/dialogues.ts`
+- Zod-схема диалога: + `approvalMode: z.enum(['always','needed','never']).optional()`.
+- Хелпер `dialogueApprovalMode(d): AgentApprovalMode` → `d.approvalMode ?? 'needed'` (миграция чтением, файл не переписываем).
+- Мутатор `setDialogueApprovalMode(id, mode)` — обновить запись, `save()` (tmp+rename, corrupt-guard — уже есть).
+
+### 2. `ai/agent.ts`
+- `AgentSession`: поле `approvalMode: AgentApprovalMode`. В `attachAgent` (`agent.ts:1038+`) — из загруженного диалога через `dialogueApprovalMode`; новый диалог → `needed`.
+- Точка решения в `runLoop` (бывший `getAgentApprovalMode()`) → `this.approvalMode`, читается на каждый вызов — live-смена работает.
+- `handleClientMessage`: новый кейс `set_approval_mode {mode, riskAcknowledged?}`:
+  - валидация enum; мусор → `error`;
+  - `mode === 'never'` и `riskAcknowledged !== true` → `error` (текст как в v1-роуте: «Подтвердите осознание рисков»), режим не меняем;
+  - успех → `this.approvalMode = mode` + `setDialogueApprovalMode(dialogueId, mode)` + broadcast `{type:'approval_mode', mode}`.
+- При attach слать `{type:'approval_mode', mode}` текущего режима (фронт рендерит селектор до первого действия).
+- Смена режима влияет только на будущие решения; висящий `tool_pending` не трогаем.
+- Ошибка записи диалога не роняет сессию (try/catch + warn, как у `save()`).
+
+### 3. Откат v1 из настроек
+- `services/settings.ts`: убрать `agentApprovalMode` из `AppSettings`/`settingsSchema`/`SettingsPatch`, убрать `getAgentApprovalMode()`. Старые `settings.json` с полем читаются без ошибок (zod strip) и поле затирается при следующем save — миграция бесплатная.
+- `routes/settings.ts`: убрать `agentApprovalMode`/`riskAcknowledged` из `settingsStatus()`/`putBodySchema`/обработчика. Тип `AgentApprovalMode` остаётся жить в `ai/approval.ts` (импорты поправить).
+- `ai/approval.ts`, `services/privileges.ts`, `routes/profiles.ts` (privileges-эндпоинт) — **без изменений**.
+
+## Web
+
+### 1. `components/AgentAccessConfirm.tsx` (переезд)
+- Компонент confirm-модалки вынести из `SettingsModal.tsx` в отдельный файл без изменений логики (probePending, privileged, чекбокс, busy). Проп `onEnabled` меняет сигнатуру: вместо PUT настроек — колбэк подтверждения; PUT уходит из интерфейса компонента, сабмит делает родитель через WS (см. ниже). Тексты и стили (`access-level-*` в styles.css) сохраняются.
+
+### 2. `pages/AgentPage.tsx` — селектор у поля ввода
+- В футере области ввода (левый край, до кнопок отправки; рядом с `PendingBar` по вертикали не конфликтует — PendingBar над инпутом, селектор в строке контролов): кнопка-дропдаун `🛡 <лейбл режима> ⌄` (`agent.accessLevel{Always,Needed,Never}`).
+- Меню из трёх пунктов; текущий помечен. Выбор:
+  - `always`/`needed` → `sendWs({type:'set_approval_mode', mode})`;
+  - `never` → открыть `AgentAccessConfirm` (probe по `profileId` диалога); подтверждение → `sendWs({type:'set_approval_mode', mode:'never', riskAcknowledged:true})`.
+- Стейт режима: `approvalMode` в компоненте, источник правды — WS-событие `approval_mode` (обработать в `ws.onmessage` switch, `:449-542`); до первого события селектор показывает `needed`-дефолт не нужен — ждём событие (attach шлёт его сразу). Ошибка (`type:'error'`) → тост/текст как принято на странице, режим не двигаем.
+- Селектор не дизейблится во время `running` — смена режима на лету поддержана сервером.
+
+### 3. Откат v1 из настроек
+- `SettingsModal.tsx`: удалить радиогруппу, `AgentAccessConfirm`, проп `activeProfileId`, стейт `accessConfirmOpen` (Escape-гейт тоже уходит вместе с ним); `App.tsx` — убрать проп.
+- `api.ts`: убрать `agentApprovalMode` из `SettingsStatus`/patch-типа `updateSettings`; `riskAcknowledged` убрать. `fetchProfilePrivileges`, типы `AgentApprovalMode`/`ProfilePrivileges` — оставить.
+- i18n: ключи `settings.accessLevel*` перенести в `agent.*` неймспейс (те же тексты; `accessLevelConfirmUnknown`, `accessLevelProbeFailed` тоже), старые ключи удалить из обоих словарей.
+
+## Тесты
+
+- `test/approval.test.ts` — без изменений (чистая функция).
+- `test/agent-approval-mode.test.ts` — переработать: режим задаётся не `updateSettings`, а полем диалога при создании + фреймом `set_approval_mode`. Кейсы те же (needed-таблица, never-авто, live-смена) + новые: `set_approval_mode never` без `riskAcknowledged` → `error`, режим прежний, файл диалога не изменён; с `riskAcknowledged:true` → событие `approval_mode`, режим применяется к следующему вызову и персистится; мусорный mode → `error`; дефолт диалога без поля = `needed`.
+- `test/settings-route.test.ts` / `settings.test.ts` — убрать кейсы `agentApprovalMode`/`riskAcknowledged`; добавить регрессионный: settings.json с легаси-полем `agentApprovalMode` читается без ошибок и поле исчезает после save.
+- Тест диалогов (существующий файл для `ai/dialogues.ts`, если есть — иначе новый): `dialogueApprovalMode` дефолтит в `needed`; `setDialogueApprovalMode` персистит; битое значение в файле → corrupt-guard/отказ по zod (как принято в сторе).
+- `i18n.test.ts` — паритет перенесённых ключей (автоматом).
+
+## Документация
+
+- `AGENTS.md`: пункт «Уровень доступа агента» переписать — режим per-dialogue (`approvalMode` в `ai-dialogues.json`, дефолт `needed` — **в т.ч. для существующих диалогов**), переключение WS `set_approval_mode` с серверным ack-гейтом для `never`, селектор в панели агента; из раздела «Настройки»/settings-инварианта убрать упоминания `agentApprovalMode`; в «Безопасность (кратко)» поправить дефолт (`always` → `needed`).
+- `docs/architecture.md` — те же дельты (модель диалога, WS-протокол, состав тестов); `docs/roadmap.md` — запись эпика дополнить ревизией.
+
+## Итерации v2
+
+1. Сервер: dialogues (поле+хелпер+мутатор) → agent.ts (поле сессии, attach, `set_approval_mode`, событие `approval_mode`) → откат settings. Тесты сервера зелёные.
+2. Web: переезд `AgentAccessConfirm` → селектор в `AgentPage` → откат SettingsModal/App/api → i18n-перенос. Lint + build зелёные.
+3. Документация (AGENTS.md, architecture.md, roadmap.md) + статус этого плана.
+
+## Риски v2 (дополнение)
+
+- **Дефолт `needed` для всех существующих диалогов** — осознанное понижение барьера, подтверждено пользователем; фиксируем в AGENTS.md, чтобы будущие аудиты не приняли за регрессию.
+- **Два клиента одного диалога** — attachAgent убивает прежнюю сессию профиля, гонки нет; последний `set_approval_mode` побеждает и персистится.
+- **Смена режима посреди pending-подтверждения** — не влияет на висящий `tool_pending`; документировано, UX-путаницы не создаёт (бар доезжает своё решение).

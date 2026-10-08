@@ -24,6 +24,9 @@ export const AI_STRINGS = {
     stoppedByUser: 'Агент остановлен пользователем.',
     rejectedByUser: 'Пользователь отклонил выполнение этого действия.',
     stepLimitReached: 'Достигнут лимит шагов ({n}).',
+    // agent.ts — the per-dialogue access level (WS set_approval_mode)
+    riskAckRequired: 'Подтвердите осознание рисков',
+    invalidApprovalMode: 'Недопустимый уровень доступа: {mode}',
     outputTruncated: '… (вывод обрезан, показано {n} символов)',
     // redact.ts — the redacted-secret marker in tool output
     secretRedacted: '<секрет скрыт приложением, {n} симв.>',
@@ -144,6 +147,8 @@ export const AI_STRINGS = {
     stoppedByUser: 'The agent was stopped by the user.',
     rejectedByUser: 'The user rejected this action.',
     stepLimitReached: 'Step limit reached ({n}).',
+    riskAckRequired: 'Confirm you understand the risks',
+    invalidApprovalMode: 'Invalid access level: {mode}',
     outputTruncated: '… (output truncated, showing {n} characters)',
     secretRedacted: '<secret hidden by the app, {n} chars>',
     emptyOutput: '(empty output)',

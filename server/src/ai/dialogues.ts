@@ -5,6 +5,9 @@ import { z } from 'zod';
 import { config } from '../config.js';
 import type { ChatMessage } from './client.js';
 import { sanitizeMessages } from './messages.js';
+// Type-only import: erased at compile time, no runtime cycle
+// (approval → tools → web-search → settings).
+import type { AgentApprovalMode } from './approval.js';
 
 export interface Dialogue {
   id: string;
@@ -12,6 +15,10 @@ export interface Dialogue {
   // Extra profiles attached to a multi-server dialogue
   // (profileId is the home one — always attached and never listed here).
   extraProfileIds?: string[];
+  // The per-dialogue agent access level (docs/agent-access-levels-plan.md,
+  // revision v2); the absence of the field reads as the 'needed' default —
+  // a read-time migration, the file is not rewritten for it.
+  approvalMode?: AgentApprovalMode;
   title: string;
   messages: ChatMessage[];
   messageCount: number;
@@ -62,6 +69,8 @@ const dialogueSchema = z.object({
   profileId: z.string().min(1),
   // Optional: older ai-dialogues.json files without the field stay valid.
   extraProfileIds: z.array(z.string()).optional(),
+  // Optional: dialogues without the field are the 'needed' default.
+  approvalMode: z.enum(['always', 'needed', 'never']).optional(),
   title: z.string(),
   messages: z.array(messageSchema).default([]),
   messageCount: z.number().int().min(0),
@@ -140,6 +149,27 @@ export function listDialogues(profileId: string): DialogueSummary[] {
 export function getDialogue(id: string): Dialogue | undefined {
   const found = load().find((d) => d.id === id);
   return found ? copy(found) : undefined;
+}
+
+/**
+ * The dialogue's agent access level; the absence of the field (new and all
+ * pre-v2 dialogues) is the 'needed' default — an explicit, user-approved
+ * lowering of the bar (docs/agent-access-levels-plan.md, revision v2).
+ */
+export function dialogueApprovalMode(d: Dialogue): AgentApprovalMode {
+  return d.approvalMode ?? 'needed';
+}
+
+/** Persists the access level on the dialogue (tmp+rename, corrupt-guard — as everywhere in the store). */
+export function setDialogueApprovalMode(id: string, mode: AgentApprovalMode): Dialogue {
+  const list = load();
+  const idx = list.findIndex((d) => d.id === id);
+  if (idx < 0) {
+    throw new Error(`Dialogue ${id} not found`);
+  }
+  list[idx] = { ...list[idx], approvalMode: mode, updatedAt: Date.now() };
+  persist(list);
+  return copy(list[idx]);
 }
 
 export function createDialogue(profileId: string): Dialogue {

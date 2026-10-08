@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
@@ -146,6 +146,44 @@ describe('dialogues store', () => {
     expect(() => store.detachProfileFromDialogue(d.id, profileId)).toThrow(/домашний/i);
     expect(() => store.attachProfileToDialogue('missing-dialogue', uniqueProfile())).toThrow();
     expect(() => store.detachProfileFromDialogue('missing-dialogue', uniqueProfile())).toThrow();
+    store.deleteDialogue(d.id);
+  });
+
+  // The per-dialogue access level (docs/agent-access-levels-plan.md, v2).
+  it('approvalMode: the absence of the field reads as needed; the mutator persists', () => {
+    const profileId = uniqueProfile();
+    const d = store.createDialogue(profileId);
+    // Read-time migration: a fresh (and any pre-v2) dialogue is 'needed'.
+    expect(store.dialogueApprovalMode(d)).toBe('needed');
+
+    expect(store.setDialogueApprovalMode(d.id, 'never').approvalMode).toBe('never');
+    expect(store.getDialogue(d.id)?.approvalMode).toBe('never');
+    expect(store.dialogueApprovalMode(store.getDialogue(d.id)!)).toBe('never');
+    // Saving messages does not wipe the field.
+    store.saveDialogueMessages(d.id, [{ role: 'user', content: 'вопрос' }]);
+    expect(store.getDialogue(d.id)?.approvalMode).toBe('never');
+    expect(() => store.setDialogueApprovalMode('missing-dialogue', 'always')).toThrow();
+    store.deleteDialogue(d.id);
+  });
+
+  it('a broken approvalMode value hits the corrupt-guard (as any zod rejection)', async () => {
+    const profileId = uniqueProfile();
+    const d = store.createDialogue(profileId);
+    // Tamper with the file directly: an invalid enum value must not load.
+    const raw = JSON.parse(readFileSync(path.join(dataDir, 'ai-dialogues.json'), 'utf8'));
+    (raw.dialogues as Array<{ id: string }>).find((x) => x.id === d.id)!.approvalMode = 'sometimes';
+    writeFileSync(path.join(dataDir, 'ai-dialogues.json'), JSON.stringify(raw));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.resetModules();
+    const reloaded = await import('../src/ai/dialogues.js');
+    // The broken file is moved aside, the fresh module serves an empty store.
+    expect(reloaded.listDialogues(profileId)).toEqual([]);
+    expect(reloaded.getDialogue(d.id)).toBeUndefined();
+    expect(
+      readdirSync(dataDir).filter((f) => f.startsWith('ai-dialogues.json.corrupt-')),
+    ).toHaveLength(1);
+    warn.mockRestore();
+    // Cleanup via the original (non-corrupt) instance: it rewrites a clean file.
     store.deleteDialogue(d.id);
   });
 });

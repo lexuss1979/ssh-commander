@@ -3293,11 +3293,11 @@ body.resizing-agent {
 
 .agent-input {
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
   padding: 12px 16px;
   border-top: 1px solid var(--border);
   background: var(--bg-raised);
-  align-items: flex-end;
 }
 
 .agent-input textarea {
@@ -3305,6 +3305,106 @@ body.resizing-agent {
   resize: vertical;
   min-height: 42px;
   max-height: 160px;
+}
+
+/* The controls row under the input: the access-level selector on the left,
+   the send button on the right. */
+.agent-input-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* The dialogue access-level dropdown (docs/agent-access-levels-plan.md, v2)
+   — opens upward from the input bar. */
+.access-select {
+  position: relative;
+}
+
+.access-select-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+}
+
+.access-select-btn svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.access-select-btn > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.access-select-caret {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--muted);
+}
+
+.access-select-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  min-width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px var(--shadow);
+}
+
+.access-select-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.access-select-item:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.access-select-item.active {
+  background: var(--accent-soft);
+}
+
+/* A set_approval_mode frame is in flight — the choice is locked visually. */
+.access-select-item:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.access-select-item-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.access-select-check {
+  color: var(--accent-hover);
+}
+
+.access-select-item-desc {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
 }
 
 /* Overview (server monitoring) */
@@ -5637,63 +5737,8 @@ body.resizing-agent {
   margin-top: 4px;
 }
 
-/* Agent access level (docs/agent-access-levels-plan.md): a radio group of
-   three modes in the "AI agent" section of the settings modal. */
-.access-level-block {
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
-}
-
-.access-level-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.access-level-option {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.access-level-option.active {
-  border-color: var(--accent-soft-border);
-  background: var(--accent-soft);
-}
-
-/* The global `input { width: 100% }` would stretch the radio. */
-.access-level-option input[type='radio'] {
-  width: auto;
-  margin-top: 2px;
-  flex-shrink: 0;
-}
-
-.access-level-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.access-level-title {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.access-level-desc {
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--muted);
-}
-
 /* The strong warning of the 'never' confirmation modal (root/sudo or a
-   failed probe) */
+   failed probe) — AgentAccessConfirm in the agent panel */
 .access-level-warning {
   margin: 0 0 12px;
   padding: 10px 12px;
