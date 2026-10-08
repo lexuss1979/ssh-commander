@@ -131,6 +131,22 @@ function ShieldIcon() {
   );
 }
 
+function ChevronDownIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
 // Template of a request built from terminal output ('explain' and 'new-dialogue' modes).
 function terminalContextMessage(
   t: (key: I18nKey, params?: I18nParams | number) => string,
@@ -1284,14 +1300,16 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
             <div className="access-select" ref={modeMenuRef}>
               <button
                 type="button"
-                className="btn btn-ghost btn-mini access-select-btn"
+                className={`btn btn-ghost btn-mini access-select-btn${approvalMode ? ` mode-${approvalMode}` : ''}`}
                 disabled={!connected || approvalMode === null}
                 title={t('agent.accessLevel')}
                 onClick={() => setModeMenuOpen((v) => !v)}
               >
                 <ShieldIcon />
                 <span>{approvalMode ? t(MODE_LABEL_KEYS[approvalMode]) : '…'}</span>
-                <span className="access-select-caret">⌄</span>
+                <span className="access-select-caret">
+                  <ChevronDownIcon />
+                </span>
               </button>
               {modeMenuOpen && approvalMode && (
                 <div className="access-select-menu">
@@ -1303,9 +1321,13 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                       disabled={modeSetPending}
                       onClick={() => selectMode(mode)}
                     >
-                      <span className="access-select-item-title">
+                      <span className={`access-select-item-title mode-${mode}`}>
                         {t(MODE_LABEL_KEYS[mode])}
-                        {approvalMode === mode && <span className="access-select-check"> ✓</span>}
+                        {approvalMode === mode && (
+                          <span className="access-select-check">
+                            <CheckIcon />
+                          </span>
+                        )}
                       </span>
                       <span className="access-select-item-desc">{t(MODE_DESC_KEYS[mode])}</span>
                     </button>
