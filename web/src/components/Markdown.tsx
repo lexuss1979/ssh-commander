@@ -1,9 +1,10 @@
-import { memo, useState, useCallback, useRef, createContext, useContext } from 'react';
+import { memo, useState, useCallback, createContext, useContext } from 'react';
 import type { ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useT } from '../i18n';
+import { Mermaid } from './Mermaid';
 
 interface Props {
   content: string;
@@ -27,32 +28,53 @@ function codeLanguage(children: ReactNode): string | null {
   return null;
 }
 
+/** Plain text of a code block child tree (for copy buttons and mermaid source). */
+function codeText(children: ReactNode): string {
+  if (typeof children === 'string') return children;
+  if (typeof children === 'number') return String(children);
+  if (Array.isArray(children)) return children.map(codeText).join('');
+  if (typeof children === 'object' && children !== null && 'props' in children) {
+    return codeText((children.props as { children?: ReactNode }).children);
+  }
+  return '';
+}
+
 /** A <pre> block with a "Copy" button; sql blocks additionally get "To SQL". */
 function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
   const { children, ...rest } = props;
   const { t } = useT();
   const [copied, setCopied] = useState(false);
-  const preRef = useRef<HTMLPreElement>(null);
+  const [mermaidFailed, setMermaidFailed] = useState(false);
   const onInsertSql = useContext(InsertSqlContext);
-  const isSql = onInsertSql && codeLanguage(children as ReactNode)?.endsWith('sql');
+  const lang = codeLanguage(children as ReactNode);
+  const isSql = onInsertSql && lang?.endsWith('sql');
+  const showMermaid = lang === 'mermaid' && !mermaidFailed;
+  const text = codeText(children);
 
   const handleCopy = useCallback(() => {
-    const text = preRef.current?.textContent ?? '';
     if (!text) return;
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
-  }, []);
+  }, [text]);
 
   const handleInsert = useCallback(() => {
-    const text = preRef.current?.textContent ?? '';
     if (text) onInsertSql?.(text.trim());
-  }, [onInsertSql]);
+  }, [onInsertSql, text]);
+
+  const handleMermaidError = useCallback(() => setMermaidFailed(true), []);
 
   return (
     <div className="code-block-wrap">
-      <pre {...rest} ref={preRef}>{children}</pre>
+      {lang === 'mermaid' && mermaidFailed && (
+        <div className="mermaid-error">{t('markdown.mermaidError')}</div>
+      )}
+      {showMermaid ? (
+        <Mermaid code={text.trim()} onError={handleMermaidError} />
+      ) : (
+        <pre {...rest}>{children}</pre>
+      )}
       <span className="code-block-actions">
         {isSql && (
           <button

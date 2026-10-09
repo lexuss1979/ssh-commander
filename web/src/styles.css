@@ -3055,6 +3055,34 @@ body.resizing-agent {
   line-height: 1.5;
 }
 
+/* Mermaid diagram rendered from a ```mermaid code block (agent chat) */
+.mermaid-block {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+  text-align: center;
+}
+
+.mermaid-block svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.mermaid-loading {
+  min-height: 40px;
+  color: var(--muted);
+}
+
+.mermaid-error {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .markdown-body table {
   display: block;
   max-width: 100%;

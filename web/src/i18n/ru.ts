@@ -72,6 +72,7 @@ export const ru = {
   'markdown.copyAria': 'Копировать код',
   'markdown.insertSqlTitle': 'Вставить SQL в редактор на вкладке «Базы данных»',
   'markdown.insertSqlAria': 'Вставить SQL в редактор',
+  'markdown.mermaidError': 'Не удалось отрисовать диаграмму — показан исходный код',
 
   'time.justNow': 'только что',
   'time.minutesAgo': (n: number) => `${n} мин назад`,
