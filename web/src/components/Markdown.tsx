@@ -1,10 +1,12 @@
-import { memo, useState, useCallback, createContext, useContext } from 'react';
+import { memo, useState, useCallback, createContext, useContext, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useT } from '../i18n';
 import { Mermaid } from './Mermaid';
+import { Chart } from './Chart';
+import { parseChartSpec } from '../chart-spec';
 
 interface Props {
   content: string;
@@ -50,6 +52,12 @@ function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
   const isSql = onInsertSql && lang?.endsWith('sql');
   const showMermaid = lang === 'mermaid' && !mermaidFailed;
   const text = codeText(children);
+  // Invalid or still-streaming JSON falls back to the plain code block —
+  // no latched error state, the chart "comes alive" once the JSON completes.
+  const chartSpec = useMemo(
+    () => (lang === 'chart' ? parseChartSpec(text.trim()) : null),
+    [lang, text],
+  );
 
   const handleCopy = useCallback(() => {
     if (!text) return;
@@ -72,6 +80,8 @@ function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
       )}
       {showMermaid ? (
         <Mermaid code={text.trim()} onError={handleMermaidError} />
+      ) : chartSpec ? (
+        <Chart spec={chartSpec} />
       ) : (
         <pre {...rest}>{children}</pre>
       )}

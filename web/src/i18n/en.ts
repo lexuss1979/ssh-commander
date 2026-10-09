@@ -60,6 +60,7 @@ export const en: typeof ru = {
   'markdown.insertSqlTitle': 'Insert SQL into the editor on the "Databases" tab',
   'markdown.insertSqlAria': 'Insert SQL into the editor',
   'markdown.mermaidError': 'Could not render the diagram — showing the source code',
+  'markdown.chartAria': 'Chart',
 
   'time.justNow': 'just now',
   'time.minutesAgo': (n: number) => `${n} min ago`,

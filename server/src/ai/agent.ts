@@ -18,6 +18,7 @@ import {
   planApprovedMessage,
   suggestInstruction,
   systemPromptBase,
+  visualsNote,
   webSearchNote,
   type PromptLang,
 } from './prompts.js';
@@ -145,6 +146,9 @@ export class AgentSession {
     if (isSearchConfigured()) {
       systemPrompt += webSearchNote(promptLang);
     }
+    // Diagrams (```mermaid / ```chart) are rendered by the chat UI — always
+    // available, so the note is unconditional.
+    systemPrompt += visualsNote(promptLang);
     // Likely-answer suggestion (agent-suggest): the marker is cut from the
     // reply before persist and context (ai/suggest.ts), the suggestion text
     // goes to the frontend as a separate WS suggestion event. The

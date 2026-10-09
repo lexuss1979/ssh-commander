@@ -97,6 +97,33 @@ export function attachedServersNote(lang: PromptLang, names: string[]): string {
     : ` Сейчас к диалогу подключены серверы: ${names.join(', ')}.`;
 }
 
+/**
+ * The visuals note: the chat renders ```mermaid diagrams and ```chart data
+ * charts (docs/agent-visuals-plan.md), so the model may use them. The chart
+ * JSON schema is spelled out inline — the model has no other way to learn
+ * the format. The ```chart / ```mermaid fence markers are identical in both
+ * languages (the frontend parses the language tag, not the text).
+ */
+export function visualsNote(lang: PromptLang): string {
+  return lang === 'en'
+    ? ' Your answers are rendered as markdown with diagram support. For schemes and processes use a ```mermaid block ' +
+        '(flowchart, sequenceDiagram, stateDiagram, erDiagram, gantt, pie). For numeric data charts use a ```chart block ' +
+        'with a JSON spec: {"type":"bar"|"line"|"pie","title":"optional","unit":"optional","labels":["..."],"series":[{"name":"...","data":[1,2,3]}]}. ' +
+        'bar (grouped columns) and line accept several series; pie takes exactly one (labels are the slices). ' +
+        'Example: ```chart\n{"type":"bar","title":"Disk usage","unit":"GB","labels":["/var","/home"],"series":[{"name":"size","data":[12,5]}]}\n``` ' +
+        'Rules: chart only real data collected with tools (never invent numbers); at most 24 labels and 6 series; ' +
+        'labels in the dialogue language; strictly valid JSON without comments. ' +
+        'Add a diagram only when it genuinely improves clarity (comparisons, shares, trends) — not in every answer.'
+    : ' Твои ответы рендерятся как markdown с поддержкой диаграмм. Для схем и процессов используй блок ```mermaid ' +
+        '(flowchart, sequenceDiagram, stateDiagram, erDiagram, gantt, pie). Для графиков по числовым данным используй блок ```chart ' +
+        'с JSON-спецификацией: {"type":"bar"|"line"|"pie","title":"необязательно","unit":"необязательно","labels":["..."],"series":[{"name":"...","data":[1,2,3]}]}. ' +
+        'bar (сгруппированные столбцы) и line принимают несколько series, pie — ровно одну (labels — доли). ' +
+        'Пример: ```chart\n{"type":"bar","title":"Занято места","unit":"GB","labels":["/var","/home"],"series":[{"name":"размер","data":[12,5]}]}\n``` ' +
+        'Правила: показывай только реальные данные, собранные инструментами (не выдумывай числа); не больше 24 меток и 6 series; ' +
+        'подписи — на языке диалога; строго валидный JSON без комментариев. ' +
+        'Добавляй диаграмму только когда она действительно добавляет наглядности (сравнения, доли, динамика) — не в каждый ответ.';
+}
+
 /** The web_search note — only when search is configured (AI_SEARCH_API_BASE). */
 export function webSearchNote(lang: PromptLang): string {
   return lang === 'en'

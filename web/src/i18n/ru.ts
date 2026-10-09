@@ -73,6 +73,7 @@ export const ru = {
   'markdown.insertSqlTitle': 'Вставить SQL в редактор на вкладке «Базы данных»',
   'markdown.insertSqlAria': 'Вставить SQL в редактор',
   'markdown.mermaidError': 'Не удалось отрисовать диаграмму — показан исходный код',
+  'markdown.chartAria': 'Диаграмма',
 
   'time.justNow': 'только что',
   'time.minutesAgo': (n: number) => `${n} мин назад`,

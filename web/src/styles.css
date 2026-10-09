@@ -28,6 +28,12 @@
   --ok-soft-border: rgba(127, 191, 127, 0.4);
   --warn-soft-border: rgba(229, 192, 123, 0.4);
   --code-inline-bg: rgba(255, 255, 255, 0.08);
+  --chart-1: #4c9be8;
+  --chart-2: #7fbf7f;
+  --chart-3: #e5c07b;
+  --chart-4: #e06c75;
+  --chart-5: #b57edc;
+  --chart-6: #56b6c2;
   color-scheme: dark;
 }
 
@@ -61,6 +67,12 @@
   --ok-soft-border: rgba(60, 145, 80, 0.35);
   --warn-soft-border: rgba(169, 118, 27, 0.35);
   --code-inline-bg: rgba(29, 39, 51, 0.07);
+  --chart-1: #256fbf;
+  --chart-2: #3c9150;
+  --chart-3: #a9761b;
+  --chart-4: #cf4a55;
+  --chart-5: #8a5cb8;
+  --chart-6: #2e8f9a;
   color-scheme: light;
 }
 
@@ -3081,6 +3093,143 @@ body.resizing-agent {
   margin: 0 0 4px;
   color: var(--muted);
   font-size: 12px;
+}
+
+/* Agent chart rendered from a ```chart code block (components/Chart.tsx) */
+.chart-block {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+}
+
+.chart-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chart-unit {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+
+.chart-plot {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.chart-grid {
+  stroke: var(--border-soft);
+  stroke-width: 1;
+}
+
+.chart-zero {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+
+.chart-axis-text {
+  fill: var(--muted);
+  font-size: 10px;
+}
+
+.chart-y-text {
+  text-anchor: end;
+  dominant-baseline: middle;
+}
+
+.chart-x-text {
+  text-anchor: middle;
+}
+
+.chart-line {
+  fill: none;
+  stroke-width: 2;
+}
+
+.chart-c1 { fill: var(--chart-1); stroke: var(--chart-1); }
+.chart-c2 { fill: var(--chart-2); stroke: var(--chart-2); }
+.chart-c3 { fill: var(--chart-3); stroke: var(--chart-3); }
+.chart-c4 { fill: var(--chart-4); stroke: var(--chart-4); }
+.chart-c5 { fill: var(--chart-5); stroke: var(--chart-5); }
+.chart-c6 { fill: var(--chart-6); stroke: var(--chart-6); }
+
+.chart-swatch.chart-c1 { background: var(--chart-1); }
+.chart-swatch.chart-c2 { background: var(--chart-2); }
+.chart-swatch.chart-c3 { background: var(--chart-3); }
+.chart-swatch.chart-c4 { background: var(--chart-4); }
+.chart-swatch.chart-c5 { background: var(--chart-5); }
+.chart-swatch.chart-c6 { background: var(--chart-6); }
+
+.chart-dot {
+  stroke: none;
+}
+
+.chart-pie-wrap {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.chart-pie {
+  width: 180px;
+  height: auto;
+  flex: none;
+}
+
+.chart-pie-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.chart-pie-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.chart-pie-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart-pie-value {
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 .markdown-body table {

@@ -7,6 +7,7 @@ import {
   planModeInstruction,
   suggestInstruction,
   systemPromptBase,
+  visualsNote,
   webSearchNote,
   type PromptLang,
 } from '../src/ai/prompts.js';
@@ -21,6 +22,7 @@ function fullPrompt(lang: PromptLang): string {
     multiServerNote(lang) +
     attachedServersNote(lang, ['srv-a', 'srv-b']) +
     webSearchNote(lang) +
+    visualsNote(lang) +
     suggestInstruction(lang)
   );
 }
@@ -56,6 +58,20 @@ describe('ai prompts (i18n)', () => {
     expect(planModeInstruction('ru')).toMatch(CYRILLIC);
     expect(planModeInstruction('en')).not.toMatch(CYRILLIC);
     expect(planModeInstruction('ru')).not.toBe(planModeInstruction('en'));
+  });
+
+  it('visualsNote of both languages is in its own language and carries the untranslated fence markers', () => {
+    expect(visualsNote('ru')).toMatch(CYRILLIC);
+    expect(visualsNote('en')).not.toMatch(CYRILLIC);
+    expect(visualsNote('ru')).not.toBe(visualsNote('en'));
+    for (const lang of ['ru', 'en'] as const) {
+      expect(visualsNote(lang)).toContain('```mermaid');
+      expect(visualsNote(lang)).toContain('```chart');
+      // The chart JSON schema keys are part of the contract with the frontend parser.
+      for (const key of ['"type"', '"labels"', '"series"', '"data"']) {
+        expect(visualsNote(lang)).toContain(key);
+      }
+    }
   });
 
   it('the lang choice: the variants differ, each in its own language', () => {
