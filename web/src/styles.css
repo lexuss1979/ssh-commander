@@ -3301,10 +3301,8 @@ body.resizing-agent {
 }
 
 .agent-input textarea {
-  flex: 1;
-  resize: vertical;
+  resize: none;
   min-height: 42px;
-  max-height: 160px;
 }
 
 /* The controls row under the input: the access-level selector on the left,

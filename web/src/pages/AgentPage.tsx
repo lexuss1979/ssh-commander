@@ -242,6 +242,25 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   const tRef = useRef(t);
   tRef.current = t;
 
+  // Auto-growing input: the textarea follows its content up to 10 lines,
+  // an inner scrollbar appears beyond that. Manual resize is off (CSS).
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const cs = getComputedStyle(el);
+    const lineHeight = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.4;
+    const maxHeight =
+      lineHeight * 10 +
+      parseFloat(cs.paddingTop) +
+      parseFloat(cs.paddingBottom) +
+      parseFloat(cs.borderTopWidth) +
+      parseFloat(cs.borderBottomWidth);
+    el.style.height = 'auto';
+    const next = Math.min(el.scrollHeight, maxHeight);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }, [input]);
+
   const pushAssistantToken = useCallback((token: string) => {
     setMessages((prev) => {
       const last = prev[prev.length - 1];
