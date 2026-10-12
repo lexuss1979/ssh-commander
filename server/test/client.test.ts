@@ -35,6 +35,31 @@ function jsonResponse(data: Record<string, unknown>): Response {
   });
 }
 
+describe('HTTP context overflow classification', () => {
+  it.each(['maximum context length is 1048576', 'context_length_exceeded', 'Context window exceeded', 'too many tokens'])(
+    'recognizes %s before truncating the error body', async (detail) => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { message: 'x'.repeat(600) + detail } }), { status: 400 })));
+      await expect(client.streamChatCompletion({ messages: [] })).rejects.toBeInstanceOf(client.ContextOverflowError);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([[400, 'invalid tool call'], [401, 'context_length_exceeded'], [429, 'too many tokens']])(
+    'does not classify an unrelated HTTP %s as a context overflow', async (status, detail) => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(String(detail), { status: Number(status) })));
+      const error = await client.streamChatCompletion({ messages: [] }).catch((err) => err);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(client.ContextOverflowError);
+      expect(error.message).toContain(`AI API error ${status}`);
+    },
+  );
+
+  it('redacts the API key even in an HTTP overflow response', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('context_length_exceeded test-key', { status: 400 })));
+    await expect(client.streamChatCompletion({ messages: [] })).rejects.toThrow('context_length_exceeded [redacted]');
+  });
+});
+
 function sseResponse(chunks: string[]): Response {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({

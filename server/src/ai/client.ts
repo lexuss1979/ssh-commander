@@ -53,6 +53,18 @@ export interface StreamOptions {
 /** The client's own name, without a hard-coded version that would go stale on releases. */
 const USER_AGENT = 'ssh-commander';
 
+/** Only an HTTP rejection before streaming is eligible for a context retry. */
+export class ContextOverflowError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ContextOverflowError';
+  }
+}
+
+function isContextOverflow(detail: string): boolean {
+  return /maximum context length|context_length_exceeded|context window|too many tokens/i.test(detail);
+}
+
 /**
  * Call tokens from the API response's `usage` (docs/ai-costs-plan.md,
  * decision 1). Numbers are finite ≥ 0 only: provider garbage (a string,
@@ -278,8 +290,11 @@ export async function streamChatCompletion(opts: StreamOptions): Promise<ChatCom
   }
 
   if (!res.ok || !res.body) {
-    const detail = await res.text().catch(() => '');
-    throw new Error(`AI API error ${res.status}${detail ? `: ${detail.slice(0, 500)}` : ''}`);
+    const raw = await res.text().catch(() => '');
+    const detail = apiKey ? raw.replaceAll(apiKey, '[redacted]') : raw;
+    const message = `AI API error ${res.status}${detail ? `: ${detail.slice(0, 500)}` : ''}`;
+    if (res.status === 400 && isContextOverflow(detail)) throw new ContextOverflowError(message);
+    throw new Error(message);
   }
 
   const contentType = res.headers.get('content-type') || '';

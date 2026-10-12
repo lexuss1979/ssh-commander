@@ -866,6 +866,7 @@ export const ru = {
   'agent.errorDialogueRunning': 'Дождитесь завершения текущего диалога',
   'agent.deleteConfirm': 'Удалить диалог? Это действие необратимо.',
   'agent.errorFallback': 'Ошибка агента',
+  'agent.serviceNotice': 'Служебная заметка',
   'agent.errorBusy': 'Агент выполняет задачу — дождитесь завершения',
   'agent.errorBusyNow': 'Агент сейчас выполняет задачу — дождитесь завершения',
   'agent.auditNoConnection': 'Нет соединения с агентом',

@@ -62,6 +62,7 @@ export const config = {
     apiKey: process.env.AI_API_KEY || '',
     model: process.env.AI_MODEL || 'gpt-4.1-mini',
     maxSteps: int('AI_MAX_STEPS', 30),
+    contextLimit: int('AI_CONTEXT_LIMIT', 120000),
     temperature: float('AI_TEMPERATURE', 0.2),
     // Web search for the agent: an Anthropic-compatible endpoint with the
     // server-side web_search tool (DeepSeek uses the same API key as chat).

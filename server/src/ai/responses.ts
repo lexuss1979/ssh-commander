@@ -24,7 +24,7 @@ export interface ResponsesContext {
   }>;
 }
 
-/** The history stays local: every request carries the full context. */
+/** The history stays local: every request carries the context view selected by the agent. */
 export function buildResponsesBody(opts: StreamOptions, model: string, apiBase: string): Record<string, unknown> {
   const input: Record<string, unknown>[] = [];
   for (const message of opts.messages) {

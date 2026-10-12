@@ -11,6 +11,13 @@ import type { PromptLang } from './prompts.js';
 /** Raw dictionaries — exported for the parity test (test/ai-strings.test.ts). */
 export const AI_STRINGS = {
   ru: {
+    contextInvalidBudget: 'Некорректный бюджет контекста. Проверьте AI_CONTEXT_LIMIT: требуется положительное целое число.',
+    contextToolTruncated: '[…усечено для экономии контекста]',
+    contextMemoryTruncated: '[…память усечена для экономии контекста; полный текст доступен через read_memory]',
+    contextHistoryNotice: 'Часть ранней истории исключена из контекста запроса. Полная история диалога сохранена.',
+    contextMemoryNotice: 'Память профиля сокращена в контексте запроса. Файл MEMORY.md сохранён полностью.',
+    contextRetryNotice: 'Провайдер отклонил запрос из-за размера контекста. Повторяем с меньшим бюджетом.',
+    contextCannotFit: 'Текущий запрос, системные инструкции и инструменты не помещаются в бюджет контекста ({budget} токенов). Сократите сообщение, начните новый диалог или увеличьте AI_CONTEXT_LIMIT, если модель допускает это.',
     // agent.ts — resolving/attaching dialogue servers
     serverNotAttached:
       'Сервер «{name}» не подключён к диалогу — вызови connect_server ' +
@@ -136,6 +143,13 @@ export const AI_STRINGS = {
     auditTruncatedChars: '… (обрезано по объёму)',
   },
   en: {
+    contextInvalidBudget: 'Invalid context budget. Check AI_CONTEXT_LIMIT: a positive integer is required.',
+    contextToolTruncated: '[…truncated to save context]',
+    contextMemoryTruncated: '[…memory truncated to save context; full text is available via read_memory]',
+    contextHistoryNotice: 'Some earlier history was excluded from the request context. The full dialogue history is preserved.',
+    contextMemoryNotice: 'Profile memory was shortened in the request context. The full MEMORY.md file is preserved.',
+    contextRetryNotice: 'The provider rejected the context size. Retrying with a smaller budget.',
+    contextCannotFit: 'The current request, system instructions and tools do not fit the context budget ({budget} tokens). Shorten the message, start a new dialogue or increase AI_CONTEXT_LIMIT if the model supports it.',
     serverNotAttached:
       'Server "{name}" is not attached to this dialogue — call connect_server ' +
       'or ask the user to attach it.',

@@ -1,9 +1,10 @@
 import type { WebSocket } from 'ws';
 import { config } from '../config.js';
-import { streamChatCompletion, type ChatMessage, type TokenUsage, type ToolCall } from './client.js';
+import { ContextOverflowError, streamChatCompletion, type ChatCompletionResult, type ChatMessage, type TokenUsage, type ToolCall } from './client.js';
+import { contextInputBudget, fitToContext } from './context.js';
 import { sanitizeMessages } from './messages.js';
 import { buildPlanRequestMessages, toolsForRequest } from './plan.js';
-import { getToolDefs, isAutoRunnable } from './tools.js';
+import { isAutoRunnable } from './tools.js';
 import { needsApproval, type AgentApprovalMode } from './approval.js';
 import { checkReadOnlyCommand } from './guard.js';
 import { redactDockerEnv, redactSecrets } from './redact.js';
@@ -86,6 +87,9 @@ interface PendingCall {
 
 export class AgentSession {
   private messages: ChatMessage[] = [];
+  private sessionBudget = contextInputBudget(config.ai.contextLimit);
+  private memoryRange?: { start: number; end: number };
+  private contextNotices = new Set<string>();
   private pending = new Map<string, PendingCall>();
   private steps = 0;
   private searchCalls = 0;
@@ -159,6 +163,7 @@ export class AgentSession {
     const memoryBlock = memoryPromptBlock(homeProfile.id, promptLang);
     if (memoryBlock) {
       systemPrompt += `\n\n${memoryBlock}`;
+      this.memoryRange = { start: systemPrompt.length - memoryBlock.length, end: systemPrompt.length };
     }
     this.messages.push({
       role: 'system',
@@ -521,6 +526,40 @@ export class AgentSession {
     });
   }
 
+  /** One context retry per API step; tools and step accounting live outside this method. */
+  private async requestCompletion(planMode: boolean): Promise<ChatCompletionResult> {
+    const tools = toolsForRequest(planMode, this.lang);
+    // Include the planning instructions in the estimate, including after emergency memory trimming.
+    const source = planMode ? buildPlanRequestMessages(this.messages, this.lang) : this.messages;
+    const notice = (key: 'contextHistoryNotice' | 'contextMemoryNotice' | 'contextRetryNotice'): void => {
+      if (this.contextNotices.has(key)) return;
+      this.contextNotices.add(key);
+      this.send({ type: 'notice', message: aiStr(this.lang, key) });
+    };
+    for (let attempt = 0; ; attempt++) {
+      this.loopAbort!.signal.throwIfAborted();
+      const view = fitToContext(source, tools, this.sessionBudget, { lang: this.lang, memoryRange: this.memoryRange });
+      if (view.droppedExchanges) notice('contextHistoryNotice');
+      if (view.memoryTruncated) notice('contextMemoryNotice');
+      const tokenFilter = createSuggestionTokenFilter((t) => this.send({ type: 'token', content: t }));
+      try {
+        const result = await streamChatCompletion({
+          messages: view.messages, tools, signal: this.loopAbort!.signal,
+          onToken: (token) => tokenFilter.push(token), lang: this.lang, sessionId: this.dialogueId,
+        });
+        tokenFilter.flush();
+        return result;
+      } catch (err) {
+        if (!(err instanceof ContextOverflowError) || attempt > 0 || this.loopAbort!.signal.aborted) throw err;
+        // fitToContext guarantees the estimate fits the session budget; halve the rejected request itself.
+        const smaller = Math.max(1024, Math.floor(view.estimatedTokens / 2));
+        if (smaller >= view.estimatedTokens) throw err;
+        this.sessionBudget = smaller;
+        notice('contextRetryNotice');
+      }
+    }
+  }
+
   /**
    * Planning step: a single API request WITHOUT tools (the `tools` key is
    * absent from the request body) with an extended system prompt. The model's
@@ -531,6 +570,7 @@ export class AgentSession {
    */
   private async runPlan(userContent: string): Promise<void> {
     if (this.running) return;
+    this.contextNotices.clear();
     this.running = true;
     this.stopRequested = false;
     this.planPending = false;
@@ -543,19 +583,7 @@ export class AgentSession {
       this.loopAbort = new AbortController();
       let assistant: ChatMessage;
       try {
-        // Holdback filter: the [[SUGGEST]] marker and the suggestion text
-        // never flash in the stream bubble. flush — on a successful stream
-        // only (decision 5 of the plan).
-        const tokenFilter = createSuggestionTokenFilter((t) => this.send({ type: 'token', content: t }));
-        const result = await streamChatCompletion({
-          messages: buildPlanRequestMessages(sanitizeMessages(this.messages), this.lang),
-          tools: toolsForRequest(true, this.lang),
-          signal: this.loopAbort.signal,
-          onToken: (token) => tokenFilter.push(token),
-          lang: this.lang,
-          sessionId: this.dialogueId,
-        });
-        tokenFilter.flush();
+        const result = await this.requestCompletion(true);
         assistant = result.message;
         // The planning step is a paid call too: record it in the journal.
         // The model comes from settings (getAiSettings), not env: env is
@@ -594,6 +622,7 @@ export class AgentSession {
 
   private async runLoop(userContent: string): Promise<void> {
     if (this.running) return;
+    this.contextNotices.clear();
     this.running = true;
     this.stopRequested = false;
     this.steps = 0;
@@ -612,20 +641,7 @@ export class AgentSession {
 
         let assistant: ChatMessage;
         try {
-          // Holdback filter: the [[SUGGEST]] marker and the suggestion text
-          // never flash in the stream bubble. flush — on a successful stream
-          // only: on the error/stop path the held-back tail does not matter
-          // (there is no final message there anyway, the loss is cosmetic).
-          const tokenFilter = createSuggestionTokenFilter((t) => this.send({ type: 'token', content: t }));
-          const result = await streamChatCompletion({
-            messages: sanitizeMessages(this.messages),
-            tools: getToolDefs(this.lang),
-            signal: this.loopAbort.signal,
-            onToken: (token) => tokenFilter.push(token),
-            lang: this.lang,
-            sessionId: this.dialogueId,
-          });
-          tokenFilter.flush();
+          const result = await this.requestCompletion(false);
           assistant = result.message;
           // Every chat call is a paid journal record (decisions 5, 6).
           if (result.usage) {

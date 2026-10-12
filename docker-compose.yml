@@ -15,6 +15,7 @@ services:
       - AI_API_KEY=${AI_API_KEY:-}
       - AI_MODEL=${AI_MODEL:-deepseek-v4-flash}
       - AI_MAX_STEPS=${AI_MAX_STEPS:-30}
+      - AI_CONTEXT_LIMIT=${AI_CONTEXT_LIMIT:-120000}
       - AI_TEMPERATURE=${AI_TEMPERATURE:-0.2}
       - AI_SEARCH_API_BASE=${AI_SEARCH_API_BASE:-}
       - AI_SEARCH_MODEL=${AI_SEARCH_MODEL:-deepseek-v4-flash}

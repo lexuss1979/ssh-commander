@@ -2860,6 +2860,13 @@ body.resizing-agent {
   background: var(--on-accent);
 }
 
+.agent-context-notice {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 12px;
+}
+
 .agent-messages {
   flex: 1;
   overflow-y: auto;

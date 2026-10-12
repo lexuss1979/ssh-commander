@@ -72,7 +72,7 @@ interface ToolCallView {
 
 interface ChatMessageView {
   id: number;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'notice';
   content: string;
   streaming?: boolean;
   toolCalls?: ToolCallView[];
@@ -551,6 +551,11 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           break;
         case 'message':
           finalizeAssistant(String(msg.content ?? ''));
+          break;
+        case 'notice':
+          if (typeof msg.message === 'string' && msg.message) {
+            setMessages((prev) => [...prev, { id: nextId++, role: 'notice', content: String(msg.message) }]);
+          }
           break;
         case 'suggestion':
           // The agent's suggested likely reply: the input placeholder,
@@ -1217,7 +1222,11 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
             </div>
           )}
           {messages.map((m) => (
-            <div key={m.id} className={`chat-row ${m.role}`}>
+            m.role === 'notice' ? (
+              <div key={m.id} className="agent-context-notice" role="status" aria-label={t('agent.serviceNotice')}>
+                {m.content}
+              </div>
+            ) : <div key={m.id} className={`chat-row ${m.role}`}>
               {m.content && (
                 <div className="bubble">
                   <Markdown

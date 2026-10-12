@@ -853,6 +853,7 @@ export const en: typeof ru = {
   'agent.errorDialogueRunning': 'Wait for the current dialogue to finish',
   'agent.deleteConfirm': 'Delete this dialogue? This action is irreversible.',
   'agent.errorFallback': 'Agent error',
+  'agent.serviceNotice': 'Service notice',
   'agent.errorBusy': 'The agent is running a task — wait for it to finish',
   'agent.errorBusyNow': 'The agent is currently running a task — wait for it to finish',
   'agent.auditNoConnection': 'No connection to the agent',

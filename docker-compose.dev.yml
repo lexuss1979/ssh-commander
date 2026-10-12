@@ -17,6 +17,7 @@ services:
       - AI_API_KEY=${AI_API_KEY:-}
       - AI_MODEL=${AI_MODEL:-gpt-4.1-mini}
       - AI_MAX_STEPS=${AI_MAX_STEPS:-30}
+      - AI_CONTEXT_LIMIT=${AI_CONTEXT_LIMIT:-120000}
       - AI_TEMPERATURE=${AI_TEMPERATURE:-0.2}
       # inotify не работает на bind-монтах Windows (WSL), поэтому polling
       - CHOKIDAR_USEPOLLING=true
