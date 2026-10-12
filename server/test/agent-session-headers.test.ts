@@ -49,6 +49,7 @@ beforeEach(() => {
 afterEach(() => {
   for (const session of sessions.splice(0)) session.stop();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 afterAll(() => {
   vi.unstubAllEnvs();
@@ -155,15 +156,16 @@ describe('agent — a stable OpenCode Go session', () => {
     'data: {"error":{"code":"inference_failed","message":"Upstream failed"}}\n\n',
     'data: [DONE]\n\n',
   ])('an error or an empty SSE response is visible in the UI and not saved as an empty response', async (frame) => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(frame, {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(frame, {
       status: 200, headers: { 'content-type': 'text/event-stream' },
     })));
     const target = makeSession();
     target.session.handleClientMessage({ type: 'message', content: 'привет' });
-    await vi.waitFor(() => {
-      expect(target.sent.filter((m) => m.type === 'error')).toHaveLength(1);
-      expect(target.session.isRunning).toBe(false);
-    });
+    await vi.runAllTimersAsync();
+    expect(target.sent.filter((m) => m.type === 'error')).toHaveLength(1);
+    expect(target.session.isRunning).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(frame.includes('[DONE]') ? 3 : 1);
     expect(target.sent.find((m) => m.type === 'error')?.message).toMatch(/inference_failed|без текста/);
     expect(target.sent.filter((m) => m.type === 'message')).toEqual([]);
     expect(getDialogue(target.session.dialogueId)?.messages.filter((m) => m.role === 'assistant')).toEqual([]);

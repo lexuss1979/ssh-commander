@@ -12,9 +12,16 @@
 //   4) the final assistant content with a trailing suggestion marker
 //      [[SUGGEST]] — the server cuts it out and sends the WS suggestion event
 //      (checked in agent.manual.mjs).
+// Set MOCK_EMPTY_RESPONSES=N for the empty-response scenario: N paid empty
+// responses followed by plain text (no SSH tools). Restart to reset the count.
 import http from 'node:http';
 
 const PORT = 8199;
+const emptyScenario = process.env.MOCK_EMPTY_RESPONSES !== undefined;
+const emptyResponses = Number(process.env.MOCK_EMPTY_RESPONSES ?? 0);
+if (!Number.isSafeInteger(emptyResponses) || emptyResponses < 0) {
+  throw new Error('MOCK_EMPTY_RESPONSES must be a non-negative integer');
+}
 
 function toolCall(id, name, args) {
   return {
@@ -74,10 +81,14 @@ const server = http.createServer((req, res) => {
   req.on('end', () => {
     requestNo += 1;
     const step = script[Math.min(requestNo, script.length) - 1];
-    const response = step();
+    const response = emptyScenario ? {
+      choices: [{ finish_reason: 'stop', message: {
+        role: 'assistant', content: requestNo <= emptyResponses ? null : 'Done after empty response retries.',
+      } }],
+    } : step();
     const calls = response.choices[0].message.tool_calls ?? [];
     console.log(
-      `[mock-openai] request #${requestNo}: ${calls.length ? `tool_calls=${calls.map((c) => c.function.name).join(',')}` : 'final content'}`,
+      `[mock-openai] request #${requestNo}: ${calls.length ? `tool_calls=${calls.map((c) => c.function.name).join(',')}` : response.choices[0].message.content ? 'final content' : 'empty response'}`,
     );
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(withUsage(response)));

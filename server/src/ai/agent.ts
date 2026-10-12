@@ -10,7 +10,6 @@ import { checkReadOnlyCommand } from './guard.js';
 import { redactDockerEnv, redactSecrets } from './redact.js';
 import { readMemory, writeMemory, memoryPromptBlock } from './memory.js';
 import { isSearchConfigured, searchWeb, type WebSearchUsage } from './web-search.js';
-import { getAiSettings } from '../services/settings.js';
 import { computeCostUsd } from './pricing.js';
 import { recordUsage, usageTotalsByDialogue } from './usage.js';
 import {
@@ -546,6 +545,7 @@ export class AgentSession {
         const result = await streamChatCompletion({
           messages: view.messages, tools, signal: this.loopAbort!.signal,
           onToken: (token) => tokenFilter.push(token), lang: this.lang, sessionId: this.dialogueId,
+          onUsage: (usage, model) => this.recordChatUsage(planMode ? 'plan' : 'chat', model, usage),
         });
         tokenFilter.flush();
         return result;
@@ -585,12 +585,6 @@ export class AgentSession {
       try {
         const result = await this.requestCompletion(true);
         assistant = result.message;
-        // The planning step is a paid call too: record it in the journal.
-        // The model comes from settings (getAiSettings), not env: env is
-        // seeded into settings at first start and never read afterwards.
-        if (result.usage) {
-          this.recordChatUsage('plan', getAiSettings().model, result.usage);
-        }
       } catch (err) {
         if (this.stopRequested) {
           this.send({ type: 'done', stopped: true, note: aiStr(this.lang, 'stoppedByUser') });
@@ -643,10 +637,6 @@ export class AgentSession {
         try {
           const result = await this.requestCompletion(false);
           assistant = result.message;
-          // Every chat call is a paid journal record (decisions 5, 6).
-          if (result.usage) {
-            this.recordChatUsage('chat', getAiSettings().model, result.usage);
-          }
         } catch (err) {
           if (this.stopRequested) {
             this.send({ type: 'done', stopped: true, note: aiStr(this.lang, 'stoppedByUser') });

@@ -9,13 +9,15 @@ import type { Profile } from '../src/types.js';
 const dataDir = mkdtempSync(path.join(tmpdir(), 'sc-agent-usage-'));
 process.env.DATA_DIR = dataDir;
 
-// The client and the search are network-free: streamChatCompletion returns a message + usage,
+// The client and the search are network-free: streamChatCompletion reports usage via a callback,
 // searchWeb — ok + usage (we check the journal record, not the HTTP itself).
 vi.mock('../src/ai/client.js', () => ({
-  streamChatCompletion: vi.fn(async () => ({
-    message: { role: 'assistant', content: 'ответ', tool_calls: [] },
-    usage: { promptTokens: 1000, cachedTokens: 200, completionTokens: 500, reasoningTokens: 50 },
-  })),
+  streamChatCompletion: vi.fn(async (opts: import('../src/ai/client.js').StreamOptions) => {
+    const usage = { promptTokens: 1000, cachedTokens: 200, completionTokens: 500, reasoningTokens: 50 };
+    const { getAiSettings } = await import('../src/services/settings.js');
+    opts.onUsage?.(usage, getAiSettings().model);
+    return { message: { role: 'assistant', content: 'ответ', tool_calls: [] }, usage };
+  }),
 }));
 
 vi.mock('../src/ai/web-search.js', () => ({

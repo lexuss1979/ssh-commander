@@ -50,6 +50,84 @@ afterEach(() => {
   sessions.splice(0).forEach((session) => session.stop());
   config.ai.maxSteps = 30;
   vi.unstubAllGlobals();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+describe('agent empty response retries', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  const empty = () => success({ role: 'assistant', content: null });
+  async function finish(t: ReturnType<typeof target>, planMode = false) {
+    t.session.handleClientMessage({ type: 'message', content: 'Continue', planMode });
+    await vi.runAllTimersAsync();
+    expect(t.session.isRunning).toBe(false);
+  }
+
+  it.each([false, true])('records each attempt once and keeps only the final message, plan=%s', async (planMode) => {
+    config.ai.maxSteps = 1;
+    respond = (_body, index) => index < 2 ? empty() : success();
+    const t = target(false);
+    await finish(t, planMode);
+    expect(requests).toHaveLength(3);
+    expect(requests[1]).toEqual(requests[0]);
+    expect(requests[2]).toEqual(requests[0]);
+    expect(t.sent.filter((m) => m.type === 'error')).toEqual([]);
+    expect(t.sent.filter((m) => m.type === 'message')).toHaveLength(1);
+    expect(t.sent.filter((m) => m.type === 'usage')).toHaveLength(3);
+    expect(t.sent.some((m) => m.type === 'plan_ready')).toBe(planMode);
+    expect(usageTotalsByDialogue().get(t.session.dialogueId)).toMatchObject({ calls: 3, promptTokens: 300, completionTokens: 30 });
+    expect(getDialogue(t.session.dialogueId)!.messages).toEqual([
+      { role: 'user', content: 'Continue' }, { role: 'assistant', content: 'Done' },
+    ]);
+  });
+
+  it.each([false, true])('records failed attempts without adding assistant placeholders, plan=%s', async (planMode) => {
+    respond = empty;
+    const t = target(false);
+    await finish(t, planMode);
+    expect(requests).toHaveLength(3);
+    expect(t.sent.filter((m) => m.type === 'error')).toHaveLength(1);
+    expect(t.sent.filter((m) => m.type === 'message')).toHaveLength(0);
+    expect(usageTotalsByDialogue().get(t.session.dialogueId)?.calls).toBe(3);
+    expect(getDialogue(t.session.dialogueId)!.messages).toEqual([{ role: 'user', content: 'Continue' }]);
+  });
+
+  it.each([false, true])('stops during backoff and retains the completed attempt cost, plan=%s', async (planMode) => {
+    respond = empty;
+    const t = target(false);
+    t.session.handleClientMessage({ type: 'message', content: 'Continue', planMode });
+    await vi.advanceTimersByTimeAsync(1000);
+    t.session.stop();
+    await vi.runAllTimersAsync();
+    expect(t.session.isRunning).toBe(false);
+    expect(requests).toHaveLength(1);
+    expect(usageTotalsByDialogue().get(t.session.dialogueId)?.calls).toBe(1);
+    expect(t.sent.some((m) => m.type === 'done' && m.stopped)).toBe(true);
+    expect(t.sent.filter((m) => m.type === 'error')).toEqual([]);
+  });
+
+  it('does not repeat tools or consume extra execution steps', async () => {
+    config.ai.maxSteps = 2;
+    respond = (_body, index) => index === 0 ? success({
+      role: 'assistant', content: null, tool_calls: [
+        { id: 'read-once', type: 'function', function: { name: 'read_memory', arguments: '{}' } },
+      ],
+    }) : index < 3 ? empty() : success();
+    const t = target(false);
+    await finish(t);
+    expect(requests).toHaveLength(4);
+    expect(requests[2]).toEqual(requests[1]);
+    expect(requests[3]).toEqual(requests[1]);
+    expect(t.sent.filter((m) => m.type === 'tool_start')).toHaveLength(1);
+    expect(t.sent.filter((m) => m.type === 'tool_result')).toHaveLength(1);
+    expect(t.sent.filter((m) => m.type === 'error')).toEqual([]);
+    expect(t.sent.find((m) => m.type === 'done')).not.toHaveProperty('note');
+    expect(usageTotalsByDialogue().get(t.session.dialogueId)?.calls).toBe(4);
+  });
 });
 afterAll(() => {
   vi.unstubAllEnvs();

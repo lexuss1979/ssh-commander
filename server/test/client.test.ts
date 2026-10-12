@@ -26,6 +26,8 @@ afterAll(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 function jsonResponse(data: Record<string, unknown>): Response {
@@ -289,9 +291,13 @@ describe('streamChatCompletion — errors inside HTTP 200', () => {
     'data: [DONE]\n\n',
     dataLine({ choices: [{ delta: { reasoning_content: 'скрытое рассуждение' } }] }) + 'data: [DONE]\n\n',
   ])('an empty stream or reasoning-only does not count as a successful response', async (frame) => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([frame])));
-    await expect(client.streamChatCompletion({ messages: [{ role: 'user', content: 'hi' }] }))
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => sseResponse([frame])));
+    const check = expect(client.streamChatCompletion({ messages: [{ role: 'user', content: 'hi' }] }))
       .rejects.toThrow('AI API завершил ответ без текста и вызовов инструментов');
+    await vi.runAllTimersAsync();
+    await check;
+    expect(fetch).toHaveBeenCalledTimes(3);
   });
 
   it('a JSON response with error at HTTP 200 keeps the error description', async () => {
@@ -301,11 +307,15 @@ describe('streamChatCompletion — errors inside HTTP 200', () => {
   });
 
   it('an empty message in a JSON response is not a success', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => jsonResponse({
       choices: [{ message: { role: 'assistant', content: null } }],
     })));
-    await expect(client.streamChatCompletion({ messages: [{ role: 'user', content: 'hi' }], lang: 'en' }))
+    const check = expect(client.streamChatCompletion({ messages: [{ role: 'user', content: 'hi' }], lang: 'en' }))
       .rejects.toThrow('The AI API completed the response without text or tool calls');
+    await vi.runAllTimersAsync();
+    await check;
+    expect(fetch).toHaveBeenCalledTimes(3);
   });
 
   it('an error after partial text is not swallowed and does not call onToolCalls', async () => {
@@ -369,7 +379,7 @@ describe('streamChatCompletion — transport failures', () => {
     await expect(
       client.streamChatCompletion({ messages: [{ role: 'user', content: 'hi' }], signal: controller.signal }),
     ).rejects.toThrow();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
@@ -514,6 +524,206 @@ function fetchMockArgs(): [string, RequestInit] {
   return call;
 }
 
+describe('streamChatCompletion — empty response retries', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  const paidUsage = { prompt_tokens: 100, prompt_cache_hit_tokens: 20, completion_tokens: 10,
+    completion_tokens_details: { reasoning_tokens: 5 } };
+  function empty(reason = 'stop', reasoning = false): Response {
+    return sseResponse([
+      dataLine({ choices: [{ delta: { content: ' \n', ...(reasoning ? { reasoning_content: 'PRIVATE REASONING' } : {}) } }] }),
+      dataLine({ choices: [{ finish_reason: reason }] }),
+      dataLine({ choices: [], usage: paidUsage }),
+      'data: [DONE]\n\n',
+    ]);
+  }
+  function success(): Response {
+    return sseResponse([
+      dataLine({ choices: [{ delta: { content: 'OK' }, finish_reason: 'stop' }] }),
+      dataLine({ choices: [], usage: paidUsage }), 'data: [DONE]\n\n',
+    ]);
+  }
+
+  it('retries the same request after 2 s, emits only the answer, and sums usage without persisting it', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(empty('stop', true)).mockResolvedValueOnce(success());
+    vi.stubGlobal('fetch', fetchMock);
+    const onToken = vi.fn();
+    const onUsage = vi.fn();
+    const messages = [{ role: 'user' as const, content: 'hello' }];
+    const promise = client.streamChatCompletion({ messages, sessionId: 'dialogue-test', onToken, onUsage });
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(onUsage).toHaveBeenCalledTimes(1);
+    // Settings changed during the pause must not change the retried request or its billing model.
+    saveSettings({ ...defaultSettings, aiModel: 'other-model' });
+    await vi.advanceTimersByTimeAsync(1);
+    const result = await promise;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toBe(fetchMock.mock.calls[0][0]);
+    expect(fetchMock.mock.calls[1][1].body).toBe(fetchMock.mock.calls[0][1].body);
+    expect(fetchMock.mock.calls[1][1].headers).toEqual(fetchMock.mock.calls[0][1].headers);
+    expect(onToken.mock.calls).toEqual([['OK']]);
+    expect(onUsage.mock.calls).toEqual(Array(2).fill([
+      { promptTokens: 100, cachedTokens: 20, completionTokens: 10, reasoningTokens: 5 }, 'test-model',
+    ]));
+    expect(result.usage).toEqual({ promptTokens: 200, cachedTokens: 40, completionTokens: 20, reasoningTokens: 10 });
+    expect(result.message).not.toHaveProperty('usage');
+    expect(messages).toEqual([{ role: 'user', content: 'hello' }]);
+    expect(console.warn).toHaveBeenCalledWith('AI API empty response:', expect.objectContaining({
+      sessionId: 'dialogue-test', finishReason: 'stop', hadReasoning: true, retry: true,
+    }));
+    expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain('PRIVATE REASONING');
+  });
+
+  it('waits 2 s and 5 s, then stops after three empty attempts and bills every one', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => empty()));
+    const onUsage = vi.fn();
+    const check = expect(client.streamChatCompletion({ messages: [], onUsage })).rejects.toMatchObject({
+      name: 'EmptyResponseError', finishReason: 'stop', hadReasoning: false,
+    });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    await check;
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(onUsage).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    ['content_filter', 'ru', 'фильтром провайдера', 2],
+    ['content_filter', 'en', 'provider filter', 2],
+    ['length', 'ru', 'исчерпан лимит', 3],
+    ['length', 'en', 'output token limit', 3],
+  ] as const)('classifies %s (%s) and limits attempts', async (reason, lang, error, count) => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => empty(reason, true)));
+    const check = expect(client.streamChatCompletion({ messages: [], lang })).rejects.toThrow(error);
+    await vi.runAllTimersAsync();
+    await check;
+    expect(fetch).toHaveBeenCalledTimes(count);
+  });
+
+  it('only consecutive content filters stop retries early', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(empty('content_filter'))
+      .mockResolvedValueOnce(empty('stop')).mockResolvedValueOnce(success()));
+    const promise = client.streamChatCompletion({ messages: [] });
+    await vi.runAllTimersAsync();
+    expect((await promise).message.content).toBe('OK');
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('aborts during the pause without another request and keeps the completed attempt usage', async () => {
+    const controller = new AbortController();
+    const onUsage = vi.fn();
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => empty()));
+    const promise = client.streamChatCompletion({ messages: [], signal: controller.signal, onUsage });
+    const check = expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.advanceTimersByTimeAsync(1000);
+    controller.abort();
+    await check;
+    await vi.runAllTimersAsync();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(onUsage).toHaveBeenCalledTimes(1);
+  });
+
+  it('handles an abort before the retry delay is registered', async () => {
+    const controller = new AbortController();
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => empty()));
+    const check = expect(client.streamChatCompletion({ messages: [], signal: controller.signal,
+      onUsage: () => controller.abort(),
+    })).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.runAllTimersAsync();
+    await check;
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(['http', 'sse', 'transport'] as const)('keeps empty-attempt usage if the next request fails: %s', async (kind) => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(empty());
+    if (kind === 'http') fetchMock.mockImplementation(async () => new Response('unavailable', { status: 503 }));
+    if (kind === 'sse') fetchMock.mockImplementation(async () => sseResponse([dataLine({ error: { message: 'failed' } })]));
+    if (kind === 'transport') fetchMock.mockRejectedValue(new TypeError('fetch failed'));
+    vi.stubGlobal('fetch', fetchMock);
+    const onUsage = vi.fn();
+    const check = expect(client.streamChatCompletion({ messages: [], onUsage })).rejects.toThrow();
+    await vi.runAllTimersAsync();
+    await check;
+    expect(fetch).toHaveBeenCalledTimes(kind === 'transport' ? 3 : 2);
+    expect(onUsage).toHaveBeenCalledTimes(1);
+  });
+
+  it('JSON preserves finish_reason and drops reasoning text from successful messages', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => jsonResponse({ choices: [{ finish_reason: 'length',
+      message: { role: 'assistant', content: null, reasoning_content: 'PRIVATE' },
+    }], usage: paidUsage })));
+    const check = expect(client.streamChatCompletion({ messages: [] })).rejects.toMatchObject({
+      finishReason: 'length', hadReasoning: true,
+    });
+    await vi.runAllTimersAsync();
+    await check;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ choices: [{
+      message: { role: 'assistant', content: 'OK', reasoning_content: 'PRIVATE' },
+    }] })));
+    expect(JSON.stringify(await client.streamChatCompletion({ messages: [] }))).not.toContain('PRIVATE');
+  });
+
+  it.each(['json', 'sse'] as const)('Responses %s retries empty incomplete output and records its usage', async (format) => {
+    saveSettings({ ...defaultSettings, aiProvider: 'opencode-go', aiModel: 'gpt-6-luna' });
+    const incomplete = { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' },
+      output: [{ type: 'reasoning', id: 'r', summary: [] }], usage: { input_tokens: 40, output_tokens: 20 } };
+    const completed = { status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: 'OK' }] }] };
+    const response = (data: typeof incomplete | typeof completed) => format === 'json' ? jsonResponse(data)
+      : sseResponse([dataLine({ type: `response.${data.status}`, response: data })]);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(response(incomplete)).mockResolvedValueOnce(response(completed)));
+    const onUsage = vi.fn();
+    const promise = client.streamChatCompletion({ messages: [], onUsage });
+    await vi.runAllTimersAsync();
+    const result = await promise;
+    expect(result.message.content).toBe('OK');
+    expect(result.usage).toEqual({ promptTokens: 40, completionTokens: 20 });
+    expect(onUsage).toHaveBeenCalledExactlyOnceWith(result.usage, 'gpt-6-luna');
+    expect(console.warn).toHaveBeenCalledWith('AI API empty response:', expect.objectContaining({ finishReason: 'length', hadReasoning: true }));
+  });
+
+  it('does not retry Responses after visible deltas even if final output is empty', async () => {
+    saveSettings({ ...defaultSettings, aiProvider: 'opencode-go', aiModel: 'gpt-6-luna' });
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => sseResponse([
+      dataLine({ type: 'response.output_text.delta', delta: 'partial' }),
+      dataLine({ type: 'response.incomplete', response: { output: [], incomplete_details: { reason: 'max_output_tokens' } } }),
+    ])));
+    const check = expect(client.streamChatCompletion({ messages: [] })).rejects.toBeInstanceOf(client.EmptyResponseError);
+    await vi.runAllTimersAsync();
+    await check;
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('never executes incomplete Responses tool calls or retries their request', async () => {
+    saveSettings({ ...defaultSettings, aiProvider: 'opencode-go', aiModel: 'gpt-6-luna' });
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => jsonResponse({ status: 'incomplete',
+      output: [{ type: 'function_call', call_id: 'c', name: 'exec', arguments: '{}' }],
+    })));
+    const onToolCalls = vi.fn();
+    await expect(client.streamChatCompletion({ messages: [], onToolCalls })).rejects.toThrow('не завершил');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(onToolCalls).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a contradictory completed event as successful tool output', async () => {
+    saveSettings({ ...defaultSettings, aiProvider: 'opencode-go', aiModel: 'gpt-6-luna' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([dataLine({ type: 'response.completed', response: {
+      status: 'incomplete', output: [{ type: 'function_call', call_id: 'c', name: 'exec', arguments: '{}' }],
+    } })])));
+    const onToolCalls = vi.fn();
+    await expect(client.streamChatCompletion({ messages: [], onToolCalls })).rejects.toThrow('не завершил');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(onToolCalls).not.toHaveBeenCalled();
+  });
+});
+
 describe('streamChatCompletion — Responses for Go models', () => {
   const model = 'gpt-6-luna';
   const apiBase = 'http://mock-api';
@@ -626,17 +836,20 @@ describe('streamChatCompletion — Responses for Go models', () => {
 
   it.each([
     [dataLine({ type: 'response.failed', response: { error: { code: 'inference_failed' } } }), 'inference_failed'],
-    [dataLine({ type: 'response.incomplete', response: { incomplete_details: { reason: 'max_output_tokens' } } }), 'не завершил'],
+    [dataLine({ type: 'response.incomplete', response: { incomplete_details: { reason: 'max_output_tokens' } } }), 'исчерпан лимит'],
     [dataLine({ type: 'error', message: 'provider broke' }), 'provider broke'],
     [dataLine({ type: 'response.output_text.delta', delta: 'partial' }), 'прервался'],
     [dataLine({ type: 'response.output_item.added', item: callItem }) + 'data: [DONE]\n\n', 'прервался'],
     [completionEvent([]), 'без текста'],
     [completionEvent([{ ...callItem, call_id: undefined }]), 'некорректный вызов инструмента'],
   ])('does not execute tools and reports an error for an unsuccessful stream', async (frame, expected) => {
+    vi.useFakeTimers();
     const onToolCalls = vi.fn();
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([frame])));
-    await expect(client.streamChatCompletion({ messages: [{ role: 'user', content: 'hi' }], onToolCalls }))
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => sseResponse([frame])));
+    const check = expect(client.streamChatCompletion({ messages: [{ role: 'user', content: 'hi' }], onToolCalls }))
       .rejects.toThrow(expected);
+    await vi.runAllTimersAsync();
+    await check;
     expect(onToolCalls).not.toHaveBeenCalled();
   });
 
