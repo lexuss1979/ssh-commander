@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAllowedOrigin, isLoopbackHostname } from '../src/util/origin.js';
+import { isAllowedOrigin, isContainerWildcardHost, isLoopbackHostname } from '../src/util/origin.js';
 
 describe('isLoopbackHostname', () => {
   it('recognizes loopback addresses', () => {
@@ -12,6 +12,21 @@ describe('isLoopbackHostname', () => {
     for (const h of ['evil.tld', '192.168.1.10', '10.0.0.5', 'localhost.evil.tld', '127.0.0.1.evil.tld']) {
       expect(isLoopbackHostname(h), h).toBe(false);
     }
+  });
+});
+
+describe('isContainerWildcardHost', () => {
+  // Regression: 0.0.0.0 was dropped from the loopback set for origins, but the
+  // same predicate drives the non-loopback startup warning, which would then
+  // fire on every Docker start (the Dockerfile sets APP_HOST=0.0.0.0).
+  it('keeps the wildcard bind out of trusted origins but not out of the warning', () => {
+    expect(isContainerWildcardHost('0.0.0.0')).toBe(true);
+    expect(isContainerWildcardHost(' 0.0.0.0 ')).toBe(true);
+    for (const h of ['127.0.0.1', 'localhost', '192.168.1.10', '::', '']) {
+      expect(isContainerWildcardHost(h), h).toBe(false);
+    }
+    expect(isLoopbackHostname('0.0.0.0')).toBe(false);
+    expect(isAllowedOrigin('http://0.0.0.0')).toBe(false);
   });
 });
 

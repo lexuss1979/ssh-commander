@@ -33,7 +33,7 @@ import { nginxRouter } from './routes/nginx.js';
 import { requireProfile } from './profiles.js';
 import { attachTerminal } from './ws/terminal.js';
 import { handleAgentWs, parseAgentLang } from './ws/agent.js';
-import { isAllowedOrigin, isAllowedApiSource, isLoopbackHostname } from './util/origin.js';
+import { isAllowedOrigin, isAllowedApiSource, isContainerWildcardHost, isLoopbackHostname } from './util/origin.js';
 
 ensureDirs();
 // Seed from env on first start (docs/settings-model-plan.md): settings.json
@@ -198,7 +198,7 @@ server.on('upgrade', (req, socket, head) => {
 server.listen(config.port, config.host, () => {
   if (config.access.network) console.warn('WARNING: proxy mode enabled. Use HTTPS, a client IP allow-list and an isolated backend; never expose this single-user tool publicly.');
   console.log(`ssh-commander listening on http://${config.host}:${config.port}`);
-  if (!isLoopbackHostname(config.host)) {
+  if (!isLoopbackHostname(config.host) && !isContainerWildcardHost(config.host)) {
     console.warn(
       `WARNING: APP_HOST=${config.host} — the app is reachable from the network. ` +
         'It is a single-user local tool without TLS: one password guards SSH access to every server. ' +

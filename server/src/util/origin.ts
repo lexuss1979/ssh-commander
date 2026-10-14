@@ -6,6 +6,24 @@ export function isLoopbackHostname(hostname: string): boolean {
   return h === 'localhost' || h === '::1' || (isIP(h) === 4 && h.startsWith('127.'));
 }
 
+/**
+ * The wildcard bind address the Dockerfile sets (`APP_HOST=0.0.0.0`).
+ *
+ * Deliberately a separate predicate from `isLoopbackHostname`: the two answer
+ * different questions and must not be merged back. As an *origin* `0.0.0.0`
+ * means "any interface" and is never trusted — hence its removal from the
+ * loopback set. As a *bind address* it is the required value inside a
+ * container, and compose still publishes the port on `127.0.0.1` only, so the
+ * "reachable from the network" warning in index.ts would be a false alarm on
+ * every start of the documented Docker deployment.
+ *
+ * `::` was never exempt from that warning and is not exempt here either —
+ * extending it would silence a warning that used to fire.
+ */
+export function isContainerWildcardHost(hostname: string): boolean {
+  return hostname.trim().toLowerCase() === '0.0.0.0';
+}
+
 /** Accept only serialized HTTP(S) origins, never paths, credentials or wildcards. */
 function parseOrigin(value: string): URL | null {
   try {
