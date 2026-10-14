@@ -94,4 +94,4 @@ docker compose up -d --build
 
 Repeat with `--build` after changing code. Hot-reload remains separate in `docker-compose.dev.yml`; see [CONTRIBUTING.md](../CONTRIBUTING.md).
 
-Optional private LAN access requires [HTTPS proxy mode](lan-access.md). The pinned 0.1.3 image does not support the new settings; build the modified sources until a release is available.
+Optional private LAN access requires [HTTPS proxy mode](lan-access.md). It was added in 0.2.0; older pinned images ignore the new settings.
