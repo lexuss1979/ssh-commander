@@ -159,6 +159,8 @@ Environment variables are set via `.env` (template: `.env.example`); inside the 
 |---|---|---|
 | `APP_PORT` / `APP_HOST` | `8080` / `127.0.0.1` | HTTP/WS port and bind address. The default is loopback; the Docker image sets `0.0.0.0` internally so the published port works. A non-loopback address prints a warning at startup |
 | `APP_PASSWORD` | empty | Password for the web UI. **Seed only, first start**: hashed into `data/settings.json`; empty — set via onboarding. Afterwards env is ignored; change it in Settings → Security |
+| `APP_ACCESS_MODE` | `local` | Network access mode. `local` accepts loopback origins only; `proxy` enables opt-in private LAN access through an HTTPS reverse proxy ([guide](docs/lan-access.md)). An unknown value stops startup |
+| `APP_TRUSTED_ORIGINS` | empty | In `proxy`, a **required** comma-separated list of exact HTTPS origins (scheme + host + port; no path, trailing `/`, wildcard or userinfo). Non-empty in `local` stops startup |
 | `DATA_DIR` | `/data` (docker) | Directory with `settings.json`, `profiles.json`, `db-connections.json`, `ai-dialogues.json`, `memory/`, … |
 | `KEYS_DIR` | `/keys` (docker) | Directory with SSH keys |
 | `WEB_DIST` | auto-detected | Path to the built frontend |
