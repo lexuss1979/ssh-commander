@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { readOriginPolicy } from './util/origin.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +40,7 @@ function float(name: string, def: number): number {
 }
 
 export const config = {
+  access: readOriginPolicy(process.env),
   // Default is the loopback address: the tool is single-user and TLS-less,
   // and "listens on 127.0.0.1 only" used to rely solely on docker-compose
   // port mapping. Inside a container 0.0.0.0 is required (otherwise port

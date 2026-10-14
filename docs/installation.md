@@ -93,3 +93,5 @@ docker compose up -d --build
 ```
 
 После изменения кода повторите команду с `--build`. Для hot-reload предусмотрен отдельный `docker-compose.dev.yml`, см. [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+Опциональный LAN-доступ через HTTPS proxy описан в [инструкции](lan-access.md). Образ 0.1.3 новые переменные не поддерживает; до выпуска используйте сборку из исходников.

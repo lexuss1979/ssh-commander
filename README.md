@@ -102,7 +102,7 @@ An **OpenCode Go subscription** is also supported, but **not every model**: Chat
 
 The app is free under the MIT license. AI usage is billed separately by your chosen provider; cost depends on the model and the task, and the app tracks estimated spending. You can use an OpenAI-compatible provider or a self-hosted model endpoint.
 
-ssh-commander runs locally, is password-protected, and listens on `127.0.0.1` only. No ssh-commander account or telemetry. Application state stays on your machine, but **AI prompts and tool results are sent to your configured provider**. Do not expose the app to the internet; read [Security](#security) before use.
+ssh-commander runs locally, is password-protected, and uses localhost-only access by default. Optional private LAN access requires [HTTPS proxy mode](docs/lan-access.md). No ssh-commander account or telemetry. Application state stays on your machine, but **AI prompts and tool results are sent to your configured provider**. Do not expose the app to the internet; read [Security](#security) before use.
 
 ## Features
 
@@ -182,7 +182,7 @@ Server profiles live in `data/profiles.json` (volume `./data`), DB connections i
 - The app binds **`127.0.0.1` by default** and `docker compose` publishes it only there — it is not reachable from the network. Don't change the port mapping or `APP_HOST` unless you understand the risk: this tool is not built to be exposed.
 - SSH host keys are verified on the **trust-on-first-use** model, like `ssh(1)`: the first key is remembered in `data/known-hosts.json`, and a changed key aborts the connection instead of handing your password to whoever answered.
 - Requests from another origin are rejected on both the API and the WebSocket handshake, so a page in another tab cannot drive your terminal.
-- It is a **single-user local tool**: SSH passwords and key passphrases are stored **in plain text** in `data/profiles.json`; database passwords likewise in `data/db-connections.json`. Never publish the `data/` volume and never expose the container beyond localhost. The API never sends those secrets back to the browser — a saved secret shows as “set”, and an empty field means “keep it”.
+- It is a **single-user local tool**: SSH passwords and key passphrases are stored **in plain text** in `data/profiles.json`; database passwords likewise in `data/db-connections.json`. Never publish the `data/` volume and keep the backend isolated; optional LAN access must use the documented HTTPS proxy and client IP allow-list. The API never sends those secrets back to the browser — a saved secret shows as “set”, and an empty field means “keep it”.
 - A profile backup contains your SSH passwords and the private keys themselves, so exporting with secrets **requires an encryption passphrase**; without one you get a backup without secrets.
 - SSH tunnels open an **unauthenticated listener** on `127.0.0.1:<port>` — any local process or user can reach the forwarded service without the app password (the same trust model as a local terminal).
 - The AI agent **never executes mutating actions without your approval**; auto-run read-only commands pass a conservative **allow-list** (reading utilities only — no interpreters, no network clients). Reading a file that looks like a secret store (`.env`, private keys, `.pgpass`) asks for approval too.
@@ -220,3 +220,7 @@ bash scripts/install-hooks.sh
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Optional private LAN access
+
+Localhost-only remains the default. `APP_ACCESS_MODE=proxy` requires exact HTTPS `APP_TRUSTED_ORIGINS` and a preconfigured password. REST and WebSocket retain session and source checks; cookies use Secure, and proxy headers are not trusted. Enforce client IP/CIDR restrictions at the HTTPS proxy/firewall and keep backend/tunnel ports on loopback. See the [setup guide](docs/lan-access.md) and [nginx example](docs/examples/lan-proxy.nginx.conf).
