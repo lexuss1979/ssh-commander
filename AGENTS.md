@@ -156,6 +156,7 @@ bash scripts/install-hooks.sh             # ставит pre-commit
   - `server/test/db.manual.mjs` — вкладка «Базы данных»: контейнеры postgres/mysql, test-connection (в т.ч. неверный пароль), query/dump, частичный update пароля.
   - `server/test/nginx.manual.mjs` — вкладка «Nginx»: SSH-хост с реальным docker; discovery, снапшот сайтов, сроки сертификатов, `nginx -t` и reload.
   - `server/test/bootstrap.manual.mjs` — «Новый сервер (root + пароль)»: сам поднимает sshd-контейнер (команды в шапке); откат, happy path дважды (идемпотентность), hardening поверх.
+  - `server/test/lan-proxy.manual.mjs` — LAN-доступ: сам поднимает локальный стенд (nginx с настоящим TLS перед образом приложения, клиенты на сети без маршрута к backend, ни одного порта на хост) и проверяет allow/deny по TCP-peer, поддельные `Forwarded`/`X-Forwarded-*`, WSS через прокси, плюс два контрольных сценария — подмена Origin на доверенный и allow-all.
 
 ## Безопасность (кратко)
 
