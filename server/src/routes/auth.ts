@@ -1,3 +1,4 @@
+import { config } from '../config.js';
 import { Router } from 'express';
 import {
   SESSION_COOKIE,
@@ -25,6 +26,7 @@ authRouter.post('/login', (req, res) => {
   resetLoginAttempts(ip);
   res.cookie(SESSION_COOKIE, token, {
     httpOnly: true,
+    secure: config.access.network,
     sameSite: 'lax',
     maxAge: 24 * 60 * 60 * 1000,
     path: '/',
@@ -34,7 +36,7 @@ authRouter.post('/login', (req, res) => {
 
 authRouter.post('/logout', (req, res) => {
   destroySession(authToken(req));
-  res.clearCookie(SESSION_COOKIE, { path: '/' });
+  res.clearCookie(SESSION_COOKIE, { path: '/', secure: config.access.network, httpOnly: true, sameSite: 'lax' });
   res.json({ ok: true });
 });
 

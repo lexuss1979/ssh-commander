@@ -12,7 +12,7 @@ Security fixes target the latest stable release listed in [Releases](https://git
 
 ## Trust boundaries
 
-- This is a single-user tool for a trusted local computer. Compose publishes the panel and tunnel ports only on `127.0.0.1`. Do not expose it through a public port, reverse proxy, or shared hosting account. Protect your computer and Docker access.
+- This is a single-user tool for a trusted local computer. Compose publishes the panel and tunnel ports only on `127.0.0.1`. Do not expose it publicly or on shared hosting. Optional private LAN access requires the explicit HTTPS proxy mode, a client IP allow-list and an isolated backend; see [LAN access](docs/lan-access.md). Protect your computer and Docker access.
 - The app password is stored as a scrypt hash. SSH and database passwords and the AI API key are stored **in plaintext** in local `data/` files; private SSH keys live in `keys/`. Restrictive file permissions do not encrypt these files. Protect backups as carefully as the originals.
 - The agent operates with the selected SSH user's permissions. Mutating tools require explicit approval. Automatic shell commands use a conservative read-only allow-list; sensitive file reads also require approval. Review the actual command and target server. Approval and secret redaction do not guarantee safety or undo changes.
 - AI prompts, conversation context and tool results go to the configured AI provider. When web search is enabled, queries go to its configured search endpoint. Redaction is best effort; never paste secrets into chat. Manual tools can be used without an AI key. There is no ssh-commander telemetry.

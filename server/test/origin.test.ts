@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAllowedOrigin, isLoopbackHostname } from '../src/util/origin.js';
+import { isAllowedOrigin, isContainerWildcardHost, isLoopbackAddress, isLoopbackHostname } from '../src/util/origin.js';
 
 describe('isLoopbackHostname', () => {
   it('recognizes loopback addresses', () => {
@@ -11,6 +11,39 @@ describe('isLoopbackHostname', () => {
   it('does not recognize external ones', () => {
     for (const h of ['evil.tld', '192.168.1.10', '10.0.0.5', 'localhost.evil.tld', '127.0.0.1.evil.tld']) {
       expect(isLoopbackHostname(h), h).toBe(false);
+    }
+  });
+});
+
+describe('isContainerWildcardHost', () => {
+  // Regression: 0.0.0.0 was dropped from the loopback set for origins, but the
+  // same predicate drives the non-loopback startup warning, which would then
+  // fire on every Docker start (the Dockerfile sets APP_HOST=0.0.0.0).
+  it('keeps the wildcard bind out of trusted origins but not out of the warning', () => {
+    expect(isContainerWildcardHost('0.0.0.0')).toBe(true);
+    expect(isContainerWildcardHost(' 0.0.0.0 ')).toBe(true);
+    for (const h of ['127.0.0.1', 'localhost', '192.168.1.10', '::', '']) {
+      expect(isContainerWildcardHost(h), h).toBe(false);
+    }
+    expect(isLoopbackHostname('0.0.0.0')).toBe(false);
+    expect(isAllowedOrigin('http://0.0.0.0')).toBe(false);
+  });
+});
+
+describe('isLoopbackAddress', () => {
+  // Socket peer addresses, not origins: on a dual-stack listener Node reports
+  // IPv4 peers as ::ffff:127.0.0.1, and the whole 127.0.0.0/8 range is loopback.
+  it('accepts every loopback form a socket peer can report', () => {
+    for (const a of ['127.0.0.1', '127.0.0.2', '127.1.2.3', '::1', '[::1]',
+      '::ffff:127.0.0.1', '::FFFF:127.0.0.1', '::ffff:127.9.9.9', ' 127.0.0.1 ']) {
+      expect(isLoopbackAddress(a), a).toBe(true);
+    }
+  });
+
+  it('rejects anything else, including an absent peer', () => {
+    for (const a of [undefined, null, '', '192.168.1.10', '10.0.0.5', '::ffff:192.168.1.10',
+      'evil.tld', '127.0.0.1.evil.tld', '::2']) {
+      expect(isLoopbackAddress(a), String(a)).toBe(false);
     }
   });
 });

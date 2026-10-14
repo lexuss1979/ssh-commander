@@ -9,7 +9,7 @@ import { SESSION_COOKIE, hasSession, readCookie, requireAuth } from './auth.js';
 import { authRouter } from './routes/auth.js';
 import { setupRouter } from './routes/setup.js';
 import { settingsRouter } from './routes/settings.js';
-import { getAiSettings, seedSettingsFromEnv } from './services/settings.js';
+import { getAiSettings, seedSettingsFromEnv, onboardingRequired } from './services/settings.js';
 import { profilesRouter } from './routes/profiles.js';
 import { keysRouter } from './routes/keys.js';
 import { filesRouter } from './routes/files.js';
@@ -33,7 +33,7 @@ import { nginxRouter } from './routes/nginx.js';
 import { requireProfile } from './profiles.js';
 import { attachTerminal } from './ws/terminal.js';
 import { handleAgentWs, parseAgentLang } from './ws/agent.js';
-import { isAllowedOrigin, isLoopbackHostname } from './util/origin.js';
+import { isAllowedOrigin, isAllowedApiSource, isContainerWildcardHost, isLoopbackAddress, isLoopbackHostname } from './util/origin.js';
 
 ensureDirs();
 // Seed from env on first start (docs/settings-model-plan.md): settings.json
@@ -41,18 +41,26 @@ ensureDirs();
 // password as a hash). After that env is never read — data/settings.json is
 // the source of truth.
 seedSettingsFromEnv();
+if (config.access.network && onboardingRequired()) {
+  throw new Error('Proxy mode requires an existing app password. Complete local setup first or seed APP_PASSWORD on first start.');
+}
 
 const app = express();
+// Never derive identity, origin or cookie security from caller-supplied proxy headers.
+app.set('trust proxy', false);
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
 
 /**
  * Cross-site requests are cut off by `Origin` (util/origin.ts) before any
  * router: before this the only protection was `sameSite: 'lax'` on the
- * cookie. /api/health deliberately stays open — healthchecks use it.
+ * cookie. In proxy mode only a loopback healthcheck may omit both source headers.
  */
 app.use('/api', (req, res, next) => {
-  if (isAllowedOrigin(req.headers.origin)) {
+  const localHealth = req.method === 'GET' && req.path === '/health' &&
+    req.headers.origin === undefined &&
+    isLoopbackAddress(req.socket.remoteAddress);
+  if (localHealth || isAllowedApiSource(req.method, req.headers.origin, req.headers.referer, config.access)) {
     next();
     return;
   }
@@ -141,10 +149,11 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
-  const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+  // Host is untrusted; only the relative path/query are needed here.
+  const url = new URL(req.url ?? '/', 'http://localhost');
   // Same gate as /api: a WS handshake from someone else's page is a ready
   // terminal on the user's servers.
-  if (!isAllowedOrigin(req.headers.origin)) {
+  if (!isAllowedOrigin(req.headers.origin, config.access)) {
     socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
     socket.destroy();
     return;
@@ -187,8 +196,9 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 server.listen(config.port, config.host, () => {
+  if (config.access.network) console.warn('WARNING: proxy mode enabled. Use HTTPS, a client IP allow-list and an isolated backend; never expose this single-user tool publicly.');
   console.log(`ssh-commander listening on http://${config.host}:${config.port}`);
-  if (!isLoopbackHostname(config.host)) {
+  if (!isLoopbackHostname(config.host) && !isContainerWildcardHost(config.host)) {
     console.warn(
       `WARNING: APP_HOST=${config.host} — the app is reachable from the network. ` +
         'It is a single-user local tool without TLS: one password guards SSH access to every server. ' +

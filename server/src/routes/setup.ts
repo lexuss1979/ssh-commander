@@ -1,3 +1,4 @@
+import { config } from '../config.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import { SESSION_COOKIE, createSession, isRateLimited, resetLoginAttempts } from '../auth.js';
@@ -136,6 +137,7 @@ setupRouter.post('/', (req, res) => {
   resetLoginAttempts(ip);
   res.cookie(SESSION_COOKIE, token, {
     httpOnly: true,
+    secure: config.access.network,
     sameSite: 'lax',
     maxAge: 24 * 60 * 60 * 1000,
     path: '/',

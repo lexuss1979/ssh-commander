@@ -8,6 +8,8 @@ services:
       # Обе стороны маппинга используют одни переменные — источник истины один.
       - "127.0.0.1:${TUNNEL_PORT_MIN:-10000}-${TUNNEL_PORT_MAX:-10049}:${TUNNEL_PORT_MIN:-10000}-${TUNNEL_PORT_MAX:-10049}"
     environment:
+      - APP_ACCESS_MODE=${APP_ACCESS_MODE:-local}
+      - APP_TRUSTED_ORIGINS=${APP_TRUSTED_ORIGINS:-}
       # Пусто = «не задан»: пароль сеется в data/settings.json при первом
       # старте или задаётся в onboarding; после первого старта env не читается.
       - APP_PASSWORD=${APP_PASSWORD:-}
