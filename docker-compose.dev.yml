@@ -12,6 +12,9 @@ services:
     environment:
       - APP_HOST=0.0.0.0
       - APP_PORT=8080
+      # APP_ACCESS_MODE / APP_TRUSTED_ORIGINS здесь намеренно не пробрасываются:
+      # Vite отдаёт UI по http на :5173, а proxy-режим принимает только точные
+      # HTTPS-Origin — в dev-раскладке этот режим всё равно не проверить.
       - APP_PASSWORD=${APP_PASSWORD:-admin}
       - AI_API_BASE=${AI_API_BASE:-https://api.openai.com/v1}
       - AI_API_KEY=${AI_API_KEY:-}

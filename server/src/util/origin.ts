@@ -24,6 +24,19 @@ export function isContainerWildcardHost(hostname: string): boolean {
   return hostname.trim().toLowerCase() === '0.0.0.0';
 }
 
+/**
+ * Whether a socket peer address is loopback. Unlike `isLoopbackHostname` this
+ * accepts the IPv4-mapped IPv6 form Node reports on dual-stack listeners
+ * (`::ffff:127.0.0.1`) and covers the whole 127.0.0.0/8 range, so a caller does
+ * not have to enumerate literals and cannot miss a form.
+ */
+export function isLoopbackAddress(address: string | undefined | null): boolean {
+  if (!address) return false;
+  const bare = address.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  const mapped = bare.startsWith('::ffff:') ? bare.slice(7) : bare;
+  return isLoopbackHostname(mapped);
+}
+
 /** Accept only serialized HTTP(S) origins, never paths, credentials or wildcards. */
 function parseOrigin(value: string): URL | null {
   try {

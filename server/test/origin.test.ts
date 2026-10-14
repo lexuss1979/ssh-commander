@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAllowedOrigin, isContainerWildcardHost, isLoopbackHostname } from '../src/util/origin.js';
+import { isAllowedOrigin, isContainerWildcardHost, isLoopbackAddress, isLoopbackHostname } from '../src/util/origin.js';
 
 describe('isLoopbackHostname', () => {
   it('recognizes loopback addresses', () => {
@@ -27,6 +27,24 @@ describe('isContainerWildcardHost', () => {
     }
     expect(isLoopbackHostname('0.0.0.0')).toBe(false);
     expect(isAllowedOrigin('http://0.0.0.0')).toBe(false);
+  });
+});
+
+describe('isLoopbackAddress', () => {
+  // Socket peer addresses, not origins: on a dual-stack listener Node reports
+  // IPv4 peers as ::ffff:127.0.0.1, and the whole 127.0.0.0/8 range is loopback.
+  it('accepts every loopback form a socket peer can report', () => {
+    for (const a of ['127.0.0.1', '127.0.0.2', '127.1.2.3', '::1', '[::1]',
+      '::ffff:127.0.0.1', '::FFFF:127.0.0.1', '::ffff:127.9.9.9', ' 127.0.0.1 ']) {
+      expect(isLoopbackAddress(a), a).toBe(true);
+    }
+  });
+
+  it('rejects anything else, including an absent peer', () => {
+    for (const a of [undefined, null, '', '192.168.1.10', '10.0.0.5', '::ffff:192.168.1.10',
+      'evil.tld', '127.0.0.1.evil.tld', '::2']) {
+      expect(isLoopbackAddress(a), String(a)).toBe(false);
+    }
   });
 });
 

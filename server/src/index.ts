@@ -33,7 +33,7 @@ import { nginxRouter } from './routes/nginx.js';
 import { requireProfile } from './profiles.js';
 import { attachTerminal } from './ws/terminal.js';
 import { handleAgentWs, parseAgentLang } from './ws/agent.js';
-import { isAllowedOrigin, isAllowedApiSource, isContainerWildcardHost, isLoopbackHostname } from './util/origin.js';
+import { isAllowedOrigin, isAllowedApiSource, isContainerWildcardHost, isLoopbackAddress, isLoopbackHostname } from './util/origin.js';
 
 ensureDirs();
 // Seed from env on first start (docs/settings-model-plan.md): settings.json
@@ -59,7 +59,7 @@ app.use(cookieParser());
 app.use('/api', (req, res, next) => {
   const localHealth = req.method === 'GET' && req.path === '/health' &&
     req.headers.origin === undefined &&
-    ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? '');
+    isLoopbackAddress(req.socket.remoteAddress);
   if (localHealth || isAllowedApiSource(req.method, req.headers.origin, req.headers.referer, config.access)) {
     next();
     return;
