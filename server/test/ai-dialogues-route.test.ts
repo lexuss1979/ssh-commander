@@ -13,7 +13,7 @@ vi.stubEnv('DATA_DIR', dataDir);
 
 const express = (await import('express')).default;
 const { aiRouter } = await import('../src/routes/ai.js');
-const { createDialogue, setDialogueStepLimitReached } = await import('../src/ai/dialogues.js');
+const { createDialogue, setDialogueMessageQueue, setDialogueStepLimitReached } = await import('../src/ai/dialogues.js');
 
 let server: Server;
 let base = '';
@@ -34,7 +34,12 @@ afterAll(async () => {
 });
 
 interface DialoguePayload {
-  dialogue: { id: string; stepLimitReached?: boolean; usage?: unknown };
+  dialogue: {
+    id: string;
+    stepLimitReached?: boolean;
+    messageQueue?: Array<{ id: string; content: string; kind: 'steer' | 'queue' }>;
+    usage?: unknown;
+  };
 }
 
 describe('GET /api/ai/dialogues/:id — the step-limit state', () => {
@@ -54,6 +59,19 @@ describe('GET /api/ai/dialogues/:id — the step-limit state', () => {
     const body = (await res.json()) as DialoguePayload;
     expect(body.dialogue.stepLimitReached).toBe(true);
     expect(body.dialogue.id).toBe(d.id);
+  });
+
+  it('exposes the persisted message queue for reconnect restoration', async () => {
+    const d = createDialogue('route-profile');
+    setDialogueMessageQueue(d.id, [{
+      id: 'route-queue-1', content: 'next task', kind: 'steer', createdAt: Date.now(),
+    }]);
+    const res = await fetch(`${base}/dialogues/${d.id}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DialoguePayload;
+    expect(body.dialogue.messageQueue).toEqual([
+      expect.objectContaining({ id: 'route-queue-1', content: 'next task', kind: 'steer' }),
+    ]);
   });
 
   it('a resolved continuation is exposed as false', async () => {

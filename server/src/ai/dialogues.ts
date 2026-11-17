@@ -9,6 +9,17 @@ import { sanitizeMessages } from './messages.js';
 // (approval → tools → web-search → settings).
 import type { AgentApprovalMode } from './approval.js';
 
+export const MAX_QUEUED_MESSAGES = 20;
+export const MAX_QUEUED_MESSAGE_LENGTH = 32000;
+
+export interface QueuedAgentMessage {
+  id: string;
+  content: string;
+  kind: 'steer' | 'queue';
+  planMode?: boolean;
+  createdAt: number;
+}
+
 export interface Dialogue {
   id: string;
   profileId: string;
@@ -23,6 +34,9 @@ export interface Dialogue {
   // awaits a manual continuation (issue #5). Optional: the absence reads as
   // false — old files stay valid, nothing is rewritten for it.
   stepLimitReached?: boolean;
+  // User messages submitted during a run but not applied to the model yet
+  // (issue #6). They become regular user messages only at a safe boundary.
+  messageQueue?: QueuedAgentMessage[];
   title: string;
   messages: ChatMessage[];
   messageCount: number;
@@ -68,6 +82,14 @@ const messageSchema = z.object({
   }).optional(),
 });
 
+const queuedMessageSchema = z.object({
+  id: z.string().min(1),
+  content: z.string().min(1).max(MAX_QUEUED_MESSAGE_LENGTH),
+  kind: z.enum(['steer', 'queue']),
+  planMode: z.boolean().optional(),
+  createdAt: z.number(),
+});
+
 const dialogueSchema = z.object({
   id: z.string().min(1),
   profileId: z.string().min(1),
@@ -77,6 +99,8 @@ const dialogueSchema = z.object({
   approvalMode: z.enum(['always', 'needed', 'never']).optional(),
   // Optional: the absence reads as false (no continuation pending).
   stepLimitReached: z.boolean().optional(),
+  // Optional: older dialogues have an empty queue by default.
+  messageQueue: z.array(queuedMessageSchema).max(MAX_QUEUED_MESSAGES).optional(),
   title: z.string(),
   messages: z.array(messageSchema).default([]),
   messageCount: z.number().int().min(0),
@@ -130,11 +154,19 @@ function persist(list: Dialogue[]): void {
   // 0600: everything the agent has read on the servers settles in the dialogues.
   fs.writeFileSync(tmp, JSON.stringify({ dialogues: list }, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, storePath());
-  cache = list.map((d) => ({ ...d, messages: [...d.messages] }));
+  cache = list.map((d) => ({
+    ...d,
+    messages: [...d.messages],
+    messageQueue: d.messageQueue?.map((item) => ({ ...item })),
+  }));
 }
 
 function copy(d: Dialogue): Dialogue {
-  return { ...d, messages: [...d.messages] };
+  return {
+    ...d,
+    messages: [...d.messages],
+    messageQueue: d.messageQueue?.map((item) => ({ ...item })),
+  };
 }
 
 export function listDialogues(profileId: string): DialogueSummary[] {
@@ -200,6 +232,22 @@ export function setDialogueStepLimitReached(id: string, reached: boolean): Dialo
     throw new Error(`Dialogue ${id} not found`);
   }
   list[idx] = { ...list[idx], stepLimitReached: reached, updatedAt: Date.now() };
+  persist(list);
+  return copy(list[idx]);
+}
+
+export function setDialogueMessageQueue(id: string, messageQueue: QueuedAgentMessage[]): Dialogue {
+  const list = load();
+  const idx = list.findIndex((d) => d.id === id);
+  if (idx < 0) {
+    throw new Error(`Dialogue ${id} not found`);
+  }
+  const validated = z.array(queuedMessageSchema).max(MAX_QUEUED_MESSAGES).parse(messageQueue);
+  list[idx] = {
+    ...list[idx],
+    messageQueue: validated.map((item) => ({ ...item })),
+    updatedAt: Date.now(),
+  };
   persist(list);
   return copy(list[idx]);
 }
@@ -291,13 +339,20 @@ function oneLine(text: string, max: number): string {
  * and derives the title/preview. The title is fixed from the first user
  * message unless the dialogue is still untitled.
  */
-export function saveDialogueMessages(id: string, messages: ChatMessage[]): Dialogue {
+export function saveDialogueMessages(
+  id: string,
+  messages: ChatMessage[],
+  messageQueue?: QueuedAgentMessage[],
+): Dialogue {
   const list = load();
   const idx = list.findIndex((d) => d.id === id);
   if (idx < 0) {
     throw new Error(`Dialogue ${id} not found`);
   }
   const stored = sanitizeMessages(messages.filter((m) => m.role !== 'system'));
+  const validatedQueue = messageQueue === undefined
+    ? undefined
+    : z.array(queuedMessageSchema).max(MAX_QUEUED_MESSAGES).parse(messageQueue);
   const firstUser = stored.find((m) => m.role === 'user');
   const lastVisible = [...stored].reverse().find((m) => m.role === 'user' || m.role === 'assistant');
   const current = list[idx];
@@ -312,6 +367,7 @@ export function saveDialogueMessages(id: string, messages: ChatMessage[]): Dialo
     messages: stored,
     messageCount: stored.length,
     preview,
+    ...(validatedQueue ? { messageQueue: validatedQueue.map((item) => ({ ...item })) } : {}),
     updatedAt: Date.now(),
   };
   persist(list);

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { WebSocket } from 'ws';
 import { config } from '../config.js';
 import { ContextOverflowError, streamChatCompletion, type ChatCompletionResult, type ChatMessage, type TokenUsage, type ToolCall } from './client.js';
@@ -65,10 +66,14 @@ import {
   dialogueApprovalMode,
   dialogueStepLimitReached,
   getDialogue,
+  MAX_QUEUED_MESSAGE_LENGTH,
+  MAX_QUEUED_MESSAGES,
   saveDialogueMessages,
   setDialogueApprovalMode,
+  setDialogueMessageQueue,
   setDialogueStepLimitReached,
   type Dialogue,
+  type QueuedAgentMessage,
 } from './dialogues.js';
 
 const MAX_TOOL_OUTPUT = 12000;
@@ -83,10 +88,22 @@ type WsMessage = Record<string, unknown>;
 
 interface PendingCall {
   callId: string;
+  name: string;
+  args: Record<string, unknown>;
+  server?: string;
   resolve: (decision: 'approved' | 'rejected' | 'aborted') => void;
 }
 
+interface ActiveTool {
+  callId: string;
+  name: string;
+  args: Record<string, unknown>;
+  server?: string;
+  autoApproved?: boolean;
+}
+
 export class AgentSession {
+  private sockets = new Set<WebSocket>();
   private messages: ChatMessage[] = [];
   private sessionBudget = contextInputBudget(config.ai.contextLimit);
   private memoryRange?: { start: number; end: number };
@@ -96,7 +113,8 @@ export class AgentSession {
   private searchCalls = 0;
   private stopRequested = false;
   private running = false;
-  private wsClosed = false;
+  private retired = false;
+  private activeTool: ActiveTool | null = null;
   private loopAbort: AbortController | null = null;
   // A plan has been drafted and awaits approve_plan (or edits via a regular message with planMode=true).
   private planPending = false;
@@ -119,16 +137,19 @@ export class AgentSession {
   // button survives a reload; cleared by any run that ends otherwise, by a
   // new user turn and by a user stop.
   private stepLimitReached: boolean;
+  private messageQueue: QueuedAgentMessage[];
 
   constructor(
     private homeProfile: Profile,
-    private ws: WebSocket,
+    ws: WebSocket,
     dialogue?: Dialogue,
     // The session lang — the language of the system prompt and responses —
     // comes from the client over the WS connection (query `lang`):
     // agent lang = UI lang.
     private readonly lang: PromptLang = 'ru',
   ) {
+    this.sockets.add(ws);
+    this.messageQueue = dialogue?.messageQueue?.map((item) => ({ ...item })) ?? [];
     this.dialogueId = dialogue?.id ?? createDialogue(homeProfile.id).id;
     // The access level comes from the dialogue ('needed' for a new one and
     // for all dialogues without the field — the read-time migration).
@@ -196,6 +217,49 @@ export class AgentSession {
     return this.planPending;
   }
 
+  get language(): PromptLang {
+    return this.lang;
+  }
+
+  get hasSockets(): boolean {
+    return this.sockets.size > 0;
+  }
+
+  attachSocket(ws: WebSocket): void {
+    this.sockets.add(ws);
+    this.sendTo(ws, { type: 'dialogue', id: this.dialogueId });
+    this.sendTo(ws, this.serversEvent());
+    this.sendTo(ws, { type: 'approval_mode', mode: this.approvalMode });
+    this.sendTo(ws, { type: 'message_queue', items: this.messageQueue });
+    if (this.running) {
+      this.sendTo(ws, { type: 'running', steps: config.ai.maxSteps });
+    }
+    if (this.planPending) {
+      this.sendTo(ws, { type: 'plan_ready' });
+    }
+    if (this.activeTool) {
+      this.sendTo(ws, {
+        type: 'tool_start',
+        ...this.activeTool,
+        ...(this.activeTool.autoApproved ? { autoApproved: true } : {}),
+      });
+    }
+    for (const pending of this.pending.values()) {
+      this.sendTo(ws, {
+        type: 'tool_pending',
+        callId: pending.callId,
+        name: pending.name,
+        args: pending.args,
+        server: pending.server,
+      });
+    }
+    this.startNextQueued();
+  }
+
+  resumeQueued(): void {
+    this.startNextQueued();
+  }
+
   notifyDialogue(): void {
     this.send({ type: 'dialogue', id: this.dialogueId });
   }
@@ -211,6 +275,10 @@ export class AgentSession {
    */
   notifyApprovalMode(): void {
     this.send({ type: 'approval_mode', mode: this.approvalMode });
+  }
+
+  notifyMessageQueue(): void {
+    this.send({ type: 'message_queue', items: this.messageQueue });
   }
 
   /**
@@ -325,19 +393,47 @@ export class AgentSession {
   }
 
   handleClientMessage(data: WsMessage): void {
+    if (this.retired) return;
     switch (data.type) {
       case 'message': {
         const content = String(data.content ?? '').trim();
-        if (content && !this.running) {
-          if (data.planMode === true) {
-            // Plan mode (or edits to a pending plan): draft the plan again.
-            void this.runPlan(content);
-          } else {
-            // planMode=false/absent — leaving plan mode.
-            this.planPending = false;
-            void this.runLoop(content);
-          }
+        if (!content) break;
+        if (this.running && content.length > MAX_QUEUED_MESSAGE_LENGTH) {
+          this.send({
+            type: 'error',
+            scope: 'queue',
+            message: aiStr(this.lang, 'messageTooLong', { n: MAX_QUEUED_MESSAGE_LENGTH }),
+            rejectedContent: content,
+          });
+          break;
         }
+        if (this.running && this.stopRequested) {
+          this.send({
+            type: 'error',
+            scope: 'queue',
+            message: aiStr(this.lang, 'queueStopped'),
+            rejectedContent: content,
+          });
+          break;
+        }
+        if (this.running) {
+          this.enqueueMessage(
+            content,
+            data.delivery === 'steer' ? 'steer' : 'queue',
+            data.planMode === true,
+          );
+        } else if (data.planMode === true) {
+          // Plan mode (or edits to a pending plan): draft the plan again.
+          void this.runPlan(content);
+        } else {
+          // planMode=false/absent — leaving plan mode.
+          this.planPending = false;
+          void this.runLoop(content);
+        }
+        break;
+      }
+      case 'delete_queued': {
+        this.deleteQueuedMessage(String(data.id ?? ''));
         break;
       }
       case 'approve_plan': {
@@ -442,9 +538,106 @@ export class AgentSession {
     }
   }
 
-  stop(): void {
+  private enqueueMessage(content: string, kind: 'steer' | 'queue', planMode: boolean): void {
+    if (this.messageQueue.length >= MAX_QUEUED_MESSAGES) {
+      this.send({
+        type: 'error',
+        scope: 'queue',
+        message: aiStr(this.lang, 'queueLimit', { n: MAX_QUEUED_MESSAGES }),
+        rejectedContent: content,
+      });
+      return;
+    }
+    const item: QueuedAgentMessage = {
+      id: randomUUID(),
+      content,
+      kind,
+      ...(planMode ? { planMode: true } : {}),
+      createdAt: Date.now(),
+    };
+    try {
+      setDialogueMessageQueue(this.dialogueId, [...this.messageQueue, item]);
+    } catch (err) {
+      this.send({ type: 'error', scope: 'queue', message: String((err as Error).message ?? err) });
+      return;
+    }
+    this.messageQueue = [...this.messageQueue, item];
+    this.notifyMessageQueue();
+  }
+
+  private deleteQueuedMessage(id: string): void {
+    if (!id || !this.messageQueue.some((item) => item.id === id)) {
+      this.notifyMessageQueue();
+      return;
+    }
+    const next = this.messageQueue.filter((item) => item.id !== id);
+    try {
+      setDialogueMessageQueue(this.dialogueId, next);
+      this.messageQueue = next;
+    } catch (err) {
+      this.send({ type: 'error', scope: 'queue', message: String((err as Error).message ?? err) });
+    }
+    this.notifyMessageQueue();
+  }
+
+  private applySteering(): boolean {
+    if (this.stopRequested || !this.messageQueue.some((item) => item.kind === 'steer')) return false;
+    const steering = this.messageQueue.filter((item) => item.kind === 'steer');
+    const nextQueue = this.messageQueue.filter((item) => item.kind !== 'steer');
+    const nextMessages = [
+      ...this.messages,
+      ...steering.map((item): ChatMessage => ({ role: 'user', content: item.content })),
+    ];
+    try {
+      saveDialogueMessages(this.dialogueId, nextMessages, nextQueue);
+    } catch (err) {
+      this.send({ type: 'error', scope: 'queue', message: String((err as Error).message ?? err) });
+      return false;
+    }
+    this.messages = nextMessages;
+    this.messageQueue = nextQueue;
+    for (const item of steering) {
+      this.send({ type: 'message', role: 'user', content: item.content });
+    }
+    this.notifyMessageQueue();
+    return true;
+  }
+
+  private startNextQueued(): void {
+    if (
+      this.running || this.stopRequested || this.planPending || !this.hasSockets || this.messageQueue.length === 0
+    ) return;
+    const [item, ...rest] = this.messageQueue;
+    const nextMessages = [...this.messages, { role: 'user', content: item.content } as ChatMessage];
+    try {
+      saveDialogueMessages(this.dialogueId, nextMessages, rest);
+    } catch (err) {
+      this.send({ type: 'error', scope: 'queue', message: String((err as Error).message ?? err) });
+      return;
+    }
+    this.messages = nextMessages;
+    this.messageQueue = rest;
+    this.notifyMessageQueue();
+    this.send({ type: 'message', role: 'user', content: item.content });
+    if (item.kind === 'queue' && item.planMode) {
+      void this.runPlan(item.content, true);
+    } else {
+      void this.runLoop(item.content, true);
+    }
+  }
+
+  stop(options: { clearQueue?: boolean } = {}): void {
     this.stopRequested = true;
     this.planPending = false;
+    if ((options.clearQueue ?? true) && this.messageQueue.length > 0) {
+      this.messageQueue = [];
+      try {
+        setDialogueMessageQueue(this.dialogueId, []);
+      } catch (err) {
+        console.warn(`Failed to clear message queue for dialogue ${this.dialogueId}:`, err);
+      }
+      this.notifyMessageQueue();
+    }
     // sudo passwords must not outlive the current run.
     this.sudoPasswords.clear();
     this.loopAbort?.abort();
@@ -452,6 +645,18 @@ export class AgentSession {
       pending.resolve('aborted');
     }
     this.pending.clear();
+  }
+
+  retire(): void {
+    this.retired = true;
+    this.stop({ clearQueue: false });
+    for (const ws of this.sockets) {
+      try {
+        ws.close(1000, 'Session replaced');
+      } catch {
+        /* already closed */
+      }
+    }
   }
 
   /**
@@ -484,20 +689,32 @@ export class AgentSession {
     }
   }
 
-  onWsClose(): void {
-    this.wsClosed = true;
-    this.stop();
-  }
-
-  private send(data: WsMessage): void {
-    if (!this.wsClosed && this.ws.readyState === this.ws.OPEN) {
-      this.ws.send(JSON.stringify(data));
+  onWsClose(ws: WebSocket): void {
+    this.sockets.delete(ws);
+    if (this.sockets.size === 0) {
+      this.sudoPasswords.clear();
+      for (const pending of this.pending.values()) {
+        pending.resolve('aborted');
+      }
+      this.pending.clear();
     }
   }
 
-  private save(): void {
+  private sendTo(ws: WebSocket, data: WsMessage): void {
+    if (ws.readyState === ws.OPEN) {
+      ws.send(JSON.stringify(data));
+    }
+  }
+
+  private send(data: WsMessage): void {
+    for (const ws of this.sockets) {
+      this.sendTo(ws, data);
+    }
+  }
+
+  private save(messageQueue?: QueuedAgentMessage[]): void {
     try {
-      saveDialogueMessages(this.dialogueId, this.messages);
+      saveDialogueMessages(this.dialogueId, this.messages, messageQueue);
     } catch (err) {
       console.warn(`Failed to save dialogue ${this.dialogueId}:`, err);
     }
@@ -568,9 +785,30 @@ export class AgentSession {
     }
   }
 
-  private waitDecision(callId: string): Promise<'approved' | 'rejected' | 'aborted'> {
+  private async runTrackedTool(
+    callId: string,
+    name: string,
+    args: Record<string, unknown>,
+    server?: string,
+    autoApproved?: boolean,
+  ): Promise<{ status: 'ok' | 'error'; output: string; truncated: boolean }> {
+    this.activeTool = { callId, name, args, server, autoApproved };
+    try {
+      return await this.runTool(name, args);
+    } finally {
+      this.activeTool = null;
+    }
+  }
+
+  private waitDecision(
+    callId: string,
+    name: string,
+    args: Record<string, unknown>,
+    server?: string,
+  ): Promise<'approved' | 'rejected' | 'aborted'> {
+    if (!this.hasSockets) return Promise.resolve('aborted');
     return new Promise((resolve) => {
-      this.pending.set(callId, { callId, resolve });
+      this.pending.set(callId, { callId, name, args, server, resolve });
     });
   }
 
@@ -617,7 +855,7 @@ export class AgentSession {
    * edits. The planning step does NOT consume the AI_MAX_STEPS budget: the
    * step counter is kept only in runLoop (execution with tools).
    */
-  private async runPlan(userContent: string): Promise<void> {
+  private async runPlan(userContent: string, userPersisted = false): Promise<void> {
     if (this.running) return;
     this.contextNotices.clear();
     this.running = true;
@@ -626,46 +864,48 @@ export class AgentSession {
     this.messages = sanitizeMessages(this.messages);
     // A new user turn (planning or its edit) resolves a pending continuation.
     this.setStepLimitState(false);
-    this.messages.push({ role: 'user', content: userContent });
+    if (!userPersisted) this.messages.push({ role: 'user', content: userContent });
     this.save();
     this.send({ type: 'running', steps: config.ai.maxSteps });
 
     try {
       this.loopAbort = new AbortController();
-      let assistant: ChatMessage;
       try {
-        const result = await this.requestCompletion(true);
-        assistant = result.message;
+        for (;;) {
+          const result = await this.requestCompletion(true);
+          const assistant = result.message;
+          // No tools were passed in the request; if the model still returned
+          // tool_calls — ignore them and keep only the plan text.
+          const { content: planContent } = extractSuggestion(assistant.content ?? '');
+          this.send({ type: 'message', role: 'assistant', content: planContent });
+          this.messages.push({ role: 'assistant', content: planContent });
+          this.save();
+          if (!this.applySteering()) break;
+          this.loopAbort = new AbortController();
+        }
       } catch (err) {
         if (this.stopRequested) {
-          this.send({ type: 'done', stopped: true, note: aiStr(this.lang, 'stoppedByUser') });
+          this.send({ type: 'done', stopped: true, note: aiStr(this.lang, 'stoppedByUser'), stepLimit: false });
         } else {
-          this.send({ type: 'error', message: String((err as Error).message ?? err) });
+          this.send({ type: 'error', message: String((err as Error).message ?? err), stepLimit: false });
         }
         return;
       }
 
-      // No tools were passed in the request; if the model still returned
-      // tool_calls — ignore them and keep only the plan text. A suggestion
-      // is not needed in plan mode (the decision point is the Run button),
-      // but the marker is cut here as well, just in case.
-      const { content: planContent } = extractSuggestion(assistant.content ?? '');
-      this.send({ type: 'message', role: 'assistant', content: planContent });
-      this.messages.push({ role: 'assistant', content: planContent });
-      this.save();
       this.planPending = true;
       this.send({ type: 'plan_ready' });
-      this.send({ type: 'done' });
+      this.send({ type: 'done', stepLimit: false });
     } catch (err) {
-      this.send({ type: 'error', message: String((err as Error).message ?? err) });
+      this.send({ type: 'error', message: String((err as Error).message ?? err), stepLimit: false });
     } finally {
       this.save();
       this.running = false;
       this.loopAbort = null;
+      this.startNextQueued();
     }
   }
 
-  private async runLoop(userContent: string | null): Promise<void> {
+  private async runLoop(userContent: string | null, userPersisted = false): Promise<void> {
     if (this.running) return;
     this.contextNotices.clear();
     this.running = true;
@@ -679,7 +919,7 @@ export class AgentSession {
       // A new user turn starts a new task: a previous step-limit stop is no
       // longer actionable — the same context continues with the new message.
       this.setStepLimitState(false);
-      this.messages.push({ role: 'user', content: userContent });
+      if (!userPersisted) this.messages.push({ role: 'user', content: userContent });
     }
     // userContent === null — a continuation after a step-limit stop (issue
     // #5): no user message is added, the history already ends with tool
@@ -726,6 +966,11 @@ export class AgentSession {
 
         const calls = assistant.tool_calls ?? [];
         if (!calls.length) {
+          // Steering received while the final answer was in flight joins this
+          // run before done, provided its step budget is not exhausted.
+          if (this.steps < config.ai.maxSteps && this.applySteering()) {
+            continue;
+          }
           // A regular completion of the run: there is nothing to continue.
           this.setStepLimitState(false);
           if (suggestion) {
@@ -762,7 +1007,7 @@ export class AgentSession {
               server,
               ...(autoApproved ? { autoApproved: true } : {}),
             });
-            const result = await this.runTool(name, args);
+            const result = await this.runTrackedTool(call.id, name, args, server, autoApproved);
             this.send({
               type: 'tool_result',
               callId: call.id,
@@ -780,7 +1025,7 @@ export class AgentSession {
             });
           } else {
             this.send({ type: 'tool_pending', callId: call.id, name, args, server });
-            const decision = await this.waitDecision(call.id);
+            const decision = await this.waitDecision(call.id, name, args, server);
             if (decision === 'rejected' || decision === 'aborted') {
               const output = aiStr(
                 this.lang,
@@ -801,7 +1046,7 @@ export class AgentSession {
                 content: output,
               });
             } else {
-              const result = await this.runTool(name, args);
+              const result = await this.runTrackedTool(call.id, name, args, server, autoApproved);
               this.send({
                 type: 'tool_result',
                 callId: call.id,
@@ -822,6 +1067,9 @@ export class AgentSession {
         }
         this.messages.push(...toolMessages);
         this.save();
+        // All tool_call_ids now have responses: this is the safe boundary for
+        // steering without corrupting the OpenAI tool-call exchange.
+        if (this.steps < config.ai.maxSteps) this.applySteering();
       }
 
       if (this.stopRequested) {
@@ -849,6 +1097,7 @@ export class AgentSession {
       this.running = false;
       this.pending.clear();
       this.loopAbort = null;
+      this.startNextQueued();
     }
   }
 
@@ -1198,13 +1447,21 @@ export function attachAgent(
   lang?: PromptLang,
 ): AgentSession {
   const existing = sessions.get(profile.id);
+  const requestedLang = lang ?? 'ru';
+  if (
+    existing && dialogueId && existing.dialogueId === dialogueId && existing.language === requestedLang
+  ) {
+    existing.attachSocket(ws);
+    ws.on('close', () => {
+      existing.onWsClose(ws);
+      if (sessions.get(profile.id) === existing && !existing.hasSockets && !existing.isRunning) {
+        sessions.delete(profile.id);
+      }
+    });
+    return existing;
+  }
   if (existing) {
-    existing.stop();
-    try {
-      existing.onWsClose();
-    } catch {
-      /* noop */
-    }
+    existing.retire();
   }
   let dialogue: Dialogue | undefined;
   if (dialogueId) {
@@ -1219,11 +1476,13 @@ export function attachAgent(
   sessions.set(profile.id, session);
   session.notifyDialogue();
   session.notifyServers();
-  // The access-level selector renders before the first action.
+  // The access-level selector and queue render before the first action.
   session.notifyApprovalMode();
+  session.notifyMessageQueue();
+  session.resumeQueued();
   ws.on('close', () => {
-    session.onWsClose();
-    if (sessions.get(profile.id) === session) {
+    session.onWsClose(ws);
+    if (sessions.get(profile.id) === session && !session.hasSockets && !session.isRunning) {
       sessions.delete(profile.id);
     }
   });

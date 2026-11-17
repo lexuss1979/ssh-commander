@@ -128,9 +128,19 @@ export interface DialogueSummary {
   usage?: DialogueUsageTotals | null;
 }
 
+export interface QueuedAgentMessage {
+  id: string;
+  content: string;
+  kind: 'steer' | 'queue';
+  planMode?: boolean;
+  createdAt: number;
+}
+
 export interface Dialogue extends DialogueSummary {
   profileId: string;
   messages: DialogueMessage[];
+  /** Messages waiting for a safe application boundary (issue #6). */
+  messageQueue?: QueuedAgentMessage[];
   /** The last run stopped at the step limit and awaits a manual continue. */
   stepLimitReached?: boolean;
 }

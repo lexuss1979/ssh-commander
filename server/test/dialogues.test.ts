@@ -184,6 +184,46 @@ describe('dialogues store', () => {
     store.deleteDialogue(d.id);
   });
 
+  it('messageQueue: persists pending items and applies/removes them atomically with messages', () => {
+    const profileId = uniqueProfile();
+    const d = store.createDialogue(profileId);
+    expect(d.messageQueue).toBeUndefined();
+    const pending = [{
+      id: 'queued-1', content: 'next task', kind: 'queue' as const,
+      planMode: true, createdAt: Date.now(),
+    }];
+    store.setDialogueMessageQueue(d.id, pending);
+    expect(store.getDialogue(d.id)?.messageQueue).toEqual(pending);
+    // An ordinary message save does not overwrite the pending queue.
+    store.saveDialogueMessages(d.id, [{ role: 'user', content: 'current task' }]);
+    expect(store.getDialogue(d.id)?.messageQueue).toEqual(pending);
+    // Applying an item saves the user turn and the remaining queue together.
+    store.saveDialogueMessages(d.id, [
+      { role: 'user', content: 'current task' },
+      { role: 'user', content: 'next task' },
+    ], []);
+    const applied = store.getDialogue(d.id);
+    expect(applied?.messageQueue).toEqual([]);
+    expect(applied?.messages.map((m) => m.content)).toEqual(['current task', 'next task']);
+    expect(() => store.setDialogueMessageQueue('missing-dialogue', [])).toThrow();
+    store.deleteDialogue(d.id);
+  });
+
+  it('validates a queue supplied with an atomic message save before changing the store', () => {
+    const profileId = uniqueProfile();
+    const d = store.createDialogue(profileId);
+    const pending = [{ id: 'valid', content: 'pending', kind: 'queue' as const, createdAt: Date.now() }];
+    store.setDialogueMessageQueue(d.id, pending);
+    store.saveDialogueMessages(d.id, [{ role: 'user', content: 'before' }]);
+    expect(() => store.saveDialogueMessages(d.id, [{ role: 'user', content: 'after' }], [{
+      id: 'invalid', content: 'x'.repeat(32001), kind: 'queue', createdAt: Date.now(),
+    }])).toThrow();
+    const current = store.getDialogue(d.id);
+    expect(current?.messages.map((message) => message.content)).toEqual(['before']);
+    expect(current?.messageQueue).toEqual(pending);
+    store.deleteDialogue(d.id);
+  });
+
   it('a broken approvalMode value hits the corrupt-guard (as any zod rejection)', async () => {
     const profileId = uniqueProfile();
     const d = store.createDialogue(profileId);

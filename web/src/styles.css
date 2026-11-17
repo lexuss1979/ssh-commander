@@ -3493,9 +3493,14 @@ body.resizing-agent {
    the send button on the right. */
 .agent-input-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.agent-input-bar .access-select {
+  margin-right: auto;
 }
 
 /* The dialogue access-level dropdown (docs/agent-access-levels-plan.md, v2)
@@ -4831,6 +4836,77 @@ body.resizing-agent {
   accent-color: var(--accent);
   cursor: pointer;
   margin: 0;
+}
+
+/* Pending user messages (issue #6): outside the scrolling chat, so steer and
+   delete remain reachable during a long tool/approval sequence. */
+.agent-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  margin: 0 12px 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-raised);
+}
+
+.agent-queue-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-queue-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.agent-queue-hint {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.agent-queue-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.agent-queue-kind {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.agent-queue-kind.steer {
+  color: var(--accent);
+}
+
+.agent-queue-content {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-queue-delete {
+  flex-shrink: 0;
+  padding: 2px 6px;
 }
 
 /* The "Plan ready" card under the message list. */

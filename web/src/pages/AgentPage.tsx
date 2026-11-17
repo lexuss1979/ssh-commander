@@ -8,6 +8,7 @@ import type {
   DialogueSummary,
   DialogueUsageTotals,
   Profile,
+  QueuedAgentMessage,
 } from '../types';
 import { Markdown } from '../components/Markdown';
 import { AgentAccessConfirm } from '../components/AgentAccessConfirm';
@@ -22,6 +23,8 @@ type TFn = (key: I18nKey, params?: I18nParams | number) => string;
 // The access-level selector (docs/agent-access-levels-plan.md, v2): the
 // stable render order and the i18n keys of the three modes.
 const APPROVAL_MODES = ['always', 'needed', 'never'] as const;
+const MAX_AGENT_MESSAGE_LENGTH = 32000;
+const MAX_AGENT_QUEUE_SIZE = 20;
 
 const MODE_LABEL_KEYS: Record<AgentApprovalMode, I18nKey> = {
   always: 'agent.accessLevelAlways',
@@ -177,6 +180,9 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   // Restored from the dialogue payload (survives a reload), updated by the
   // running/done/error events.
   const [stepLimitReached, setStepLimitReached] = useState(false);
+  // Pending user messages (issue #6): the server broadcasts the authoritative
+  // queue and moves an item into the chat only when it is applied.
+  const [messageQueue, setMessageQueue] = useState<QueuedAgentMessage[]>([]);
   // The "Security audit" modal: an optional sudo password for the audit's root sections.
   const [auditOpen, setAuditOpen] = useState(false);
   const [auditPassword, setAuditPassword] = useState('');
@@ -429,6 +435,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     setMessages([]);
     setRunning(false);
     setPlanReady(false);
+    setMessageQueue([]);
     setLoading(true);
     void (async () => {
       try {
@@ -483,6 +490,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     setRunning(false);
     setPlanReady(false);
     setStepLimitReached(false);
+    setMessageQueue([]);
     setDecidedCalls(new Set());
     setLiveUsage(null);
     setSuggestion('');
@@ -499,16 +507,25 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     pinnedRowRef.current?.style.removeProperty('min-height');
     pinnedRowRef.current = null;
 
+    let historyReady = false;
+    const earlyWsEvents: MessageEvent[] = [];
     void api<{ dialogue: Dialogue }>(`/api/ai/dialogues/${encodeURIComponent(activeDialogueId)}`)
       .then(({ dialogue }) => {
         if (!cancelled) {
-          setMessages((prev) => (prev.length === 0 ? messagesToViews(dialogue.messages) : prev));
+          setMessages(messagesToViews(dialogue.messages));
           // The persisted step-limit stop (issue #5): the "Continue" card is
           // restored after a reload of the dialogue.
           setStepLimitReached(dialogue.stepLimitReached === true);
+          setMessageQueue(dialogue.messageQueue ?? []);
         }
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (cancelled) return;
+        historyReady = true;
+        for (const event of earlyWsEvents) processEvent(event);
+        earlyWsEvents.length = 0;
+      });
 
     const ws = new WebSocket(
       `/ws/agent?profileId=${encodeURIComponent(profile.id)}&dialogueId=${encodeURIComponent(activeDialogueId)}&lang=${lang}`,
@@ -528,9 +545,9 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
         ws.send(JSON.stringify({ type: 'message', content: pending.content, planMode: false }));
       }
     };
-    // WS dropped between the click and tool_result: the result will never
-    // arrive, so unlock to keep the bar from hanging in "running…" forever
-    // (reloading the dialogue recreates the session and state anyway).
+    // WS dropped between the click and tool_result: unlock the local decision
+    // state. Reattaching to the same dialogue replays the live pending call;
+    // the server-side run itself is not stopped by a socket disconnect.
     ws.onclose = () => {
       setConnected(false);
       setDecidedCalls(new Set());
@@ -542,7 +559,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       setDecidedCalls(new Set());
       setModeSetPending(false);
     };
-    ws.onmessage = (e) => {
+    const processEvent = (e: MessageEvent): void => {
       let msg: Record<string, unknown>;
       try {
         msg = JSON.parse(e.data);
@@ -559,7 +576,16 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           pushAssistantToken(String(msg.content ?? ''));
           break;
         case 'message':
-          finalizeAssistant(String(msg.content ?? ''));
+          if (msg.role === 'user') {
+            // A queued/steering message enters the feed only when the server
+            // actually applies it — enqueue itself is shown in the queue card.
+            pushUserMessage(String(msg.content ?? ''));
+          } else {
+            finalizeAssistant(String(msg.content ?? ''));
+          }
+          break;
+        case 'message_queue':
+          setMessageQueue(Array.isArray(msg.items) ? (msg.items as QueuedAgentMessage[]) : []);
           break;
         case 'notice':
           if (typeof msg.message === 'string' && msg.message) {
@@ -653,6 +679,15 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           break;
         }
         case 'error': {
+          const error = String(msg.message ?? tRef.current('agent.errorFallback'));
+          // Queue validation/persist errors do not terminate the active run.
+          if (msg.scope === 'queue') {
+            if (typeof msg.rejectedContent === 'string') {
+              setInput((current) => current || String(msg.rejectedContent));
+            }
+            showError(error);
+            break;
+          }
           setRunning(false);
           setPlanReady(false);
           setSuggestion('');
@@ -661,7 +696,6 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           if (typeof msg.stepLimit === 'boolean') setStepLimitReached(msg.stepLimit);
           // A rejected set_approval_mode unlocks the selector.
           setModeSetPending(false);
-          const error = String(msg.message ?? tRef.current('agent.errorFallback'));
           // The error stays visible in the chat; the partial reply is no longer streaming.
           setMessages((prev) => [
             ...prev.map((message) => message.streaming ? { ...message, streaming: false } : message),
@@ -672,6 +706,12 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           break;
         }
       }
+    };
+    ws.onmessage = (event) => {
+      // Attach may replay live state before the REST history response arrives.
+      // Buffer it so history renders first and no token/tool/queue event is lost.
+      if (historyReady) processEvent(event);
+      else earlyWsEvents.push(event);
     };
     return () => {
       cancelled = true;
@@ -831,8 +871,9 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
 
   // The "Ask the agent" request from the terminal: if the WS is ready and the
   // agent is idle — send the message right away; otherwise (no connection or
-  // a run in progress) put the text into the input so the user sends it
-  // themselves and the current stream is not broken. The request is one-shot:
+  // a run in progress) put the text into the input. During a run the user then
+  // explicitly chooses steer or queue; one-shot external requests never make
+  // that delivery decision implicitly. The request is one-shot:
   // the id is remembered and App resets the state.
   // mode: 'explain' (the "Ask the agent" button) — as above; 'prefill' —
   // always only inserts into the input; 'new-dialogue' — create a dialogue
@@ -938,17 +979,28 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     }
   };
 
-  const send = () => {
+  const submit = (delivery?: 'steer' | 'queue') => {
     const content = input.trim();
-    if (!content || !connected || running || !activeDialogueId) return;
-    pushUserMessage(content);
+    if (!content || !connected || !activeDialogueId || (running && !delivery)) return;
+    if (running && content.length > MAX_AGENT_MESSAGE_LENGTH) {
+      showError(t('agent.inputTooLong', { n: MAX_AGENT_MESSAGE_LENGTH }));
+      return;
+    }
+    if (running && messageQueue.length >= MAX_AGENT_QUEUE_SIZE) {
+      showError(t('agent.inputQueueLimit', { n: MAX_AGENT_QUEUE_SIZE }));
+      return;
+    }
+    if (!running) pushUserMessage(content);
     setInput('');
     setPlanReady(false);
     setSuggestion('');
-    // Edits to a pending plan are also a message with planMode=true:
-    // the server will redraft the plan. Leaving the mode — toggle "Plan" off.
-    sendWs({ type: 'message', content, planMode });
+    // While idle this is the ordinary send path. During a run the explicit
+    // delivery selects steering or the ordinary pending queue; the server,
+    // not an optimistic bubble, announces the applied user message.
+    sendWs({ type: 'message', content, planMode, ...(delivery ? { delivery } : {}) });
   };
+
+  const send = () => submit(running ? 'steer' : undefined);
 
   // The "Continue" button after a step-limit stop (issue #5): one click starts
   // exactly one new run. The card hides optimistically; a server error brings
@@ -1292,6 +1344,32 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           ))}
         </div>
 
+        {messageQueue.length > 0 && (
+          <section className="agent-queue" aria-label={t('agent.queueTitle', { n: messageQueue.length })}>
+            <div className="agent-queue-head">
+              <span className="agent-queue-title">{t('agent.queueTitle', { n: messageQueue.length })}</span>
+              <span className="agent-queue-hint muted">{t('agent.queueHint')}</span>
+            </div>
+            {messageQueue.map((item) => (
+              <div className="agent-queue-item" key={item.id}>
+                <span className={`agent-queue-kind ${item.kind}`}>
+                  {item.kind === 'steer' ? t('agent.queueSteerBadge') : t('agent.queueNextBadge')}
+                </span>
+                <span className="agent-queue-content" title={item.content}>{item.content}</span>
+                <button
+                  className="btn btn-ghost btn-mini agent-queue-delete"
+                  disabled={!connected}
+                  title={t('agent.queueDeleteTitle')}
+                  aria-label={t('agent.queueDeleteTitle')}
+                  onClick={() => sendWs({ type: 'delete_queued', id: item.id })}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </section>
+        )}
+
         {planReady && !running && (
           // Approving the plan also switches plan mode off: it is one-shot,
           // otherwise the next message would be planned again (no tools)
@@ -1364,7 +1442,11 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
               }
             }}
             placeholder={
-              suggestion ? t('agent.suggestionPlaceholder', { suggestion }) : t('agent.inputPlaceholder')
+              running
+                ? t('agent.inputRunningPlaceholder')
+                : suggestion
+                  ? t('agent.suggestionPlaceholder', { suggestion })
+                  : t('agent.inputPlaceholder')
             }
             rows={2}
           />
@@ -1411,12 +1493,23 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
                 </div>
               )}
             </div>
+            {running && (
+              <button
+                className="btn btn-ghost"
+                onClick={() => submit('queue')}
+                disabled={!connected || !input.trim() || !activeDialogueId || (running && messageQueue.length >= MAX_AGENT_QUEUE_SIZE)}
+                title={t('agent.queueNextTitle')}
+              >
+                {t('agent.queueNextButton')}
+              </button>
+            )}
             <button
               className="btn btn-primary"
               onClick={send}
-              disabled={!connected || running || !input.trim() || !activeDialogueId}
+              disabled={!connected || !input.trim() || !activeDialogueId || (running && messageQueue.length >= MAX_AGENT_QUEUE_SIZE)}
+              title={running ? t('agent.steerTitle') : undefined}
             >
-              {t('agent.send')}
+              {running ? t('agent.steerButton') : t('agent.send')}
             </button>
           </div>
         </div>
