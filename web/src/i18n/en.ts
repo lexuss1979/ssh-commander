@@ -954,6 +954,10 @@ export const en: typeof ru = {
   'agent.planHint': 'Click "Run" for the agent to start executing the plan (write actions will still require confirmation), or write corrections — the plan will be redrafted.',
   'agent.planStarted': 'Started…',
   'agent.planExecute': 'Run',
+  'agent.stepLimitTitle': 'Step limit reached',
+  'agent.stepLimitHint': 'The agent stopped when it ran out of steps. "Continue" starts a new run with the same context and a fresh step budget — every continuation is started by hand.',
+  'agent.continueButton': 'Continue',
+  'agent.continueNoConnection': 'No connection to the agent server — the continuation was not started.',
 
   'tips.dismiss': "Got it, don't show again",
   'tips.agentMultiServer': 'You can attach a second server to this conversation with the "+" button — the agent will work on both.',

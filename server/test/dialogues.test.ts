@@ -166,6 +166,24 @@ describe('dialogues store', () => {
     store.deleteDialogue(d.id);
   });
 
+  // The step-limit continuation state (issue #5).
+  it('stepLimitReached: absent reads as false; the mutator persists, save keeps it', () => {
+    const profileId = uniqueProfile();
+    const d = store.createDialogue(profileId);
+    expect(store.dialogueStepLimitReached(d)).toBe(false);
+
+    expect(store.setDialogueStepLimitReached(d.id, true).stepLimitReached).toBe(true);
+    expect(store.dialogueStepLimitReached(store.getDialogue(d.id)!)).toBe(true);
+    // Saving messages does not wipe the field.
+    store.saveDialogueMessages(d.id, [{ role: 'user', content: 'вопрос' }]);
+    expect(store.getDialogue(d.id)?.stepLimitReached).toBe(true);
+
+    expect(store.setDialogueStepLimitReached(d.id, false).stepLimitReached).toBe(false);
+    expect(store.dialogueStepLimitReached(store.getDialogue(d.id)!)).toBe(false);
+    expect(() => store.setDialogueStepLimitReached('missing-dialogue', true)).toThrow();
+    store.deleteDialogue(d.id);
+  });
+
   it('a broken approvalMode value hits the corrupt-guard (as any zod rejection)', async () => {
     const profileId = uniqueProfile();
     const d = store.createDialogue(profileId);

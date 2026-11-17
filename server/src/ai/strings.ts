@@ -31,6 +31,7 @@ export const AI_STRINGS = {
     stoppedByUser: 'Агент остановлен пользователем.',
     rejectedByUser: 'Пользователь отклонил выполнение этого действия.',
     stepLimitReached: 'Достигнут лимит шагов ({n}).',
+    continuationUnavailable: 'Продолжение недоступно: агент не останавливался из-за лимита шагов.',
     // agent.ts — the per-dialogue access level (WS set_approval_mode)
     riskAckRequired: 'Подтвердите осознание рисков',
     invalidApprovalMode: 'Недопустимый уровень доступа: {mode}',
@@ -163,6 +164,7 @@ export const AI_STRINGS = {
     stoppedByUser: 'The agent was stopped by the user.',
     rejectedByUser: 'The user rejected this action.',
     stepLimitReached: 'Step limit reached ({n}).',
+    continuationUnavailable: 'Continuation is unavailable: the agent did not stop at the step limit.',
     riskAckRequired: 'Confirm you understand the risks',
     invalidApprovalMode: 'Invalid access level: {mode}',
     outputTruncated: '… (output truncated, showing {n} characters)',

@@ -63,9 +63,11 @@ import {
   createDialogue,
   detachProfileFromDialogue,
   dialogueApprovalMode,
+  dialogueStepLimitReached,
   getDialogue,
   saveDialogueMessages,
   setDialogueApprovalMode,
+  setDialogueStepLimitReached,
   type Dialogue,
 } from './dialogues.js';
 
@@ -111,6 +113,12 @@ export class AgentSession {
   // set_approval_mode frame. Read per tool call in runLoop — a mode change
   // acts on the next decision without touching a pending confirmation.
   private approvalMode: AgentApprovalMode;
+  // The last run of this dialogue stopped at AI_MAX_STEPS (issue #5): the
+  // client shows "Continue", the `continue` frame starts a new loop with a
+  // fresh step budget. Restored from the persisted dialogue on attach so the
+  // button survives a reload; cleared by any run that ends otherwise, by a
+  // new user turn and by a user stop.
+  private stepLimitReached: boolean;
 
   constructor(
     private homeProfile: Profile,
@@ -125,6 +133,9 @@ export class AgentSession {
     // The access level comes from the dialogue ('needed' for a new one and
     // for all dialogues without the field — the read-time migration).
     this.approvalMode = dialogue ? dialogueApprovalMode(dialogue) : 'needed';
+    // A persisted step-limit stop (issue #5): the "Continue" button is
+    // restored from the dialogue, not from the live session.
+    this.stepLimitReached = dialogue ? dialogueStepLimitReached(dialogue) : false;
     this.attached.set(homeProfile.id, homeProfile);
     // Load servers saved into the dialogue by the previous session;
     // missing profiles are skipped — the dialogue keeps working.
@@ -338,6 +349,14 @@ export class AgentSession {
         }
         break;
       }
+      case 'continue': {
+        // The "Continue" button after a step-limit stop (issue #5): a new
+        // loop with a fresh AI_MAX_STEPS budget and no new user turn. Accepted
+        // only while that state holds; a repeated click during a run is a
+        // no-op, a stale client gets an error so its state syncs.
+        this.continueRun();
+        break;
+      }
       case 'approve': {
         const callId = String(data.callId ?? '');
         const pending = this.pending.get(callId);
@@ -433,6 +452,36 @@ export class AgentSession {
       pending.resolve('aborted');
     }
     this.pending.clear();
+  }
+
+  /**
+   * Starts a continuation run (issue #5) — only from the step-limit state and
+   * only while idle. A repeated click during a run is a no-op; a stale frame
+   * (the state was already resolved by another turn) gets an error, so the
+   * client does not stay with a dead button.
+   */
+  private continueRun(): void {
+    if (this.running) return;
+    if (!this.stepLimitReached) {
+      this.send({ type: 'error', message: aiStr(this.lang, 'continuationUnavailable'), stepLimit: false });
+      return;
+    }
+    void this.runLoop(null);
+  }
+
+  /**
+   * Updates the persisted step-limit state of the dialogue. A failed persist
+   * must not kill the session as a whole (same as save()): the state still
+   * acts live, it just may not survive a restart.
+   */
+  private setStepLimitState(reached: boolean): void {
+    if (this.stepLimitReached === reached) return;
+    this.stepLimitReached = reached;
+    try {
+      setDialogueStepLimitReached(this.dialogueId, reached);
+    } catch (err) {
+      console.warn(`Failed to persist step-limit state for dialogue ${this.dialogueId}:`, err);
+    }
   }
 
   onWsClose(): void {
@@ -575,6 +624,8 @@ export class AgentSession {
     this.stopRequested = false;
     this.planPending = false;
     this.messages = sanitizeMessages(this.messages);
+    // A new user turn (planning or its edit) resolves a pending continuation.
+    this.setStepLimitState(false);
     this.messages.push({ role: 'user', content: userContent });
     this.save();
     this.send({ type: 'running', steps: config.ai.maxSteps });
@@ -614,7 +665,7 @@ export class AgentSession {
     }
   }
 
-  private async runLoop(userContent: string): Promise<void> {
+  private async runLoop(userContent: string | null): Promise<void> {
     if (this.running) return;
     this.contextNotices.clear();
     this.running = true;
@@ -624,7 +675,17 @@ export class AgentSession {
     // Do not send to the API or persist a truncated tool_calls exchange (e.g.
     // after stopping the agent or reloading the tab mid-call).
     this.messages = sanitizeMessages(this.messages);
-    this.messages.push({ role: 'user', content: userContent });
+    if (userContent !== null) {
+      // A new user turn starts a new task: a previous step-limit stop is no
+      // longer actionable — the same context continues with the new message.
+      this.setStepLimitState(false);
+      this.messages.push({ role: 'user', content: userContent });
+    }
+    // userContent === null — a continuation after a step-limit stop (issue
+    // #5): no user message is added, the history already ends with tool
+    // results and the model picks the task up from there. The step-limit
+    // state stays set while the run is in flight: a failed attempt must
+    // leave the "Continue" button for a retry.
     this.save();
     this.send({ type: 'running', steps: config.ai.maxSteps });
 
@@ -639,9 +700,16 @@ export class AgentSession {
           assistant = result.message;
         } catch (err) {
           if (this.stopRequested) {
-            this.send({ type: 'done', stopped: true, note: aiStr(this.lang, 'stoppedByUser') });
+            this.setStepLimitState(false);
+            this.send({ type: 'done', stopped: true, note: aiStr(this.lang, 'stoppedByUser'), stepLimit: false });
           } else {
-            this.send({ type: 'error', message: String((err as Error).message ?? err) });
+            this.send({
+              type: 'error',
+              message: String((err as Error).message ?? err),
+              // A failed continuation keeps the state, so the button is still
+              // there for a retry (issue #5).
+              stepLimit: this.stepLimitReached,
+            });
           }
           return;
         }
@@ -658,10 +726,12 @@ export class AgentSession {
 
         const calls = assistant.tool_calls ?? [];
         if (!calls.length) {
+          // A regular completion of the run: there is nothing to continue.
+          this.setStepLimitState(false);
           if (suggestion) {
             this.send({ type: 'suggestion', text: suggestion });
           }
-          this.send({ type: 'done' });
+          this.send({ type: 'done', stepLimit: false });
           return;
         }
 
@@ -755,12 +825,25 @@ export class AgentSession {
       }
 
       if (this.stopRequested) {
-        this.send({ type: 'done', stopped: true, note: aiStr(this.lang, 'stoppedByUser') });
+        // A deliberate stop is a terminal state too — no "Continue" button.
+        this.setStepLimitState(false);
+        this.send({ type: 'done', stopped: true, note: aiStr(this.lang, 'stoppedByUser'), stepLimit: false });
       } else {
-        this.send({ type: 'done', note: aiStr(this.lang, 'stepLimitReached', { n: config.ai.maxSteps }) });
+        // The run exhausted AI_MAX_STEPS: the step-limit state is persisted so
+        // the button works after a reload; a new press starts a fresh budget.
+        this.setStepLimitState(true);
+        this.send({
+          type: 'done',
+          note: aiStr(this.lang, 'stepLimitReached', { n: config.ai.maxSteps }),
+          stepLimit: true,
+        });
       }
     } catch (err) {
-      this.send({ type: 'error', message: String((err as Error).message ?? err) });
+      this.send({
+        type: 'error',
+        message: String((err as Error).message ?? err),
+        stepLimit: this.stepLimitReached,
+      });
     } finally {
       this.save();
       this.running = false;

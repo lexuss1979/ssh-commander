@@ -131,4 +131,6 @@ export interface DialogueSummary {
 export interface Dialogue extends DialogueSummary {
   profileId: string;
   messages: DialogueMessage[];
+  /** The last run stopped at the step limit and awaits a manual continue. */
+  stepLimitReached?: boolean;
 }

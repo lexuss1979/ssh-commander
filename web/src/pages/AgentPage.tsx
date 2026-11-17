@@ -172,6 +172,11 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
   // drafts a plan without tools and waits for approve_plan.
   const [planMode, setPlanMode] = useState(false);
   const [planReady, setPlanReady] = useState(false);
+  // The last run stopped at AI_MAX_STEPS (issue #5): the "Continue" card is
+  // shown above the input, a click starts a new run with a fresh step budget.
+  // Restored from the dialogue payload (survives a reload), updated by the
+  // running/done/error events.
+  const [stepLimitReached, setStepLimitReached] = useState(false);
   // The "Security audit" modal: an optional sudo password for the audit's root sections.
   const [auditOpen, setAuditOpen] = useState(false);
   const [auditPassword, setAuditPassword] = useState('');
@@ -477,6 +482,7 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     setMessages([]);
     setRunning(false);
     setPlanReady(false);
+    setStepLimitReached(false);
     setDecidedCalls(new Set());
     setLiveUsage(null);
     setSuggestion('');
@@ -497,6 +503,9 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
       .then(({ dialogue }) => {
         if (!cancelled) {
           setMessages((prev) => (prev.length === 0 ? messagesToViews(dialogue.messages) : prev));
+          // The persisted step-limit stop (issue #5): the "Continue" card is
+          // restored after a reload of the dialogue.
+          setStepLimitReached(dialogue.stepLimitReached === true);
         }
       })
       .catch(() => undefined);
@@ -625,12 +634,18 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           setRunning(true);
           setPlanReady(false);
           setSuggestion('');
+          // Any run resolves (or restarts) the step-limit state server-side;
+          // a continuation that hits the limit again re-arms the card on done.
+          setStepLimitReached(false);
           break;
         case 'plan_ready':
           setPlanReady(true);
           break;
         case 'done': {
           setRunning(false);
+          // The step-limit stop (issue #5) is the only done that offers a
+          // continuation; a regular completion or a user stop clears it.
+          setStepLimitReached(msg.stepLimit === true);
           if (msg.note) {
             setMessages((prev) => [...prev, { id: nextId++, role: 'assistant', content: `⚠️ ${String(msg.note)}` }]);
           }
@@ -641,6 +656,9 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
           setRunning(false);
           setPlanReady(false);
           setSuggestion('');
+          // A failed continuation keeps the server-side state: the card stays
+          // available for a retry (issue #5).
+          if (typeof msg.stepLimit === 'boolean') setStepLimitReached(msg.stepLimit);
           // A rejected set_approval_mode unlocks the selector.
           setModeSetPending(false);
           const error = String(msg.message ?? tRef.current('agent.errorFallback'));
@@ -930,6 +948,20 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
     // Edits to a pending plan are also a message with planMode=true:
     // the server will redraft the plan. Leaving the mode — toggle "Plan" off.
     sendWs({ type: 'message', content, planMode });
+  };
+
+  // The "Continue" button after a step-limit stop (issue #5): one click starts
+  // exactly one new run. The card hides optimistically; a server error brings
+  // it back (`error` carries the server-side step-limit state).
+  const continueRun = () => {
+    if (running) return;
+    if (wsRef.current?.readyState !== WebSocket.OPEN) {
+      // The card stays — the user can retry once the connection is back.
+      showError(t('agent.continueNoConnection'));
+      return;
+    }
+    setStepLimitReached(false);
+    sendWs({ type: 'continue' });
   };
 
   // Starting the "Security audit": the password (if entered) goes as a separate
@@ -1270,6 +1302,22 @@ export function AgentPage({ profile, showError, agentRequest, onAgentRequestCons
               sendWs({ type: 'approve_plan' });
             }}
           />
+        )}
+
+        {stepLimitReached && !running && (
+          // The step-limit stop (issue #5): the continuation is always manual —
+          // there is no auto-continue. A new run keeps the dialogue history,
+          // the attached servers and the access level, and gets a fresh
+          // AI_MAX_STEPS budget.
+          <div className="plan-card continue-card">
+            <div className="plan-card-info">
+              <span className="plan-card-title">{t('agent.stepLimitTitle')}</span>
+              <span className="plan-card-hint muted">{t('agent.stepLimitHint')}</span>
+            </div>
+            <button className="btn btn-primary" onClick={continueRun}>
+              {t('agent.continueButton')}
+            </button>
+          </div>
         )}
 
         {pendingTool && (

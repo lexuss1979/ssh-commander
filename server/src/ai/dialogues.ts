@@ -19,6 +19,10 @@ export interface Dialogue {
   // revision v2); the absence of the field reads as the 'needed' default —
   // a read-time migration, the file is not rewritten for it.
   approvalMode?: AgentApprovalMode;
+  // The last agent run of the dialogue stopped at the AI_MAX_STEPS limit and
+  // awaits a manual continuation (issue #5). Optional: the absence reads as
+  // false — old files stay valid, nothing is rewritten for it.
+  stepLimitReached?: boolean;
   title: string;
   messages: ChatMessage[];
   messageCount: number;
@@ -71,6 +75,8 @@ const dialogueSchema = z.object({
   extraProfileIds: z.array(z.string()).optional(),
   // Optional: dialogues without the field are the 'needed' default.
   approvalMode: z.enum(['always', 'needed', 'never']).optional(),
+  // Optional: the absence reads as false (no continuation pending).
+  stepLimitReached: z.boolean().optional(),
   title: z.string(),
   messages: z.array(messageSchema).default([]),
   messageCount: z.number().int().min(0),
@@ -168,6 +174,32 @@ export function setDialogueApprovalMode(id: string, mode: AgentApprovalMode): Di
     throw new Error(`Dialogue ${id} not found`);
   }
   list[idx] = { ...list[idx], approvalMode: mode, updatedAt: Date.now() };
+  persist(list);
+  return copy(list[idx]);
+}
+
+/**
+ * Whether the dialogue's last agent run stopped at the AI_MAX_STEPS limit and
+ * can be continued by a manual press of "Continue" (issue #5). The absence of
+ * the field is false — the same read-time default the schema relies on.
+ */
+export function dialogueStepLimitReached(d: Dialogue): boolean {
+  return d.stepLimitReached === true;
+}
+
+/**
+ * Persists the step-limit state of the dialogue: true when a run stopped at
+ * AI_MAX_STEPS, false when the pending continuation is resolved (a normal
+ * completion, a user stop, a new user turn). A failed continuation keeps the
+ * value — the button stays available for a retry.
+ */
+export function setDialogueStepLimitReached(id: string, reached: boolean): Dialogue {
+  const list = load();
+  const idx = list.findIndex((d) => d.id === id);
+  if (idx < 0) {
+    throw new Error(`Dialogue ${id} not found`);
+  }
+  list[idx] = { ...list[idx], stepLimitReached: reached, updatedAt: Date.now() };
   persist(list);
   return copy(list[idx]);
 }

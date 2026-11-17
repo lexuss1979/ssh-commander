@@ -4867,6 +4867,12 @@ body.resizing-agent {
   flex-shrink: 0;
 }
 
+/* The step-limit stop card (agent "Continue", issue #5): the plan-card frame,
+   warn-coloured — the run stopped, the user decides about the next one. */
+.plan-card.continue-card {
+  border-color: var(--warn);
+}
+
 /* A pinned approval bar for a mutating call (tool_pending) — a single
    decision point, always visible at the input, outside the scrolling feed.
    The warn frame: approval = attention. The button row height is fixed so
