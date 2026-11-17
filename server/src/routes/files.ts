@@ -1,5 +1,5 @@
 import express, { Router } from 'express';
-import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { z } from 'zod';
 import { exec, execRawChannel, execStream, getSftp, withSftp } from '../ssh/manager.js';
 import {
@@ -213,7 +213,6 @@ filesRouter.get('/download', async (req, res) => {
 
 filesRouter.post(
   '/upload',
-  express.raw({ type: '*/*', limit: '200mb' }),
   async (req, res) => {
   try {
     const profile = requireProfile(profileId(req));
@@ -223,20 +222,10 @@ filesRouter.post(
       res.status(400).json({ error: 'Некорректное имя файла' });
       return;
     }
-    const body = req.body as Buffer | undefined;
-    if (!Buffer.isBuffer(body)) {
-      res.status(400).json({ error: 'Тело запроса должно быть файлом' });
-      return;
-    }
     const target = joinRemotePath(dir, name);
-    await withSftp(profile, (sftp) =>
-      new Promise<void>((resolve, reject) => {
-        const ws = sftp.createWriteStream(target);
-        ws.on('error', reject);
-        ws.on('close', () => resolve());
-        ws.end(body);
-      }),
-    );
+    await withSftp(profile, async (sftp) => {
+      await pipeline(req, sftp.createWriteStream(target));
+    });
     res.json({ ok: true, path: target });
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
@@ -479,16 +468,10 @@ filesRouter.post('/download-batch', async (req, res) => {
 
 filesRouter.post(
   '/upload-dir',
-  express.raw({ type: '*/*', limit: '200mb' }),
   async (req, res) => {
   try {
     const profile = requireProfile(profileId(req));
     const path = assertSafePath(normalizePath(String(req.query.path ?? '')));
-    const body = req.body as Buffer | undefined;
-    if (!Buffer.isBuffer(body) || body.length === 0) {
-      res.status(400).json({ error: 'Тело запроса должно быть архивом tar.gz' });
-      return;
-    }
     const stat = await withSftp(profile, (sftp) => sftpStat(sftp, path));
     if ((stat.mode & 0o170000) !== 0o040000) {
       res.status(400).json({ error: 'Целевой путь — не директория' });
@@ -499,19 +482,13 @@ filesRouter.post(
     channel.stderr.on('data', (d: Buffer) => {
       if (stderr.length < 65536) stderr += d.toString();
     });
-    req.on('close', () => {
-      try {
-        channel.close();
-      } catch {
-        /* noop */
-      }
-    });
-    const code = await new Promise<number | null>((resolve) => {
-      channel.on('close', (c: number | null) => resolve(c));
-      channel.on('error', () => resolve(null));
-      // Readable.pipe provides backpressure and closes stdin when the body ends.
-      Readable.from(body).pipe(channel);
-    });
+    const [code] = await Promise.all([
+      new Promise<number | null>((resolve) => {
+        channel.on('close', (c: number | null) => resolve(c));
+        channel.on('error', () => resolve(null));
+      }),
+      pipeline(req, channel),
+    ]);
     if (code !== 0) {
       res.status(500).json({ error: tarError(stderr, code) });
       return;
